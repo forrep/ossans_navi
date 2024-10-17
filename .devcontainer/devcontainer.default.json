@@ -1,0 +1,45 @@
+{
+    "name": "ossans_navi",
+    "dockerComposeFile": "compose.yaml",
+    "service": "app",
+    "workspaceFolder": "/home/ossans_navi/app",
+    "shutdownAction": "stopCompose",
+
+    "customizations": {
+        "vscode": {
+            "settings": {
+                "python.linting.enabled": true,
+                "python.linting.pylintEnabled": false,
+                "python.linting.flake8Enabled": true,
+                "python.testing.unittestEnabled": false,
+                "python.testing.pytestEnabled": true,
+                "editor.unicodeHighlight.allowedLocales": {
+                    "ja": true
+                },
+                "autopep8.args": [
+                    "--max-line-length",
+                    "150"
+                ],
+                "[python]": {
+                    "editor.defaultFormatter": "ms-python.autopep8"
+                },
+                "flake8.args": [
+                    "--config=.flake8"
+                ],
+                "files.associations": {
+                    "**/.devcontainer/devcontainer.env": "properties"
+                }
+            },
+            "extensions": [
+                "ms-python.python",
+                "humao.rest-client",
+                "tamasfe.even-better-toml",
+                "ms-azuretools.vscode-docker",
+                "ms-python.autopep8",
+                "ms-python.flake8",
+                "ms-python.isort"
+            ]
+        }
+    }
+
+}

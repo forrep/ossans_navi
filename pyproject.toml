@@ -1,0 +1,62 @@
+[tool.poetry]
+name = "ossans_navi"
+version = "0.1.0"
+description = ""
+authors = ["Jun Hayama <forrep@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+slack-bolt = "^1.18.1"
+requests = "^2.31.0"
+openai = "^1.21.2"
+tiktoken = "^0.7.0"
+pillow = "^10.3.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "*"
+pytest-cov = "*"
+flake8 = "*"
+autopep8 = "*"
+isort = "*"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+testpaths = ["tests",]
+python_files = "*_tests.py"
+addopts = "-vv --cov=ossans_navi --cov-report html"
+
+[tool.coverage.run]
+source = ["ossans_navi",]
+data_file = "${COVERAGE_DATA_FILE-.coverage}"
+
+[tool.logging]
+version = 1
+
+[tool.logging.formatters.simple]
+format = "%(asctime)s - %(process)d:%(thread)d:%(threadName)s - %(name)s(%(lineno)d) - %(levelname)s - %(message)s"
+
+[tool.logging.handlers.console]
+class = "logging.StreamHandler"
+level = "DEBUG"
+formatter = "simple"
+stream = "ext://sys.stdout"
+
+[tool.logging.loggers."root"]
+level = "INFO"
+handlers = ["console"]
+
+[tool.logging.loggers."urllib3"]
+level = "INFO"
+
+[tool.logging.loggers."slack_bolt"]
+level = "INFO"
+
+[tool.logging.loggers."slack_sdk"]
+level = "INFO"
+
+[tool.logging.loggers."httpcore"]
+level = "INFO"

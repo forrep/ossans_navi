@@ -1,0 +1,13 @@
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: development
+      args:
+        uid: ${UID:-20000}
+        gid: ${GID:-20000}
+    command: sleep infinity
+    env_file: devcontainer.env
+    volumes:
+      - ..:/home/ossans_navi/app
