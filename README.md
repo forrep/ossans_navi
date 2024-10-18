@@ -1,7 +1,7 @@
 # OssansNavi
-OssansNavi は起動するだけで Slack ワークスペースに蓄積された情報を活用して応答するチャットボットになります。
+OssansNavi は起動するだけで Slack ワークスペースに蓄積された情報をふまえた応答してくれるチャットボットです
 
-必要なのは普段利用している Slack ワークスペースと OpenAI (Azure OpenAI) の API だけです。
+必要なのは普段利用している Slack ワークスペースと OpenAI (Azure OpenAI) の API とアプリを起動する環境だけです
 
 ## 主な機能
 - Slack のパブリックチャネルを情報源として応答します
@@ -13,6 +13,11 @@ OssansNavi は起動するだけで Slack ワークスペースに蓄積され�
   - まずは様々なチャネルに OssansNavi のボットユーザーを追加してみることをオススメします
 - OssansNavi が質問に回答できない場合は詳しい人にメンションすることもあります。メンションされた方は広い心で対応しましょう
 - 応答に 1~3分はかかるので相手を人間だと思って気長にお待ちください
+
+OssansNavi について詳しくは以下の記事をご覧ください
+
+- [RAGにベクトルDBは必要ない！DBも不要で運用めちゃ楽な RAG Chatbot を作った話](https://speakerdeck.com/forrep/rag-does-not-need-a-vector-db)
+- [社内用AIアシスタント「おっさんずナビ」を作った話、そして人間らしく振る舞う重要性を認識した話](https://techblog.raccoon.ne.jp/archives/1719796918.html)
 
 ## アプリの利用方法
 OssansNavi は Slack Marketplace で配布していません。
@@ -48,10 +53,9 @@ https://api.slack.com/apps で先ほど追加したアプリを選択して設�
   2. "User OAuth Token", "Bot User OAuth Token" をメモします ※後で再表示可能
 
 ### 3. バックエンドアプリの設定
-任意のディレクトリを作成して、以下の `.env` ファイルを用意します。
+バックエンドアプリの設定を記述した `.env` ファイルを用意します。
 
-OSN_SLACK_APP_TOKEN, OSN_SLACK_BOT_TOKEN, OSN_SLACK_USER_TOKEN には、前の手順で発行したトークンをそれぞれ設定します。
-LLM には openai, azure_openai のどちらかを利用可能です。
+以下の内容を `.env` という名前で保存してください。`OSN_SLACK_APP_TOKEN` `OSN_SLACK_BOT_TOKEN` `OSN_SLACK_USER_TOKEN` には、前の手順で発行したトークンをそれぞれ設定します。LLM には openai, azure_openai のどちらかを利用可能です。
 
 ```properties
 # Slack トークン
@@ -88,7 +92,7 @@ OSN_ASSISTANT_NAMES=OssansNavi,おっさんずナビ,おっさん
 # 言語、OssansNavi が Slack ワークスペース内の検索及び応答に利用する言語、省略時はユーザーの言語になるべく合わせて応答
 OSN_LANGUAGE=Japanese
 # ログレベル
-OSN_LOG_LEVEL=WARN
+OSN_LOG_LEVEL=INFO
 # OssansNavi の応答をロギングするチャネル ※省略可 例: {"channel": "CXXXXXXXX", "thread_ts", "cost": 0.04}
 # OSN_RESPONSE_LOGGING_CHANNEL=
 ```
@@ -108,17 +112,16 @@ OSN_OPENAI_MODEL_HIGH_QUALITY_OUT=10.0
 
 ### 4. バックエンドアプリの起動
 ```
-docker build --target production -t ossans_navi:latest .
-docker run --env-file .env ossans_navi:latest
+docker run --env-file .env ghcr.io/forrep/ossans_navi:latest
 ```
 
-起動に成功すると INFO レベルのログで以下のメッセージが表示されます。（※ OSN_LOG_LEVEL=INFO 以上が必要）
+起動に成功すると以下のメッセージが表示されます。（※ OSN_LOG_LEVEL=INFO 以上が必要）
 
 ```
 slack_bolt(265) - INFO - Starting to receive messages from a new connection 
 ```
 
-まずは Slack アプリで OssansNavi アプリを開いて DM で話しかけてみましょう。
+まずは Slack の画面から OssansNavi アプリを開いて DM で話しかけてみましょう。
 質問内容にもよりますが 1~3分ほどで応答してくれるはずです。
 
 ### バックエンドアプリを終了
@@ -163,3 +166,6 @@ OSN_DEVELOPERS=UXXXXXXXX
 # OssansNavi を --production 引数ありで起動すると OSN_DEVELOPMENT_CHANNELS（カンマ区切りで複数可）に指定したチャネルでは応答しない
 OSN_DEVELOPMENT_CHANNELS=GXXXXXXXX,CXXXXXXXXXX
 ```
+
+## 最後に
+OssansNavi は予告なく仕様変更する場合があります、ご了承ください。
