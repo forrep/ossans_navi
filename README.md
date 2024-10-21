@@ -13,6 +13,7 @@ OssansNavi は起動するだけで Slack ワークスペースに蓄積され�
   - まずは様々なチャネルに OssansNavi のボットユーザーを追加してみることをオススメします
 - OssansNavi が質問に回答できない場合は詳しい人にメンションすることもあります。メンションされた方は広い心で対応しましょう
 - 応答に 1~3分はかかるので相手を人間だと思って気長にお待ちください
+- 安価な LLM モデルと高精度のモデルを使い分けることで、LLM の API 使用料を節約します
 
 OssansNavi について詳しくは以下の記事をご覧ください
 
@@ -73,15 +74,15 @@ OSN_AZURE_OPENAI_API_KEY=684...
 OSN_AZURE_OPENAI_ENDPOINT=https://*.openai.azure.com/
 # Azure OpenAI 低コストモデルの DEPLOYMENT_NAME
 OSN_AZURE_OPENAI_MODEL_LOW_COST=gpt-4o-mini
-# Azure OpenAI 低コストモデルの入力コスト（1,000,000 tokens あたり） ※任意の通貨単位を設定可 
+# Azure OpenAI 低コストモデルの入力コスト（1,000,000 tokens あたり） ※省略可 ※任意の通貨単位を設定可
 OSN_AZURE_OPENAI_MODEL_LOW_COST_IN=0.15
-# Azure OpenAI 低コストモデルの出力コスト（1,000,000 tokens あたり） ※任意の通貨単位を設定可
+# Azure OpenAI 低コストモデルの出力コスト（1,000,000 tokens あたり） ※省略可 ※任意の通貨単位を設定可
 OSN_AZURE_OPENAI_MODEL_LOW_COST_OUT=0.60
 # Azure OpenAI 高クオリティモデルの DEPLOYMENT_NAME
 OSN_AZURE_OPENAI_MODEL_HIGH_QUALITY=gpt-4o
-# Azure OpenAI 高クオリティモデルの入力コスト（1,000,000 tokens あたり） ※任意の通貨単位を設定可
+# Azure OpenAI 高クオリティモデルの入力コスト（1,000,000 tokens あたり） ※省略可 ※任意の通貨単位を設定可
 OSN_AZURE_OPENAI_MODEL_HIGH_QUALITY_IN=2.50
-# Azure OpenAI 高クオリティモデルの出力コスト（1,000,000 tokens あたり） ※任意の通貨単位を設定可
+# Azure OpenAI 高クオリティモデルの出力コスト（1,000,000 tokens あたり） ※省略可 ※任意の通貨単位を設定可
 OSN_AZURE_OPENAI_MODEL_HIGH_QUALITY_OUT=10.0
 
 # -- アプリの設定 --
