@@ -358,10 +358,20 @@ class SlackMessageEvent:
         return 'thread_ts' in self.source
 
     def is_message_post(self) -> bool:
-        # text が存在し、subtype が存在しないまたは subtype=file_share が通常メッセージ
+        """
+        応答が必要なメッセージ（1, 2 の条件に当てはまる）に True を返却
+        1. text が存在する
+        2. 次のいずれかに当てはまる
+            - subtype が存在しない → 通常メッセージ
+            - subtype が file_share → テキストスニペットの送信
+            - subtype が thread_broadcast のいずれか → チャネルにも投稿するチェックを入れてスレッド返信
+        """
         return (
             'text' in self.source
-            and ('subtype' not in self.source or self.source['subtype'] in ('file_share'))
+            and (
+                "subtype" not in self.source
+                or self.source["subtype"] in ("file_share", "thread_broadcast")
+            )
         )
 
     def is_open_channel(self) -> bool:
