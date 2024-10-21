@@ -60,3 +60,9 @@ level = "INFO"
 
 [tool.logging.loggers."httpcore"]
 level = "INFO"
+
+[tool.logging.loggers."openai"]
+level = "INFO"
+
+[tool.logging.loggers."httpx"]
+level = "INFO"
