@@ -30,4 +30,5 @@ jobs:
           context: .
           push: true
           tags: ghcr.io/${{ github.repository_owner }}/ossans_navi:latest
+          target: production
 
