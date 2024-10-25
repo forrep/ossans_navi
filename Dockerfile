@@ -71,5 +71,5 @@ WORKDIR /home/ossans_navi/app
 ENV PYTHONPYCACHEPREFIX=/tmp/__pycache__
 # pytest のカバレッジデータファイルの生成ディレクトリを /tmp/ossan_coverage とする
 ENV COVERAGE_DATA_FILE=/tmp/ossan_coverage/.coverage
-# 2度目の実行で root プロジェクトのインストールする
+# 開発用のライブラリをインストール
 RUN $HOME/.local/bin/poetry install
