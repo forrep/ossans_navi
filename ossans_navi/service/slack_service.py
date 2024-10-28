@@ -8,7 +8,7 @@ import re
 from enum import Enum
 from io import BytesIO
 from threading import RLock
-from typing import Callable, Optional
+from typing import Callable
 
 import requests
 from PIL import Image
@@ -140,8 +140,8 @@ class SlackService:
         self.cache_user_presence = LRUCache[str, bool](capacity=100, expire=1 * 60 * 10)   # 10分
         self.cache_get_channel = LRUCache[str, SlackChannel](capacity=1000, expire=1 * 60 * 60)   # 60分
         self.cache_config = LRUCache[bool, dict](capacity=1, expire=1 * 60 * 60)   # 60分
-        self.my_user_id: Optional[str] = None
-        self.my_bot_user_id: Optional[str] = None
+        self.my_user_id: str = ""
+        self.my_bot_user_id: str = ""
         self.workspace_url: str = "https://slack.com/"
 
     def start(self) -> None:

@@ -104,7 +104,7 @@ class RefineResponse:
 @dataclasses.dataclass
 class LastshotResponse:
     user_intent: str
-    response_message: str | None
+    response_message: str
     confirm_message: str | None
     response_quality: bool
 
@@ -295,7 +295,7 @@ class AiService:
             LastshotResponse(
                 message['content']['user_intent'],
                 message['content']['response_message'],
-                message['content']['confirm_message'],
+                message['content']['confirm_message'] if isinstance(message['content']['confirm_message'], str) else None,
                 message['content']['response_quality'],
             )
             for message in messages if (

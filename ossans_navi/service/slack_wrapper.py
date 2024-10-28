@@ -2,7 +2,7 @@ import functools
 import logging
 import time
 from threading import RLock
-from typing import Callable, Dict, Optional, Sequence, Union, overload
+from typing import Callable, Dict, Optional, Sequence, TypeVar, Union
 
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
@@ -11,16 +11,23 @@ from slack_sdk.models.blocks import Block
 from slack_sdk.models.metadata import Metadata
 from slack_sdk.web.base_client import SlackResponse
 
+F = TypeVar('F', bound=Callable[..., SlackResponse])
+
 logger = logging.getLogger(__name__)
 
 
-def api_wrapper(*, pager: Callable = None, concat: Callable = None, limit: int = 100) -> Callable[[Callable], Callable]:
+def api_wrapper(
+    *,
+    pager: Optional[Callable[[SlackResponse, dict], bool]] = None,
+    concat: Optional[Callable[[SlackResponse, SlackResponse], SlackResponse]] = None,
+    limit: int = 100
+) -> Callable[[F], F]:
     lock = RLock()
 
-    def _api_wrapper(f: Callable) -> Callable:
+    def _api_wrapper(f: F) -> F:
         @functools.wraps(f)
         def _wrapper(*args, **kwargs) -> SlackResponse:
-            response: SlackResponse = None
+            response: Optional[SlackResponse] = None
             page = 0
             while limit > page:
                 for _ in range(20):
@@ -48,20 +55,23 @@ def api_wrapper(*, pager: Callable = None, concat: Callable = None, limit: int =
                             raise e
                         logger.warn(e)
                         time.sleep(20)
+            if response is None:
+                raise RuntimeError('Response is None.')
             return response
-        return _wrapper
+        return _wrapper  # type: ignore
     return _api_wrapper
 
 
 def cursor_pager(response: SlackResponse, kwargs: dict) -> bool:
-    if len(next_cursor := response.get("response_metadata", {}).get("next_cursor", "")) == 0:
+    response_metadata: dict[str, str] = response.get("response_metadata", {})
+    if len(next_cursor := response_metadata.get("next_cursor", "")) == 0:
         return True
     else:
         kwargs["cursor"] = next_cursor
         return False
 
 
-def concat_response(name: str) -> callable:
+def concat_response(name: str) -> Callable[[SlackResponse, SlackResponse], SlackResponse]:
     def _concat_response(response1: SlackResponse, response2: SlackResponse) -> SlackResponse:
         if name not in response1 or name not in response2:
             return response1
@@ -76,40 +86,18 @@ class SlackWrapper:
         self.token = token
         self.client = WebClient(token=token)
 
-    @overload
-    def auth_test(self) -> SlackResponse:
-        ...
-
     @api_wrapper()
     def auth_test(self) -> SlackResponse:
         return self.client.auth_test()
 
-    @overload
-    def users_info(
-        self,
-        *,
-        user: str,
-        include_locale: Optional[bool] = None
-    ) -> SlackResponse:
-        ...
-
     @api_wrapper()
     def users_info(
         self,
         *,
         user: str,
-        include_locale: Optional[bool] = None
+        include_locale: Optional[bool] = None,
     ) -> SlackResponse:
         return self.client.users_info(user=user, include_locale=include_locale)
-
-    @overload
-    def bots_info(
-        self,
-        *,
-        bot: Optional[str] = None,
-        team_id: Optional[str] = None
-    ) -> SlackResponse:
-        ...
 
     @api_wrapper()
     def bots_info(
@@ -119,20 +107,6 @@ class SlackWrapper:
         team_id: Optional[str] = None
     ) -> SlackResponse:
         return self.client.bots_info(bot=bot, team_id=team_id)
-
-    @overload
-    def conversations_history(
-        self,
-        *,
-        channel: str,
-        cursor: Optional[str] = None,
-        inclusive: Optional[bool] = None,
-        include_all_metadata: Optional[bool] = None,
-        latest: Optional[str] = None,
-        limit: Optional[int] = None,
-        oldest: Optional[str] = None,
-    ) -> SlackResponse:
-        ...
 
     @api_wrapper()
     def conversations_history(
@@ -156,18 +130,6 @@ class SlackWrapper:
             oldest=oldest,
         )
 
-    @overload
-    def conversations_list(
-        self,
-        *,
-        cursor: Optional[str] = None,
-        exclude_archived: Optional[bool] = None,
-        limit: Optional[int] = None,
-        team_id: Optional[str] = None,
-        types: Optional[Union[str, Sequence[str]]] = None,
-    ) -> SlackResponse:
-        ...
-
     @api_wrapper(pager=cursor_pager, concat=concat_response(name="channels"), limit=999)
     def conversations_list(
         self,
@@ -179,16 +141,6 @@ class SlackWrapper:
         types: Optional[Union[str, Sequence[str]]] = None,
     ) -> SlackResponse:
         return self.client.conversations_list(cursor=cursor, exclude_archived=exclude_archived, limit=limit, team_id=team_id, types=types)
-
-    @overload
-    def conversations_info(
-        self,
-        *,
-        channel: str,
-        include_locale: Optional[bool] = None,
-        include_num_members: Optional[bool] = None,
-    ) -> SlackResponse:
-        ...
 
     @api_wrapper()
     def conversations_info(
@@ -204,16 +156,6 @@ class SlackWrapper:
             include_num_members=include_num_members,
         )
 
-    @overload
-    def conversations_members(
-        self,
-        *,
-        channel: str,
-        cursor: Optional[str] = None,
-        limit: Optional[int] = None,
-    ) -> SlackResponse:
-        ...
-
     @api_wrapper(pager=cursor_pager, concat=concat_response(name="members"), limit=999)
     def conversations_members(
         self,
@@ -223,21 +165,6 @@ class SlackWrapper:
         limit: Optional[int] = None,
     ) -> SlackResponse:
         return self.client.conversations_members(channel=channel, cursor=cursor, limit=limit)
-
-    @overload
-    def conversations_replies(
-        self,
-        *,
-        channel: str,
-        ts: str,
-        cursor: Optional[str] = None,
-        inclusive: Optional[bool] = None,
-        include_all_metadata: Optional[bool] = None,
-        latest: Optional[str] = None,
-        limit: Optional[int] = None,
-        oldest: Optional[str] = None
-    ) -> SlackResponse:
-        ...
 
     @api_wrapper()
     def conversations_replies(
@@ -263,28 +190,9 @@ class SlackWrapper:
             oldest=oldest,
         )
 
-    @overload
-    def users_getPresence(self, *, user: str) -> SlackResponse:
-        ...
-
     @api_wrapper()
     def users_getPresence(self, *, user: str) -> SlackResponse:
         return self.client.users_getPresence(user=user)
-
-    @overload
-    def search_messages(
-        self,
-        *,
-        query: str,
-        count: Optional[int] = None,
-        cursor: Optional[str] = None,
-        highlight: Optional[bool] = None,
-        page: Optional[int] = None,
-        sort: Optional[str] = None,
-        sort_dir: Optional[str] = None,
-        team_id: Optional[str] = None
-    ) -> SlackResponse:
-        ...
 
     @api_wrapper()
     def search_messages(
@@ -310,16 +218,6 @@ class SlackWrapper:
             team_id=team_id
         )
 
-    @overload
-    def reactions_add(
-        self,
-        *,
-        channel: str,
-        name: str,
-        timestamp: str,
-    ) -> SlackResponse:
-        ...
-
     @api_wrapper()
     def reactions_add(
         self,
@@ -333,30 +231,6 @@ class SlackWrapper:
             name=name,
             timestamp=timestamp,
         )
-
-    @overload
-    def chat_postMessage(
-        self,
-        *,
-        channel: str,
-        text: Optional[str] = None,
-        as_user: Optional[bool] = None,
-        attachments: Optional[Union[str, Sequence[Union[Dict, Attachment]]]] = None,
-        blocks: Optional[Union[str, Sequence[Union[Dict, Block]]]] = None,
-        thread_ts: Optional[str] = None,
-        reply_broadcast: Optional[bool] = None,
-        unfurl_links: Optional[bool] = None,
-        unfurl_media: Optional[bool] = None,
-        container_id: Optional[str] = None,
-        icon_emoji: Optional[str] = None,
-        icon_url: Optional[str] = None,
-        mrkdwn: Optional[bool] = None,
-        link_names: Optional[bool] = None,
-        username: Optional[str] = None,
-        parse: Optional[str] = None,  # none, full
-        metadata: Optional[Union[Dict, Metadata]] = None
-    ) -> SlackResponse:
-        ...
 
     @api_wrapper()
     def chat_postMessage(
@@ -399,16 +273,6 @@ class SlackWrapper:
             parse=parse,
             metadata=metadata
         )
-
-    @overload
-    def conversations_open(
-        self,
-        *,
-        channel: Optional[str] = None,
-        return_im: Optional[bool] = None,
-        users: Optional[Union[str, Sequence[str]]] = None,
-    ) -> SlackResponse:
-        ...
 
     @api_wrapper()
     def conversations_open(

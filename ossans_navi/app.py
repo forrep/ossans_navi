@@ -12,7 +12,7 @@ from ossans_navi.service.ossans_navi_service import OssansNaviService
 from ossans_navi.service.slack_service import EventGuard, SlackService
 from ossans_navi.type.slack_type import SlackMessageEvent
 
-_EXECUTOR: ThreadPoolExecutor = None
+_EXECUTOR: ThreadPoolExecutor
 _EXECUTOR_WORKERS: Final[int] = 2
 EVENT_GUARD = EventGuard()
 
@@ -230,7 +230,7 @@ def do_ossans_navi_response(say, event: SlackMessageEvent, models: AiModels):
 
     lastshot_response = sorted(
         lastshot_responses,
-        key=lambda v: (v.response_quality, len(v.response_message or ""), len(v.confirm_message or "")),
+        key=lambda v: (v.response_quality, len(v.response_message), len(v.confirm_message or "")),
         reverse=True
     )[0]
     do_response = False
@@ -263,8 +263,11 @@ def do_ossans_navi_response(say, event: SlackMessageEvent, models: AiModels):
                     SlackService.convert_markdown_to_mrkdwn(lastshot_response.response_message) + "\n"
                     + (
                         # 詳しい人へパスするメッセージはオープンチャネルの場合のみ投稿する
-                        SlackService.convert_markdown_to_mrkdwn(lastshot_response.confirm_message)
-                        if len(lastshot_response.confirm_message or "") > 0 and event.is_open_channel() else ""
+                        SlackService.convert_markdown_to_mrkdwn(lastshot_response.confirm_message) if (
+                            isinstance(lastshot_response.confirm_message, str)
+                            and len(lastshot_response.confirm_message) > 0
+                            and event.is_open_channel()
+                        ) else ""
                     )
                 )
             ),

@@ -19,6 +19,8 @@ pytest-cov = "*"
 flake8 = "*"
 autopep8 = "*"
 isort = "*"
+mypy = "*"
+types-requests = "^2.31.0"
 
 [build-system]
 requires = ["poetry-core"]
