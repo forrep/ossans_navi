@@ -5,23 +5,7 @@ import hashlib
 import itertools
 import re
 from threading import RLock
-from typing import Callable
-
-
-@dataclasses.dataclass
-class SlackAttachment:
-    title: str
-    text: str
-    link: str
-    user: 'SlackUser' = dataclasses.field(default=None, init=False)
-
-    @staticmethod
-    def from_dict(attachment: dict[str, str]) -> 'SlackAttachment':
-        return SlackAttachment(
-            title=attachment.get("title", ""),
-            text=attachment.get("text", ""),
-            link=attachment.get("title_link", attachment.get("from_url", "")),
-        )
+from typing import Callable, Optional
 
 
 @dataclasses.dataclass
@@ -34,6 +18,22 @@ class SlackUser:
     is_guest: bool
     is_admin: bool
     is_valid: bool = dataclasses.field(default=True)
+
+
+@dataclasses.dataclass
+class SlackAttachment:
+    title: str
+    text: str
+    link: str
+    user: Optional[SlackUser] = dataclasses.field(default=None, init=False)
+
+    @staticmethod
+    def from_dict(attachment: dict[str, str]) -> 'SlackAttachment':
+        return SlackAttachment(
+            title=attachment.get("title", ""),
+            text=attachment.get("text", ""),
+            link=attachment.get("title_link", attachment.get("from_url", "")),
+        )
 
 
 @dataclasses.dataclass
@@ -54,11 +54,11 @@ class SlackFile:
     title: str
     mimetype: str
     link: str
-    get_content: Callable[['SlackFile'], None]
+    get_content: Optional[Callable[['SlackFile'], None]]
     is_analyzed: bool = dataclasses.field(default=False, init=False)
-    description: str = dataclasses.field(default=None, init=False)
-    text: str = dataclasses.field(default=None, init=False)
-    _content: bytes = dataclasses.field(default=None, init=False)
+    description: Optional[str] = dataclasses.field(default=None, init=False)
+    text: Optional[str] = dataclasses.field(default=None, init=False)
+    _content: Optional[bytes] = dataclasses.field(default=None, init=False)
     _height: int = dataclasses.field(default=0, init=False)
     _width: int = dataclasses.field(default=0, init=False)
 
@@ -163,16 +163,16 @@ class SlackMessage:
     channel_id: str
     score: float
     is_private: bool
-    get_messages: Callable[['SlackMessage'], None]
-    _root_message: SlackMessageLite = dataclasses.field(default=None, init=False)
-    _messages: list[SlackMessageLite] = dataclasses.field(default=None, init=False)
-    _is_full: bool = dataclasses.field(default=None, init=False)
+    get_messages: Optional[Callable[['SlackMessage'], None]]
+    _root_message: Optional[SlackMessageLite] = dataclasses.field(default=None, init=False)
+    _messages: Optional[list[SlackMessageLite]] = dataclasses.field(default=None, init=False)
+    _is_full: bool = dataclasses.field(default=False, init=False)
 
     def is_initialized(self) -> bool:
         return not callable(self.get_messages)
 
     def initialize(self) -> None:
-        if not self.is_initialized():
+        if callable(self.get_messages):
             self.get_messages(self)
         for message in [
             self.message,
@@ -191,6 +191,8 @@ class SlackMessage:
 
     def messages(self) -> list[SlackMessageLite]:
         self.initialize()
+        if self._messages is None:
+            raise ValueError('self._messages is None')
         return self._messages
 
     def is_full(self) -> bool:

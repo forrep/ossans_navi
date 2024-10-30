@@ -35,6 +35,9 @@ addopts = "-vv --cov=ossans_navi --cov-report html"
 source = ["ossans_navi",]
 data_file = "${COVERAGE_DATA_FILE-.coverage}"
 
+[tool.isort]
+line_length = 149
+
 [tool.logging]
 version = 1
 

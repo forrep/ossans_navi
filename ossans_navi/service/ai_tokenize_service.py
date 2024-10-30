@@ -1,24 +1,25 @@
 import math
 import threading
+from typing import Protocol
 
 import tiktoken
 
 
-class AiTokenize:
+class AiTokenize(Protocol):
     @staticmethod
     def image_tokens(width: int, height: int) -> int:
-        raise NotImplementedError()
+        ...
 
     @staticmethod
     def content_tokens(content: str) -> int:
-        raise NotImplementedError()
+        ...
 
     @staticmethod
     def messages_tokens(messages: list[dict]) -> int:
-        raise NotImplementedError()
+        ...
 
 
-class AiTokenizeGpt4o(AiTokenize):
+class AiTokenizeGpt4o:
     _LOCK = threading.Lock()
 
     @staticmethod
@@ -39,11 +40,11 @@ class AiTokenizeGpt4o(AiTokenize):
         with AiTokenizeGpt4o._LOCK:
             summed = 0
             for message in messages:
-                content = message.get("content")
-                if isinstance(content, str):
-                    summed += len(enc.encode(content))
-                elif isinstance(content, list):
-                    for v in content:
-                        if isinstance(v, dict) and v.get("type") == "text" and isinstance(v.get("text"), str):
-                            summed += len(enc.encode(v.get("text")))
+                contents = message.get("content")
+                if isinstance(contents, str):
+                    summed += len(enc.encode(contents))
+                elif isinstance(contents, list):
+                    for content in contents:
+                        if isinstance(content, dict) and content.get("type") == "text" and isinstance((v := content.get("text")), str):
+                            summed += len(enc.encode(v))
             return summed

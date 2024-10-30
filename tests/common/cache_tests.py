@@ -1,5 +1,7 @@
 import time
 
+import pytest
+
 from ossans_navi.common.cache import LRUCache
 
 
@@ -8,39 +10,37 @@ def test_lru_cache():
     cache.put('a', "あ")
     cache.put('b', "い")
     cache.put('c', "う")
-    assert LRUCache.is_found(cache.get("a"))
-    assert not LRUCache.is_not_found(cache.get("a"))
-    assert cache.get("a") == "あ"
+    assert (v := cache.get("a")).found
+    assert v.value() == "あ"
 
-    assert LRUCache.is_found(cache.get("b"))
-    assert not LRUCache.is_not_found(cache.get("b"))
-    assert cache.get("b") == "い"
+    assert (v := cache.get("b")).found
+    assert v.value() == "い"
 
-    assert LRUCache.is_found(cache.get("c"))
-    assert not LRUCache.is_not_found(cache.get("c"))
-    assert cache.get("c") == "う"
+    assert (v := cache.get("c")).found
+    assert v.value() == "う"
+
+    assert not (v := cache.get("d")).found
+    with pytest.raises(ValueError):
+        v.value()
 
     cache.put('d', "え")
 
-    assert not LRUCache.is_found(cache.get("a"))
-    assert LRUCache.is_not_found(cache.get("a"))
-    assert cache.get("a") != "あ"
+    assert not (v := cache.get("a")).found
+    with pytest.raises(ValueError):
+        v.value()
 
-    assert LRUCache.is_found(cache.get("b"))
-    assert not LRUCache.is_not_found(cache.get("b"))
-    assert cache.get("b") == "い"
+    assert (v := cache.get("b")).found
+    assert v.value() == "い"
 
-    assert LRUCache.is_found(cache.get("c"))
-    assert not LRUCache.is_not_found(cache.get("c"))
-    assert cache.get("c") == "う"
+    assert (v := cache.get("c")).found
+    assert v.value() == "う"
 
-    assert LRUCache.is_found(cache.get("d"))
-    assert not LRUCache.is_not_found(cache.get("d"))
-    assert cache.get("d") == "え"
+    assert (v := cache.get("d")).found
+    assert v.value() == "え"
 
     time.sleep(2.1)
 
-    assert LRUCache.is_not_found(cache.get("a"))
-    assert LRUCache.is_not_found(cache.get("b"))
-    assert LRUCache.is_not_found(cache.get("c"))
-    assert LRUCache.is_not_found(cache.get("d"))
+    assert not cache.get("a").found
+    assert not cache.get("b").found
+    assert not cache.get("c").found
+    assert not cache.get("d").found

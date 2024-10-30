@@ -353,8 +353,8 @@ class OssansNaviService:
     def load_image_description_from_cache(thread_messages: list[SlackMessageLite]):
         for message in thread_messages:
             if message.has_files() and len([file for file in message.files if file.is_image() and not file.is_analyzed]) > 0:
-                if LRUCache.is_found(cached := OssansNaviService.image_cache.get(message.permalink)):
-                    for (file, cached_file) in itertools.zip_longest(message.files, cached):
+                if (cached := OssansNaviService.image_cache.get(message.permalink)).found:
+                    for (file, cached_file) in itertools.zip_longest(message.files, cached.value()):
                         if file is None:
                             break
                         file.is_analyzed = True

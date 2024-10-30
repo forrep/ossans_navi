@@ -4,11 +4,13 @@ import json
 import logging
 import threading
 import time
-from typing import Optional
+from typing import Iterable, Optional
 
-from openai import (NOT_GIVEN, AzureOpenAI, InternalServerError, OpenAI,
-                    RateLimitError)
+from openai import NOT_GIVEN, AzureOpenAI, InternalServerError, NotGiven, OpenAI, RateLimitError
 from openai.types.chat import ChatCompletion
+from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
+from openai.types.chat.chat_completion_tool_choice_option_param import ChatCompletionToolChoiceOptionParam
+from openai.types.chat.chat_completion_tool_param import ChatCompletionToolParam
 
 from ossans_navi import config
 from ossans_navi.common.logger import shrink_message
@@ -128,18 +130,19 @@ class AiService:
     def _chat_completions(
             self,
             model: AiModel,
-            messages: list[dict],
-            tools: list[dict] = NOT_GIVEN,
-            tool_choice: str = NOT_GIVEN,
-            n: int = NOT_GIVEN,
-            max_tokens: int = NOT_GIVEN
+            messages: Iterable[ChatCompletionMessageParam],
+            tools: Iterable[ChatCompletionToolParam] | NotGiven = NOT_GIVEN,
+            tool_choice: ChatCompletionToolChoiceOptionParam | NotGiven = NOT_GIVEN,
+            n: int | NotGiven = NOT_GIVEN,
+            max_tokens: int | NotGiven = NOT_GIVEN
     ) -> ChatCompletion:
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(f"_chat_completions model={model.name}, messages=" + json.dumps(messages, ensure_ascii=False))
         else:
             logger.info(f"_chat_completions model={model.name}, messages(shrink)=" + json.dumps(shrink_message(messages), ensure_ascii=False))
         start_time = time.time()
-        last_exception: Optional[Exception]
+        last_exception: Optional[Exception] = None
+        response = None
         for _ in range(10):
             try:
                 response = self.client.chat.completions.create(
@@ -173,12 +176,13 @@ class AiService:
 
         if response is None:
             # 実行に失敗していた場合は例外を送出
-            raise last_exception
+            raise last_exception or RuntimeError()
         logger.info(f"elapsed: {time.time() - start_time}")
         logger.info("response=" + str(response))
         # 利用したトークン数を加算する
-        model.tokens_in += response.usage.prompt_tokens
-        model.tokens_out += response.usage.completion_tokens
+        if response.usage:
+            model.tokens_in += response.usage.prompt_tokens
+            model.tokens_out += response.usage.completion_tokens
         return response
 
     def request_classification(self, model: AiModel, messages: list) -> tuple[str, str]:
@@ -187,8 +191,8 @@ class AiService:
         if len(messages) == 0:
             logger.error("Error empty choices, response=" + str(response))
             raise ValueError()
-        message_type = {}
-        slack_emoji_name = {}
+        message_type: dict[str, int] = {}
+        slack_emoji_name: dict[str, int] = {}
         for message in messages:
             if (
                 'content' in message

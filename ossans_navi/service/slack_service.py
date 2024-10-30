@@ -1,6 +1,6 @@
-import html
 import dataclasses
 import datetime
+import html
 import json
 import logging
 import math
@@ -8,10 +8,10 @@ import re
 from enum import Enum
 from io import BytesIO
 from threading import RLock
-from typing import Callable
+from typing import Any, Callable, Optional
 
 import requests
-from PIL import Image
+from PIL import Image, ImageFile
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 from slack_bolt.util.utils import get_boot_message
@@ -150,7 +150,7 @@ class SlackService:
         response_user = self.user_client.auth_test()
         response_bot = self.bot_client.auth_test()
         if not response_app.get("ok") or not response_user.get("ok") and not response_bot.get("ok"):
-            logger.error(f"auth_test() returns error: app={response_app.data}, user={response_user.data}, bot={response_bot.data}")
+            logger.error(f"auth_test() returns error: app={str(response_app.data)}, user={str(response_user.data)}, bot={str(response_bot.data)}")
         self.my_user_id = response_user["user_id"]
         self.my_bot_user_id = response_bot["user_id"]
         self.workspace_url = response_bot["url"]
@@ -163,19 +163,20 @@ class SlackService:
         self.socket_mode_hander.close()
 
     def get_user(self, user_id: str) -> SlackUser:
-        if LRUCache.is_found(cached := self.cache_get_user.get(user_id)):
-            return cached
+        if (cached := self.cache_get_user.get(user_id)).found:
+            return cached.value()
         try:
-            response: dict[str, dict[str]] = self.bot_client.users_info(user=user_id).data
+            response = self.bot_client.users_info(user=user_id)
+            response_user: dict[str, Any] = response['user']
             # 別の Workspace から参加しているユーザーは is_stranger: true となっているので、is_guest とする（通常ユーザーは is_stranger 自体が送られない）
             slack_user = SlackUser(
                 user_id=user_id,
-                name=response['user'].get('real_name', 'Unknown'),
-                username=response['user'].get("name"),
+                name=response_user.get("real_name", "Unknown"),
+                username=response_user.get("name", "Unknown"),
                 mention=f"<@{user_id}>",
-                is_bot=response['user']['is_bot'],
-                is_guest=response['user'].get("is_stranger", False) or response['user'].get('is_restricted', True),
-                is_admin=response['user'].get('is_admin', False),
+                is_bot=bool(response_user['is_bot']),
+                is_guest=bool(response_user.get("is_stranger", False) or response_user.get('is_restricted', True)),
+                is_admin=bool(response_user.get('is_admin', False)),
             )
         except SlackApiError as e:
             error_response: SlackResponse = e.response
@@ -193,14 +194,15 @@ class SlackService:
         return slack_user
 
     def get_bot(self, bot_id: str) -> SlackUser:
-        if LRUCache.is_found(cached := self.cache_get_bot.get(bot_id)):
-            return cached
+        if (cached := self.cache_get_bot.get(bot_id)).found:
+            return cached.value()
         try:
-            response: dict[str, dict[str]] = self.bot_client.bots_info(bot=bot_id).data
+            response = self.bot_client.bots_info(bot=bot_id)
+            response_bot: dict[str, Any] = response['bot']
             bot_user = SlackUser(
                 user_id=bot_id,
-                name=response['bot'].get('name', 'Unknown Bot'),
-                username=response['bot'].get('name', 'Unknown Bot'),
+                name=response_bot.get('name', 'Unknown Bot'),
+                username=response_bot.get('name', 'Unknown Bot'),
                 mention=f"<@{bot_id}>",
                 is_bot=True,
                 is_guest=False,
@@ -225,24 +227,26 @@ class SlackService:
 
     def get_channel(self, channel_id: str, user_client: bool = False) -> SlackChannel:
         client: SlackWrapper = self.user_client if user_client else self.bot_client
-        if LRUCache.is_found(cached := self.cache_get_channel.get(channel_id)):
-            return cached
+        if (cached := self.cache_get_channel.get(channel_id)).found:
+            return cached.value()
         try:
-            response: dict[str, dict] = client.conversations_info(channel=channel_id).data
-            channel_dict: dict[str, str | dict] = response["channel"]
+            response = client.conversations_info(channel=channel_id)
+            response_channel: dict[str, Any] = response["channel"]
+            response_channel_topic: dict[str, Any] = response_channel.get("topic", {})
+            response_channel_purpose: dict[str, Any] = response_channel.get("purpose", {})
             channel = SlackChannel(
                 channel_id=channel_id,
-                name=channel_dict.get("name", ""),
-                topic=channel_dict.get("topic", {}).get("value", ""),
-                purpose=channel_dict.get("purpose", {}).get("value", ""),
-                is_public=not channel_dict.get("is_private") and not channel_dict.get("is_im") and not channel_dict.get("is_mpim"),
-                is_private=channel_dict.get("is_private"),
-                is_im=channel_dict.get("is_im"),
-                is_mpim=channel_dict.get("is_mpim"),
+                name=response_channel.get("name", ""),
+                topic=response_channel_topic.get("value", ""),
+                purpose=response_channel_purpose.get("value", ""),
+                is_public=not response_channel.get("is_private") and not response_channel.get("is_im") and not response_channel.get("is_mpim"),
+                is_private=bool(response_channel.get("is_private")),
+                is_im=bool(response_channel.get("is_im")),
+                is_mpim=bool(response_channel.get("is_mpim")),
             )
         except SlackApiError as e:
             error_response: SlackResponse = e.response
-            if error_response.get("error") not in ("channel_not_found"):
+            if error_response.get("error") not in ("channel_not_found", ):
                 # error: channel_not_found ではない場合は例外を送出
                 # ・・・、する予定だけど、まずはエラーロギングだけして様子見
                 logger.error(f"{error_response.get("error")}, channel_id={channel_id}, exception={e}")
@@ -268,10 +272,10 @@ class SlackService:
         return channel
 
     def get_presence(self, user_id: str) -> bool:
-        if LRUCache.is_found(cached := self.cache_user_presence.get(user_id)):
-            return cached
+        if (cached := self.cache_user_presence.get(user_id)).found:
+            return cached.value()
         try:
-            response: dict[str, str] = self.bot_client.users_getPresence(user=user_id).data
+            response = self.bot_client.users_getPresence(user=user_id)
             user_presence = response["presence"] == "active"
         except SlackApiError as e:
             error_response: SlackResponse = e.response
@@ -289,11 +293,11 @@ class SlackService:
         return user_presence
 
     def get_conversations_members(self, channel_id: str) -> list[str]:
-        if LRUCache.is_found(cached := self.cache_get_conversations_members.get(channel_id)):
-            return cached
+        if (cached := self.cache_get_conversations_members.get(channel_id)).found:
+            return cached.value()
         try:
-            response: dict[str, list] = self.user_client.conversations_members(channel=channel_id, limit=1000).data
-            conversations_members: list[str] = response["members"]
+            response = self.user_client.conversations_members(channel=channel_id, limit=1000)
+            response_members: list[str] = response["members"]
         except SlackApiError as e:
             error_response: SlackResponse = e.response
             if error_response.get("error") != "channel_not_found":
@@ -303,30 +307,30 @@ class SlackService:
                 logger.error(e, exc_info=True)
                 # raise e
             logger.info(f"{error_response.get("error")}, channel_id={channel_id}, exception={e}")
-            conversations_members = []
+            response_members = []
         except Exception as e:
             logger.error(f"conversations_members returns error channel_id={channel_id}")
             logger.error(e, exc_info=True)
             raise e
-        self.cache_get_conversations_members.put(channel_id, conversations_members)
-        return conversations_members
+        self.cache_get_conversations_members.put(channel_id, response_members)
+        return response_members
 
     def is_user_joined_channel(self, user: SlackUser, channel: str):
         return user.user_id in self.get_conversations_members(channel)
 
     def get_channels(self) -> dict[str, dict]:
-        if LRUCache.is_found(cached := self.cache_get_channels.get(True)):
-            return cached
+        if (cached := self.cache_get_channels.get(True)).found:
+            return cached.value()
         try:
-            response: dict[str, list] = self.bot_client.conversations_list(limit=1000).data
-            conversations_lists = response["channels"]
+            response = self.bot_client.conversations_list(limit=1000)
+            response_channels = response["channels"]
             channels = {
                 channel["name"]: {
                     "name": channel["name"],
                     "num_members": channel["num_members"],
                     "score": (math.log2(channel["num_members"]) if channel["num_members"] >= 1 else 0.0) + 1.0
                 }
-                for channel in conversations_lists
+                for channel in response_channels
             }
         except Exception as e:
             logger.error("conversations_list returns error")
@@ -367,7 +371,7 @@ class SlackService:
                 file._content = SlackService.get_file(token, file.link)
                 if file.is_image():
                     bytes_io = BytesIO(file._content)
-                    image = Image.open(bytes_io)
+                    image: Image.Image | ImageFile.ImageFile = Image.open(bytes_io)
                     max_size = max(image.width, image.height)
                     if max_size > MAX_IMAGE_SIZE:
                         resize_retio = MAX_IMAGE_SIZE / max_size
@@ -390,8 +394,8 @@ class SlackService:
     def get_conversations_replies(self, channel: str, ts: str, user_client: bool = False) -> list[SlackMessageLite]:
         client: SlackWrapper = self.user_client if user_client else self.bot_client
         try:
-            response: dict = client.conversations_replies(channel=channel, ts=ts, limit=60).data
-            replies: list[dict] = response["messages"]
+            response = client.conversations_replies(channel=channel, ts=ts, limit=60)
+            response_messages: list[dict] = response["messages"]
         except SlackApiError as e:
             error_response: SlackResponse = e.response
             if user_client and error_response.get("error") == "missing_scope":
@@ -407,33 +411,32 @@ class SlackService:
             logger.error(f"conversations_replies returns error, channel={channel}, ts={ts}, user_client={user_client}, exception={e}")
             raise e
         results = []
-        for reply in replies:
-            ts: str = ts
-            attachment_dicts: list[dict[str, str]] = reply.get("attachments", [])
+        for message in response_messages:
+            attachments_dict: list[dict[str, str]] = message.get("attachments", [])
             attachments: list[SlackAttachment] = []
-            for attachment_dict in attachment_dicts:
+            for attachment_dict in attachments_dict:
                 attachment = SlackAttachment.from_dict(attachment_dict)
                 attachment.user = self.get_user(attachment_dict["author_id"]) if attachment_dict.get("author_id", "").startswith("U") else None
                 attachments.append(attachment)
-            files: list[dict[str, str]] = reply.get("files", [])
+            files: list[dict[str, str]] = message.get("files", [])
             results.append(SlackMessageLite(
                 timestamp=datetime.datetime.fromtimestamp(float(ts)),
                 ts=ts,
-                thread_ts=reply.get('thread_ts', ts),
-                user=self.get_bot(reply['bot_id']) if not reply.get('user') and reply.get("bot_id") else self.get_user(reply['user']),
-                content=self.replace_id_to_name(reply["text"]),
+                thread_ts=message.get('thread_ts', ts),
+                user=self.get_bot(message['bot_id']) if not message.get('user') and message.get("bot_id") else self.get_user(message['user']),
+                content=self.replace_id_to_name(message["text"]),
                 # スレッドが存在しない場合は thread_ts が存在しない、スレッドの root メッセージは thread_ts が存在して ts と同じ値
                 permalink=(
                     f"{self.workspace_url}archives/{channel}/p{ts.replace('.', '')}"
-                    + (f"?thread_ts={reply["thread_ts"]}" if ts != reply.get("thread_ts", ts) else "")
+                    + (f"?thread_ts={message["thread_ts"]}" if ts != message.get("thread_ts", ts) else "")
                 ),
                 attachments=attachments,
                 files=[SlackFile.from_dict(file, self._get_content_callable(self.bot_token)) for file in files],
-                reactions=([f":{reaction["name"]}:" for reaction in reply["reactions"]] if "reactions" in reply else [])
+                reactions=([f":{reaction["name"]}:" for reaction in message["reactions"]] if "reactions" in message else [])
             ))
         return results
 
-    def chat_post_message(self, channel: str, text: str, thread_ts: str = None) -> None:
+    def chat_post_message(self, channel: str, text: str, thread_ts: Optional[str] = None) -> None:
         self.bot_client.chat_postMessage(channel=channel, text=text, thread_ts=thread_ts)
 
     def add_reaction(self, channel: str, ts: str, name: str | None, fallback: str | None = None) -> None:
@@ -718,7 +721,7 @@ class SlackService:
         channel_id = channel.get("id")
         if not channel_id:
             return ""
-        channel: dict = self.bot_client.conversations_info(channel=channel_id).get("channel", {})
+        channel = self.bot_client.conversations_info(channel=channel_id).get("channel", {})
         topic_dict: dict = channel.get("topic", {})
         return topic_dict.get("value", "")
 
@@ -731,17 +734,19 @@ class SlackService:
         self.cache_config.clear(True)
 
     def get_config_dict(self) -> dict:
-        if LRUCache.is_found(cached := self.cache_config.get(True)):
-            return cached
+        if (cached := self.cache_config.get(True)).found:
+            return cached.value()
         config_dict_default: dict = {"type": "config"}
         channel: dict = self.bot_client.conversations_open(users="USLACKBOT").get("channel", {})
         channel_id = channel.get("id")
         if not channel_id:
             self.cache_config.put(True, config_dict_default)
             return config_dict_default
-        messages: list[dict] = self.bot_client.conversations_history(channel=channel_id, limit=100).get("messages", [])
+        messages: list[dict[str, str]] = self.bot_client.conversations_history(channel=channel_id, limit=100).get("messages", [])
         for (i, message) in enumerate(messages):
-            message_text: str = message.get("text")
+            message_text = message.get("text")
+            if message_text is None:
+                continue
             try:
                 config_dict: dict = json.loads(message_text)
                 if config_dict.get("type") == "config":

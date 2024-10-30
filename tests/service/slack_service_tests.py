@@ -149,7 +149,7 @@ def slack_service(monkeypatch: pytest.MonkeyPatch):
 def test_get_user(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
     def users_info_dummy(self, user: str):
         if user == "U7CAL37X0":
-            return SimpleNamespace(data={
+            return {
                 "ok": True,
                 "user": {
                     "id": "U7CAL37X0",
@@ -203,7 +203,7 @@ def test_get_user(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
                     "is_email_confirmed": True,
                     "who_can_share_contact_card": "EVERYONE"
                 }
-            })
+            }
         if user.startswith("U1"):
             raise SlackApiError("", {
                 "ok": False,
@@ -283,7 +283,7 @@ def test_get_user(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
 def test_get_bot(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
     def bots_info_dummy(self, bot: str):
         if bot == "BCL3TC9NW":
-            return SimpleNamespace(data={
+            return {
                 "ok": True,
                 "bot": {
                     "id": "BCL3TC9NW",
@@ -297,7 +297,7 @@ def test_get_bot(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
                         "image_72": "https://avatars.slack-edge.com/2018-09-03/428285650437_178ec1ec6d89ec78dd37_72.png"
                     }
                 }
-            })
+            }
         if bot.startswith("B1"):
             raise SlackApiError("", {
                 "ok": False,
@@ -371,7 +371,7 @@ def test_get_bot(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
 def test_get_conversations_members(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
     def conversations_members_dummy(self, channel: str, limit):
         if channel == "C7GGZ82UR":
-            return SimpleNamespace(data={
+            return {
                 "ok": True,
                 "members": [
                     "U02L3BLC5",
@@ -388,7 +388,7 @@ def test_get_conversations_members(slack_service: SlackService, monkeypatch: pyt
                 "response_metadata": {
                     "next_cursor": ""
                 }
-            })
+            }
         if channel.startswith("C1"):
             raise SlackApiError("", {
                 "ok": False,
@@ -448,15 +448,15 @@ def test_get_conversations_members(slack_service: SlackService, monkeypatch: pyt
 def test_get_presence(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
     def users_getPresence_dummy(self, user: str):
         if user == "U7CAL37X0":
-            return SimpleNamespace(data={
+            return {
                 "ok": True,
                 "presence": "active"
-            })
+            }
         if user == "U4XXXXXXX":
-            return SimpleNamespace(data={
+            return {
                 "ok": True,
                 "presence": "away"
-            })
+            }
         if user.startswith("U1"):
             raise SlackApiError("", {
                 "ok": False,
@@ -494,7 +494,7 @@ def test_get_presence(slack_service: SlackService, monkeypatch: pytest.MonkeyPat
 
 def test_get_channels(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
     def conversations_list_dummy1(self, limit: int):
-        return SimpleNamespace(data={
+        return {
             "ok": True,
             "channels": [
                 {
@@ -588,7 +588,7 @@ def test_get_channels(slack_service: SlackService, monkeypatch: pytest.MonkeyPat
             "response_metadata": {
                 "next_cursor": ""
             }
-        })
+        }
 
     def conversations_list_dummy2(self, limit: int):
         raise SlackApiError("", {
@@ -633,7 +633,7 @@ def test_get_channels(slack_service: SlackService, monkeypatch: pytest.MonkeyPat
 def test_get_channel(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
     def conversations_info_dummy(self, channel: str):
         if channel == "C7GGZ82UR":
-            return SimpleNamespace(data={
+            return {
                 "ok": True,
                 "channel": {
                     "id": "C7GGZ82UR",
@@ -674,7 +674,7 @@ def test_get_channel(slack_service: SlackService, monkeypatch: pytest.MonkeyPatc
                     },
                     "previous_names": []
                 }
-            })
+            }
         if channel.startswith("C1"):
             raise SlackApiError("", {
                 "ok": False,

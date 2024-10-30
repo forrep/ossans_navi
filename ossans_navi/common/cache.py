@@ -1,10 +1,22 @@
+import dataclasses
 import time
 from collections import OrderedDict
-from typing import Generic, TypeVar
-
+from typing import Generic, Optional, TypeVar
 
 K = TypeVar('K')
 V = TypeVar('V')
+
+
+@dataclasses.dataclass
+class CacheEntry(Generic[V]):
+    _value: Optional[V]
+    _expired: float
+    found: bool
+
+    def value(self) -> V:
+        if not self.found:
+            raise ValueError('Not found Error')
+        return self._value  # type: ignore
 
 
 class LRUCache(Generic[K, V]):
@@ -13,27 +25,20 @@ class LRUCache(Generic[K, V]):
     _NOT_FOUND = NotFound()
 
     def __init__(self, *, capacity: int, expire: int):
-        self.cache = OrderedDict()
+        self.cache: OrderedDict[K, CacheEntry[V]] = OrderedDict()
         self.capacity = capacity
         self.expire = expire
+        self.null: CacheEntry[V] = CacheEntry(None, 0, False)
 
-    @staticmethod
-    def is_found(value: V | NotFound):
-        return value != LRUCache._NOT_FOUND
-
-    @staticmethod
-    def is_not_found(value: V | NotFound):
-        return value == LRUCache._NOT_FOUND
-
-    def get(self, key: K) -> V:
-        if key not in self.cache or self.cache[key]["time"] < time.time():
-            return LRUCache._NOT_FOUND
-        return self.cache[key]["data"]
+    def get(self, key: K) -> CacheEntry[V]:
+        if key not in self.cache or self.cache[key]._expired < time.time():
+            return self.null
+        return self.cache[key]
 
     def put(self, key: K, value: V):
         if key in self.cache:
             self.cache.move_to_end(key)
-        self.cache[key] = {"data": value, "time": time.time() + self.expire}
+        self.cache[key] = CacheEntry(value, time.time() + self.expire, True)
         if len(self.cache) > self.capacity:
             self.cache.popitem(last=False)
 
