@@ -76,6 +76,10 @@ class SlackFile:
             slack_file.text = file["plain_text"]
         return slack_file
 
+    def initialize(self) -> None:
+        if callable(self.get_content):
+            self.get_content(self)
+
     def content(self) -> bytes:
         if callable(self.get_content):
             self.get_content(self)
@@ -188,7 +192,7 @@ class SlackMessage:
                 # テキストファイルだった場合はファイルのロード
                 # 画像の場合は読み込んでも利用できないので読み込まない
                 if file.is_text():
-                    _ = file.content()
+                    file.initialize()
 
     def root_message(self) -> SlackMessageLite | None:
         self.initialize()
@@ -425,7 +429,7 @@ class SlackMessageEvent:
         return self.source.get("channel_type") == "im"
 
     def is_need_response(self) -> bool:
-        return self.classification in ("question", "request")
+        return self.classification in ("question",)
 
     def _is_mention_to_subteam(self) -> bool:
         return bool(re.search(r'<!subteam\^[^>]+>', self.text()))
