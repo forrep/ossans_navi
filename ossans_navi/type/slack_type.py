@@ -116,14 +116,15 @@ class SlackFile:
         return f"data:image/png;base64,{base64.b64encode(self.content()).decode()}"
 
     def to_dict(self) -> dict:
-        if callable(self.get_content):
-            self.get_content(self)
         return {
             "title": self.title,
             "mimetype": self.mimetype,
             "link": self.link,
             **(
-                {"width": self.width(), "height": self.height()} if self.is_image() else {}
+                {
+                    "width": self._width,
+                    "height": self._height,
+                } if self.is_image() and self._width > 0 and self._height > 0 else {}
             ),
             **(
                 {"description": self.description} if self.description else {}
@@ -151,6 +152,9 @@ class SlackMessageLite:
 
     def has_files(self) -> bool:
         return len(self.files) > 0
+
+    def has_not_analyzed_files(self) -> bool:
+        return len([file for file in self.files if file.is_image() and not file.is_analyzed]) > 0
 
     def to_dict(self) -> dict[str, Any]:
         return {

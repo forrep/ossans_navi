@@ -115,7 +115,7 @@ class OssansNaviService:
     def get_ai_messages(
         self,
         system: str,
-        replies: list[SlackMessageLite],
+        messages: list[SlackMessageLite],
         info: Optional[str] = None,
         with_files: bool = False,
         with_permalink: bool = False,
@@ -131,15 +131,15 @@ class OssansNaviService:
             },
             *[
                 {
-                    "role": "assistant" if reply.user.user_id in self.slack_service.my_bot_user_id else "user",
+                    "role": "assistant" if message.user.user_id in self.slack_service.my_bot_user_id else "user",
                     "content": (
                         [
                             {
                                 "type": "text",
                                 "text": json.dumps(
                                     OssansNaviService.slack_message_to_ai_request(
-                                        reply,
-                                        limit=(limit_last_message if i + 1 == len(replies) else limit),
+                                        message,
+                                        limit=(limit_last_message if i + 1 == len(messages) else limit),
                                         with_permalink=with_permalink
                                     ),
                                     ensure_ascii=False,
@@ -153,27 +153,26 @@ class OssansNaviService:
                                         "url": file.image_uri()
                                     }
                                 }
-                                for file in reply.files if file.valid() and file.is_image()
+                                for file in message.files if file.is_image() and not file.is_analyzed and file.valid()
                             ]
                         ]
-                        if with_files and reply.has_files() else
+                        if with_files and message.has_not_analyzed_files() else
                         json.dumps(
                             OssansNaviService.slack_message_to_ai_request(
-                                reply,
-                                limit=(limit_last_message if i + 1 == len(replies) else limit),
+                                message,
+                                limit=(limit_last_message if i + 1 == len(messages) else limit),
                                 with_permalink=with_permalink
                             ),
                             ensure_ascii=False,
                             separators=(',', ':'),
                         )
                     ),
-                    "name": reply.user.user_id
-                } for (i, reply) in enumerate(replies)
+                    "name": message.user.user_id
+                } for (i, message) in enumerate(messages)
             ],
         ]
 
     def get_thread_messages(self) -> list[SlackMessageLite]:
-        # TODO: 画像を何度も読み込まない修正をする
         thread_messages = self.slack_service.get_conversations_replies(self.event.channel_id(), self.event.thread_ts())
         logger.info(
             "conversations_replies="
@@ -363,7 +362,7 @@ class OssansNaviService:
                     [
                         self.models.high_quality.tokenizer.image_tokens(file.width(), file.height())
                         for file in itertools.chain.from_iterable(
-                            [reply.files for reply in thread_messages]
+                            [message.files for message in thread_messages]
                         ) if file.is_image() and not file.is_analyzed
                     ]
                 )
