@@ -5,7 +5,7 @@ import hashlib
 import itertools
 import re
 from threading import RLock
-from typing import Callable, Optional
+from typing import Any, Callable, Iterable, Optional
 
 
 @dataclasses.dataclass
@@ -79,12 +79,14 @@ class SlackFile:
     def content(self) -> bytes:
         if callable(self.get_content):
             self.get_content(self)
+        if self._content is None:
+            raise ValueError('self._content is None')
         return self._content
 
-    def is_image(self) -> int:
+    def is_image(self) -> bool:
         return isinstance(self.mimetype, str) and self.mimetype.startswith("image/")
 
-    def is_text(self) -> int:
+    def is_text(self) -> bool:
         return isinstance(self.mimetype, str) and self.mimetype.startswith("text/")
 
     def is_textualize(self) -> bool:
@@ -101,7 +103,10 @@ class SlackFile:
         return self._height
 
     def valid(self) -> bool:
-        return bool(self.content())
+        try:
+            return bool(self.content())
+        except Exception:
+            return False
 
     def image_uri(self) -> str:
         return f"data:image/png;base64,{base64.b64encode(self.content()).decode()}"
@@ -143,7 +148,7 @@ class SlackMessageLite:
     def has_files(self) -> bool:
         return len(self.files) > 0
 
-    def to_dict(self) -> dict[str, str]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "timestamp": self.timestamp,
             "ts": self.ts,
@@ -249,6 +254,10 @@ class SlackSearches:
         return permalink in self.used
 
     def add_lastshot(self, permalinks: list[str]) -> None:
+        """
+        lastshot で RAG の結果として入力するメッセージのリストに追加する
+        ただし、すでにメッセージが追加済みの場合は二重で追加しない
+        """
         for permalink in permalinks:
             self._add_lastshot(permalink)
 
@@ -257,36 +266,46 @@ class SlackSearches:
             # すでに lastshot に追加済みなので終了
             return
         for result in self.results:
-            # 起点メッセージだけを探索する
+            # 検索結果の中から起点メッセージだけを探索する
             for message in result.messages:
                 if not message.is_initialized():
+                    # initialize() されていないメッセージはまだ処理対象外なので確認の必要はない
+                    # そのメッセージが initialize() されたタイミングで確認される
                     continue
                 if permalink == message.message.permalink:
+                    # lastshot に追加したい message が見つかった
                     self.lastshot[message.message.permalink] = message
                     self._lastshot_permalinks.add(message.message.permalink)
                     if message.is_full():
+                        # そのメッセージにスレッド内の全メッセージが含まれている場合はそのスレッド内の全メッセージの permalink を 追加済みとしてマークする
+                        # なぜならそのメッセージにはスレッド内の全メッセージが含まれているので、追加で別メッセージを読み込む必要がないため
                         self._lastshot_permalinks.update([v.permalink for v in message.messages()])
-                        if message.root_message():
-                            self._lastshot_permalinks.add(message.root_message().permalink)
+                        if (v := message.root_message()):
+                            self._lastshot_permalinks.add(v.permalink)
                     return
         for result in self.results:
-            # root_message とリプライメッセージを探索する
+            # root_message とスレッド内のメッセージを探索する
             for message in result.messages:
                 if not message.is_initialized():
+                    # initialize() されていないメッセージはまだ処理対象外なので確認の必要はない
+                    # そのメッセージが initialize() されたタイミングで確認される
                     continue
                 if (
-                    (message.root_message() and permalink == message.root_message().permalink)
+                    ((v := message.root_message()) and permalink == v.permalink)
                     or (permalink in [v.permalink for v in message.messages()])
                 ):
+                    # root_message またはスレッド内のメッセージの permalink と一致
                     self.lastshot[message.message.permalink] = message
                     self._lastshot_permalinks.add(message.message.permalink)
                     if message.is_full():
+                        # そのメッセージにスレッド内の全メッセージが含まれている場合はそのスレッド内の全メッセージの permalink を 追加済みとしてマークする
+                        # なぜならそのメッセージにはスレッド内の全メッセージが含まれているので、追加で別メッセージを読み込む必要がないため
                         self._lastshot_permalinks.update([v.permalink for v in message.messages()])
-                        if message.root_message():
-                            self._lastshot_permalinks.add(message.root_message().permalink)
+                        if (v := message.root_message()):
+                            self._lastshot_permalinks.add(v.permalink)
                     return
 
-    def get_lastshot(self) -> list[SlackMessage]:
+    def get_lastshot(self) -> Iterable[SlackMessage]:
         return self.lastshot.values()
 
     def is_searched(self, words: str) -> bool:
@@ -301,32 +320,55 @@ class SlackSearches:
 
 @dataclasses.dataclass
 class SlackMessageEvent:
-    source: dict[str, dict]
-    user: SlackUser = dataclasses.field(default=None, init=False)
-    channel: SlackChannel = dataclasses.field(default=None, init=False)
+    source: dict[str, Any]
+    _user: Optional[SlackUser] = dataclasses.field(default=None, init=False)
+    _channel: Optional[SlackChannel] = dataclasses.field(default=None, init=False)
     is_mention: bool = dataclasses.field(default=False, init=False)
     is_talk_to_other: bool = dataclasses.field(default=False, init=False)
     is_joined: bool = dataclasses.field(default=False, init=False)
     is_next_message_from_ossans_navi: bool = dataclasses.field(default=False, init=False)
-    classification: str = dataclasses.field(default=False, init=False)
-    settings: str = dataclasses.field(default=None, init=False)
+    classification: str = dataclasses.field(default="other", init=False)
+    settings: str = dataclasses.field(default="", init=False)
     canceled_events: list['SlackMessageEvent'] = dataclasses.field(default_factory=list, init=False)
 
+    def valid(self) -> bool:
+        return bool(self._user)
+
+    @property
+    def user(self) -> SlackUser:
+        if self._user:
+            return self._user
+        raise ValueError("self._user is None")
+
+    @user.setter
+    def user(self, value: SlackUser):
+        self._user = value
+
+    @property
+    def channel(self) -> SlackChannel:
+        if self._channel:
+            return self._channel
+        raise ValueError("self._channel is None")
+
+    @channel.setter
+    def channel(self, value: SlackChannel):
+        self._channel = value
+
     def channel_id(self) -> str:
-        return self.source.get("channel")
+        return self.source["channel"]
 
     def text(self) -> str:
-        return self.source.get("text")
+        return self.source["text"]
 
     def user_id(self) -> str:
-        return self.source.get("user")
+        return self.source["user"]
 
     def ts(self) -> str:
-        return self.source.get("ts")
+        return self.source["ts"]
 
     def thread_ts(self) -> str:
         # スレッドの場合はスレッドの大元メッセージの ts を保持する thread_ts を利用、スレッドではない場合はそのメッセージからスレッドを作るので ts を利用
-        return self.source.get('thread_ts') if 'thread_ts' in self.source else self.source.get('ts')
+        return self.source["thread_ts"] if "thread_ts" in self.source else self.source["ts"]
 
     def timestamp(self) -> str:
         return datetime.datetime.fromtimestamp(float(self.ts())).strftime('%Y-%m-%d %H:%M:%S')
@@ -362,14 +404,14 @@ class SlackMessageEvent:
     def is_message_post(self) -> bool:
         """
         応答が必要なメッセージ（1, 2 の条件に当てはまる）に True を返却
-        1. text が存在する
+        1. text, channel, user, ts が存在する
         2. 次のいずれかに当てはまる
             - subtype が存在しない → 通常メッセージ
             - subtype が file_share → テキストスニペットの送信
             - subtype が thread_broadcast のいずれか → チャネルにも投稿するチェックを入れてスレッド返信
         """
         return (
-            'text' in self.source
+            all(v in self.source for v in ("text", "channel", "user", "ts", ))
             and (
                 "subtype" not in self.source
                 or self.source["subtype"] in ("file_share", "thread_broadcast")

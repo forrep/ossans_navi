@@ -1,6 +1,5 @@
 import os
 import textwrap
-from types import SimpleNamespace
 
 import pytest
 from slack_bolt import App

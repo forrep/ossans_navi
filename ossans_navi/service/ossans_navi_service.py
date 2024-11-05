@@ -5,16 +5,14 @@ import logging
 import re
 from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
-from typing import Optional, overload
+from typing import Any, Optional
 
 from ossans_navi import assets, config
 from ossans_navi.common.cache import LRUCache
-from ossans_navi.service.ai_service import (AiModels, AiService,
-                                            AiServiceSession, LastshotResponse)
+from ossans_navi.service.ai_service import AiModels, AiService, AiServiceSession, LastshotResponse
 from ossans_navi.service.slack_service import SlackService
 from ossans_navi.type.ossans_navi_types import OssansNaviConfig
-from ossans_navi.type.slack_type import (SlackMessage, SlackMessageEvent,
-                                         SlackMessageLite, SlackSearches)
+from ossans_navi.type.slack_type import SlackMessage, SlackMessageEvent, SlackMessageLite, SlackSearches
 
 logger = logging.getLogger(__name__)
 
@@ -36,30 +34,12 @@ class OssansNaviService:
         raise TypeError(f"Object of type {type(v).__name__} is not JSON serializable")
 
     @staticmethod
-    @overload
-    def slack_message_to_ai_request(
-        message: SlackMessage,
-        limit: int = 800,
-        with_permalink: bool = True,
-    ) -> dict[str, str | dict[str, str]]:
-        ...
-
-    @staticmethod
-    @overload
-    def slack_message_to_ai_request(
-        message: SlackMessageLite,
-        limit: int = 800,
-        with_permalink: bool = True,
-    ) -> dict[str, str]:
-        ...
-
-    @staticmethod
     def slack_message_to_ai_request(
         message: SlackMessage | SlackMessageLite,
         limit: int = 800,
         with_permalink: bool = True,
         ellipsis: str = "...",
-    ) -> dict[str, str | dict[str, str]] | dict[str, str]:
+    ) -> dict[str, Any]:
         if isinstance(message, SlackMessage):
             return {
                 **(
@@ -68,8 +48,8 @@ class OssansNaviService:
                 "channel": message.channel,
                 **(
                     {
-                        "root_message": OssansNaviService.slack_message_to_ai_request(message.root_message(), limit)
-                    } if message.root_message() else {}
+                        "root_message": OssansNaviService.slack_message_to_ai_request(v, limit)
+                    } if (v := message.root_message()) else {}
                 ),
                 **(
                     {
@@ -136,13 +116,13 @@ class OssansNaviService:
         self,
         system: str,
         replies: list[SlackMessageLite],
-        info: str = None,
+        info: Optional[str] = None,
         with_files: bool = False,
         with_permalink: bool = False,
         limit: int = 800,
-        limit_last_message: int = None,
-    ) -> list[dict[str, str]]:
-        if limit_last_message is None:
+        limit_last_message: int = -1,
+    ) -> list[dict[str, Any]]:
+        if limit_last_message < 0:
             limit_last_message = limit
         return [
             {
@@ -193,6 +173,7 @@ class OssansNaviService:
         ]
 
     def get_thread_messages(self) -> list[SlackMessageLite]:
+        # TODO: 画像を何度も読み込まない修正をする
         thread_messages = self.slack_service.get_conversations_replies(self.event.channel_id(), self.event.thread_ts())
         logger.info(
             "conversations_replies="
@@ -277,13 +258,14 @@ class OssansNaviService:
             if (
                 category in ("trusted_bots", "admin_users")
                 and action in ("add", "remove")
+                and value
             ):
                 value = re.sub(r'<@([A-Z0-9]+)(\|[^>]+?)?>', "\\1", value)
 
             if category == "trusted_bots":
                 # 現在有効な trusted_bots を取得
                 now_users = {bot.user_id: bot for bot in [self.slack_service.get_bot(bot_id) for bot_id in self.config.trusted_bots] if bot.is_valid}
-                if action in ("add", "remove"):
+                if action in ("add", "remove") and value:
                     target_user = self.slack_service.get_bot(value)
                     if target_user.is_valid and target_user.is_bot:
                         if action == "add":
@@ -304,7 +286,7 @@ class OssansNaviService:
                 now_users = {
                     user.user_id: user for user in [self.slack_service.get_user(user_id) for user_id in self.config.admin_users] if user.is_valid
                 }
-                if action in ("add", "remove"):
+                if action in ("add", "remove") and value:
                     target_user = self.slack_service.get_user(value)
                     if target_user.is_valid and not target_user.is_bot and not target_user.is_guest:
                         if action == "add":
@@ -329,7 +311,7 @@ class OssansNaviService:
                     ]
                     if channel.is_valid and channel.is_private
                 }
-                if action in ("add", "remove"):
+                if action in ("add", "remove") and value:
                     value = re.sub(r'<#([A-Z0-9]+)(\|[^>]*?)?>', "\\1", value)
                     target_channel = self.slack_service.get_channel(value, True)
                     if target_channel.is_valid and target_channel.is_private:
@@ -503,8 +485,20 @@ class OssansNaviService:
                 # 最後の refine かどうか？最後以外は新たな検索ワードを追加する処理などがある
                 is_last_refine = i + 1 == 2
                 for _ in range(refine_slack_searches_count):
-                    executor.submit(self._refine_slack_searches, slack_searches, thread_messages, base_messages_token, is_last_refine)
+                    executor.submit(self._refine_slack_searches_safe, slack_searches, thread_messages, base_messages_token, is_last_refine)
             yield
+
+    def _refine_slack_searches_safe(
+        self,
+        slack_searches: SlackSearches,
+        thread_messages: list[SlackMessageLite],
+        base_messages_token: int,
+        is_last_refine: bool
+    ) -> None:
+        try:
+            self._refine_slack_searches(slack_searches, thread_messages, base_messages_token, is_last_refine)
+        except Exception as e:
+            logger.error(e, exc_info=True)
 
     def _refine_slack_searches(
         self,
@@ -575,6 +569,7 @@ class OssansNaviService:
                 current_messages.extend(candidate_messages)
             if len(current_messages) == 0:
                 # ヒット件数がゼロ件などの理由で入力可能な検索結果が存在しなかったら refine_slack_searches フェーズを終了する
+                logger.info("current_messages is empty, finished.")
                 return
             refine_slack_searches_messages = self.get_ai_messages(
                 assets.get_refine_slack_searches_system_prompt(self.event.channel, self.event.settings),

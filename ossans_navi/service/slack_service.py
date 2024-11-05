@@ -391,10 +391,10 @@ class SlackService:
                 logger.info(f"Slack get_image failed: {str(e)}")
         return _get_content
 
-    def get_conversations_replies(self, channel: str, ts: str, user_client: bool = False) -> list[SlackMessageLite]:
+    def get_conversations_replies(self, channel: str, thread_ts: str, user_client: bool = False) -> list[SlackMessageLite]:
         client: SlackWrapper = self.user_client if user_client else self.bot_client
         try:
-            response = client.conversations_replies(channel=channel, ts=ts, limit=60)
+            response = client.conversations_replies(channel=channel, ts=thread_ts, limit=60)
             response_messages: list[dict] = response["messages"]
         except SlackApiError as e:
             error_response: SlackResponse = e.response
@@ -402,13 +402,13 @@ class SlackService:
                 # user_token で実行する search_message はアプリインストール者の権限に準ずるためプライベートチャネルやDMもヒットする
                 # 一方で付与された scope はパブリックチャネルしか読み取れないので、missing_scope が発生する
                 # よって、user_client で発生する missing_scope は想定内
-                logger.info(f"{error_response.get("error")}, channel={channel}, ts={ts}, user_client={user_client}, exception={e}")
+                logger.info(f"{error_response.get("error")}, channel={channel}, thread_ts={thread_ts}, user_client={user_client}, exception={e}")
                 return []
             else:
-                logger.error(f"{error_response.get("error")}, channel={channel}, ts={ts}, user_client={user_client}, exception={e}")
+                logger.error(f"{error_response.get("error")}, channel={channel}, thread_ts={thread_ts}, user_client={user_client}, exception={e}")
                 raise e
         except Exception as e:
-            logger.error(f"conversations_replies returns error, channel={channel}, ts={ts}, user_client={user_client}, exception={e}")
+            logger.error(f"conversations_replies returns error, channel={channel}, thread_ts={thread_ts}, user_client={user_client}, exception={e}")
             raise e
         results = []
         for message in response_messages:
@@ -420,15 +420,15 @@ class SlackService:
                 attachments.append(attachment)
             files: list[dict[str, str]] = message.get("files", [])
             results.append(SlackMessageLite(
-                timestamp=datetime.datetime.fromtimestamp(float(ts)),
-                ts=ts,
-                thread_ts=message.get('thread_ts', ts),
+                timestamp=datetime.datetime.fromtimestamp(float(message["ts"])),
+                ts=message["ts"],
+                thread_ts=thread_ts,
                 user=self.get_bot(message['bot_id']) if not message.get('user') and message.get("bot_id") else self.get_user(message['user']),
                 content=self.replace_id_to_name(message["text"]),
-                # スレッドが存在しない場合は thread_ts が存在しない、スレッドの root メッセージは thread_ts が存在して ts と同じ値
+                # thread_ts と ts が異なる場合はスレッド内の子メッセージ
                 permalink=(
-                    f"{self.workspace_url}archives/{channel}/p{ts.replace('.', '')}"
-                    + (f"?thread_ts={message["thread_ts"]}" if ts != message.get("thread_ts", ts) else "")
+                    f"{self.workspace_url}archives/{channel}/p{thread_ts.replace('.', '')}"
+                    + (f"?thread_ts={message["thread_ts"]}" if thread_ts != message["ts"] else "")
                 ),
                 attachments=attachments,
                 files=[SlackFile.from_dict(file, self._get_content_callable(self.bot_token)) for file in files],
