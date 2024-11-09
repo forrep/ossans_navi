@@ -420,14 +420,13 @@ class OssansNaviService:
 
             # Slack のキーワード検索を実行して、slack_searches に積み込む
             # slack_searches.add() 内ではヒット件数（total_count）が少ない方がより絞り込めた良いキーワードと判断してヒット件数の昇順で並べる
-            slack_searches.add(
-                self.slack_service.search(
-                    slack_search_words,
-                    self.event.user,
-                    self.event.channel_id(),
-                    self.event.thread_ts(),
-                    self.config.viewable_private_channels
-                )
+            self.slack_service.search(
+                slack_searches,
+                slack_search_words,
+                self.event.user,
+                self.event.channel_id(),
+                self.event.thread_ts(),
+                self.config.viewable_private_channels
             )
 
             if slack_searches.result_len() == 0:
@@ -601,46 +600,40 @@ class OssansNaviService:
                 slack_searches.add_lastshot(refine_slack_searches_response.get_next_messages)
                 if not is_last_refine:
                     # 最後の refine ではない→ まだ検索結果を精査するフェーズが残っている
-                    additional_search_words = [
-                        v for v in refine_slack_searches_response.additional_search_words if not slack_searches.is_searched(v)
-                    ]
-                    if len(additional_search_words) > 0:
+                    if len(refine_slack_searches_response.additional_search_words) > 0:
                         # 追加の検索ワードが提供された場合は検索する
-                        slack_searches.add(
-                            self.slack_service.search(
-                                [v for v in list(set(additional_search_words)) if not slack_searches.is_searched(v)],
-                                self.event.user,
-                                self.event.channel_id(),
-                                self.event.thread_ts(),
-                                self.config.viewable_private_channels,
-                                True,
-                            )
+                        self.slack_service.search(
+                            slack_searches,
+                            refine_slack_searches_response.additional_search_words,
+                            self.event.user,
+                            self.event.channel_id(),
+                            self.event.thread_ts(),
+                            self.config.viewable_private_channels,
+                            True,
                         )
-                        logger.info("Additional search: " + ", ".join(additional_search_words))
-                    get_messages = [v for v in refine_slack_searches_response.get_messages if not slack_searches.is_searched(v)]
-                    if len(get_messages) > 0:
+                    if len(refine_slack_searches_response.get_messages) > 0:
                         # 追加の取得メッセージが提供された場合は検索する
-                        slack_searches.add(
-                            self.slack_service.search(
-                                list(set(get_messages)),
-                                self.event.user,
-                                self.event.channel_id(),
-                                self.event.thread_ts(),
-                                self.config.viewable_private_channels,
-                                True,
-                                True
-                            )
+                        self.slack_service.search(
+                            slack_searches,
+                            refine_slack_searches_response.get_messages,
+                            self.event.user,
+                            self.event.channel_id(),
+                            self.event.thread_ts(),
+                            self.config.viewable_private_channels,
+                            True,
+                            True
                         )
-                        logger.info("Get messages: " + ", ".join(get_messages))
 
     def lastshot(self, slack_searches: SlackSearches, thread_messages: list[SlackMessageLite]) -> list[LastshotResponse]:
         current_messages: list[SlackMessage] = []
         # 入力可能なトークン数を定義する、たくさん入れたら精度が上がるが費用も上がるのでほどほどのトークン数に制限する（話しかけられている時はトークン量を増やす）
         if self.event.is_mention or self.event.is_reply_to_ossans_navi():
-            slack_searches_tokens_remain = config.REQUEST_LASTSHOT_TOKEN_WITH_MENTION
+            tokens_remain = config.REQUEST_LASTSHOT_TOKEN_WITH_MENTION
+            n = 2
         else:
-            slack_searches_tokens_remain = config.REQUEST_LASTSHOT_TOKEN_NO_MENTION
-        slack_searches_tokens_remain -= self.models.high_quality.tokenizer.messages_tokens(
+            tokens_remain = config.REQUEST_LASTSHOT_TOKEN_NO_MENTION
+            n = 1
+        tokens_remain -= self.models.high_quality.tokenizer.messages_tokens(
             self.get_ai_messages(
                 assets.get_lastshot_system_prompt(self.event.channel, self.event.settings),
                 thread_messages,
@@ -657,10 +650,10 @@ class OssansNaviService:
                     separators=(',', ':')
                 )
             )
-            if tokens > slack_searches_tokens_remain:
+            if tokens > tokens_remain:
                 # 入力できるトークン数が slack_searches_tokens_remain を越えたら終了
                 break
-            slack_searches_tokens_remain -= tokens
+            tokens_remain -= tokens
             current_messages.append(content)
         logger.info(f"Lastshot input_count={len(current_messages)}")
 
@@ -674,5 +667,6 @@ class OssansNaviService:
                 ),
                 limit=10000,
                 limit_last_message=30000,
-            )
+            ),
+            n
         )

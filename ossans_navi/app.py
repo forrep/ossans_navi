@@ -79,9 +79,9 @@ def do_ossans_navi_response_safe(say, event: SlackMessageEvent):
             except Exception as e:
                 logger.error(e, exc_info=True)
     finally:
-        logger.info(f"Usage Report (Total Cost: {models.get_total_cost():.3f})")
+        logger.info(f"Usage Report (Total Cost: {models.get_total_cost():.4f})")
         for model in models.models():
-            logger.info(f"  {model.name} (Cost: {model.get_total_cost():.3f})")
+            logger.info(f"  {model.name} (Cost: {model.get_total_cost():.4f})")
             logger.info(f"    tokens_in  = {model.tokens_in}")
             logger.info(f"    tokens_out = {model.tokens_out}")
 
@@ -318,4 +318,5 @@ if __name__ == "__main__":
             event.set()
 
         signal.signal(signal.SIGTERM, graceful_stop)
+        signal.signal(signal.SIGINT, graceful_stop)
         event.wait()

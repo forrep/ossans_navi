@@ -5,6 +5,7 @@ import json
 import logging
 import math
 import re
+from collections import defaultdict
 from enum import Enum
 from io import BytesIO
 from threading import RLock
@@ -21,10 +22,8 @@ from slack_sdk.web.base_client import SlackResponse
 from ossans_navi import config
 from ossans_navi.common.cache import LRUCache
 from ossans_navi.service.slack_wrapper import SlackWrapper
-from ossans_navi.type.slack_type import (SlackAttachment, SlackChannel,
-                                         SlackFile, SlackMessage,
-                                         SlackMessageEvent, SlackMessageLite,
-                                         SlackSearch, SlackUser)
+from ossans_navi.type.slack_type import (SlackAttachment, SlackChannel, SlackFile, SlackMessage, SlackMessageEvent, SlackMessageLite, SlackSearch,
+                                         SlackSearches, SlackSearchTerm, SlackUser)
 
 MAX_IMAGE_SIZE = 1536
 
@@ -607,22 +606,9 @@ class SlackService:
             get_messages=self._get_messages_callable(),
         )
 
-    @staticmethod
-    def _expand_date(operator: str, date: str) -> str:
-        """before なら 1日後に、after なら 1日前にして日付範囲を1日ずつ拡張する"""
-        try:
-            return (
-                operator + ":"
-                + (
-                    datetime.datetime.strptime(date, '%Y-%m-%d') + datetime.timedelta(days=(1 if operator == "before" else -1))
-                ).strftime('%Y-%m-%d')
-            )
-        except ValueError:
-            return f"{operator}:{date}"
-
     def _search(
         self,
-        words: str,
+        term: SlackSearchTerm,
         recieved_message_user: SlackUser,
         recieved_message_channel_id: str,
         recieved_message_thread_ts: str,
@@ -630,21 +616,17 @@ class SlackService:
         is_additional: bool,
         is_get_messages: bool
     ) -> SlackSearch:
-        # 日付範囲を1日ずつ拡張する
-        expanded_words = re.sub(
-            r'\b(before|after):([0-9]{4}-[0-9]{2}-[0-9]{2})\b',
-            lambda v: SlackService._expand_date(v.group(1), v.group(2)),
-            words
-        )
-        search_results = self.user_client.search_messages(
-            query=f"{expanded_words}{' ' + self.search_messages_exclude if self.search_messages_exclude else ''}",
+        results = self.user_client.search_messages(
+            query=f"{term.to_term(True)}{' ' + self.search_messages_exclude if self.search_messages_exclude else ''}",
             count=100,
             sort="score",
         )
+        logger.debug(f"search_messages{"(additional)" if is_additional else ""}={{query={term.to_term(True)}, total={results["messages"]["total"]}}}")
         return SlackSearch(
-            words,
-            search_results["messages"]["total"],
-            sorted(
+            words=term.to_term(False),
+            term=term,
+            total_count=results["messages"]["total"],
+            messages=sorted(
                 [
                     message for message in [
                         self._refine_slack_message(
@@ -654,13 +636,14 @@ class SlackService:
                             recieved_message_thread_ts,
                             viewable_private_channels
                         )
-                        for message in search_results['messages']['matches']
+                        for message in results['messages']['matches']
                     ] if message is not None
                 ],
                 key=lambda v: v.score, reverse=True
             ),
-            is_additional,
-            is_get_messages,
+            is_full=results["messages"]["total"] == results["messages"]["pagination"]["last"],
+            is_additional=is_additional,
+            is_get_messages=is_get_messages,
         )
 
     @staticmethod
@@ -674,44 +657,66 @@ class SlackService:
 
     def search(
         self,
-        words: list[str],
+        slack_searches: SlackSearches,
+        terms: list[str],
         recieved_message_user: SlackUser,
         recieved_message_channel_id: str,
         recieved_message_thread_ts: str,
         viewable_private_channels: list[str],
         is_additional: bool = False,
         is_get_messages: bool = False
-    ) -> list[SlackSearch]:
-        words = SlackService._validate_words(words)
-        results = [
-            self._search(
-                word,
-                recieved_message_user,
-                recieved_message_channel_id,
-                recieved_message_thread_ts,
-                viewable_private_channels,
-                is_additional,
-                is_get_messages,
+    ) -> None:
+        terms = SlackService._validate_words(terms)
+        terms_dict: defaultdict[frozenset[str], set[SlackSearchTerm]] = defaultdict(set)
+        for term in [SlackSearchTerm.parse(term) for term in terms]:
+            terms_dict[frozenset(term.words)].add(term)
+
+        # 絞り込みのキーワード数が少なく、文字数も少ない検索条件から順番に検索する
+        # なぜならば「ワードA AND ワードB」の検索結果が 10件ならば 「ワードA AND ワードB AND ワードC」の検索は実行の必要がないからスキップできるように
+        for current_term_words in sorted(terms_dict.keys(), key=lambda v: (len(v), sum([len(w) for w in v]),)):
+            current_terms = sorted(
+                terms_dict[current_term_words],
+                key=lambda v: (v.date_from.timestamp() if v.date_from else 0.0, (1 / v.date_to.timestamp()) if v.date_to else 0.0)
             )
-            for word in words
-        ]
-        for result in list(results):
-            if not re.search(r'\b(before|after):[0-9]{4}-[0-9]{2}-[0-9]{2}\b', result.words):
-                if len(result.messages) > 40:
-                    results.append(SlackService._duplicate_search_result(result, 2))
-                if len(result.messages) > 60:
-                    results.append(SlackService._duplicate_search_result(result, 1))
-        return results
+            for current_term in current_terms:
+                if (
+                    any(
+                        [
+                            (result.is_full and result.term.is_subset(current_term)) or result.term == current_term
+                            for result in slack_searches.results
+                        ]
+                    )
+                ):
+                    # 検索済み結果に今回の検索条件より緩く、かつ全検索結果を取得済みならば current_term は検索の必要が無いのでスキップする
+                    continue
+                result = self._search(
+                    current_term,
+                    recieved_message_user,
+                    recieved_message_channel_id,
+                    recieved_message_thread_ts,
+                    viewable_private_channels,
+                    is_additional,
+                    is_get_messages,
+                )
+                slack_searches.add(result)
+                if result.term.date_from is None and result.term.date_to is None:
+                    if result.is_meny_messages():
+                        slack_searches.add(SlackService._duplicate_search_result(result, 2))
+                    if result.is_too_meny_messages():
+                        slack_searches.add(SlackService._duplicate_search_result(result, 1))
 
     @staticmethod
     def _duplicate_search_result(result: SlackSearch, year: int) -> SlackSearch:
         """指定した結果を指定の年数内のメッセージで絞り込んで新しい検索結果を生成する、同時に検索ワードに after:yyyy-mm-dd を付与する"""
         years_ago = datetime.datetime.now() - (datetime.timedelta(days=365) * year) - datetime.timedelta(days=1)
+        term = SlackSearchTerm(result.term.words, years_ago, None)
         filtered_contents = [content for content in result.messages if content.message.timestamp > years_ago]
         return SlackSearch(
-            words=result.words + " after:" + years_ago.strftime('%Y-%m-%d'),
+            words=term.to_term(),
+            term=term,
             total_count=result.total_count * len(filtered_contents) // len(result.messages),
             messages=filtered_contents,
+            is_full=result.is_full,
             is_additional=result.is_additional,
             is_get_messages=result.is_get_messages,
         )

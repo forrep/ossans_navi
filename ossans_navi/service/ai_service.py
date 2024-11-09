@@ -32,7 +32,7 @@ class AiModel:
     tokens_out: int = dataclasses.field(default=0, init=False)
 
     def get_total_cost(self) -> float:
-        return round(self.cost_in * self.tokens_in / 1_000_000 + self.cost_out * self.tokens_out / 1_000_000, 2)
+        return self.cost_in * self.tokens_in / 1_000_000 + self.cost_out * self.tokens_out / 1_000_000
 
 
 @dataclasses.dataclass
@@ -84,7 +84,7 @@ class AiModels:
         ]
 
     def get_total_cost(self) -> float:
-        return round(sum([model.get_total_cost() for model in self.models()]), 4)
+        return sum([model.get_total_cost() for model in self.models()])
 
 
 @dataclasses.dataclass
@@ -314,9 +314,9 @@ class AiService:
             )
         ]
 
-    def request_lastshot(self, model: AiModel, messages: list) -> list[LastshotResponse]:
+    def request_lastshot(self, model: AiModel, messages: list, n: int = 1) -> list[LastshotResponse]:
         for _ in range(2):
-            response = self._chat_completions(model, messages)
+            response = self._chat_completions(model, messages, n=n)
             if len(result := AiService._analyze_lastshot_response(response)) > 0:
                 return result
         logger.error("Error empty choices, response=" + str(response))

@@ -217,16 +217,81 @@ class SlackMessage:
         return sorted(messages, key=lambda v: v.message.timestamp, reverse=True)
 
 
+@dataclasses.dataclass(frozen=True)
+class SlackSearchTerm:
+    words: tuple[str, ...]
+    date_from: Optional[datetime.datetime]
+    date_to: Optional[datetime.datetime]
+
+    def to_term(self, expand: bool = False) -> str:
+        expand_days = 1 if expand else 0
+        return (
+            " ".join([
+                *self.words,
+                *([f"after:{(self.date_from + datetime.timedelta(days=-1 * expand_days)).strftime("%Y-%m-%d")}"] if self.date_from else []),
+                *([f"before:{(self.date_to + datetime.timedelta(days=1 * expand_days)).strftime("%Y-%m-%d")}"] if self.date_to else []),
+            ])
+        )
+
+    def __hash__(self):
+        return hash((self.words, self.date_from, self.date_to,))
+
+    def __eq__(self, value):
+        if not isinstance(value, SlackSearchTerm):
+            return False
+        return (
+            self.words == value.words
+            and self.date_from == value.date_from
+            and self.date_to == value.date_to
+        )
+
+    def is_subset(self, other: "SlackSearchTerm") -> bool:
+        return (
+            set(other.words) >= set(self.words)
+            and (
+                (datetime.datetime.min if other.date_from is None else other.date_from)
+                >= (datetime.datetime.min if self.date_from is None else self.date_from)
+            )
+            and (
+                (datetime.datetime.max if other.date_to is None else other.date_to)
+                <= (datetime.datetime.max if self.date_to is None else self.date_to)
+            )
+        )
+
+    @staticmethod
+    def parse(term: str) -> "SlackSearchTerm":
+        words: list[str] = []
+        date_from: Optional[datetime.datetime] = None
+        date_to: Optional[datetime.datetime] = None
+        for word in term.split():
+            if (matched := re.match(r"(before|after):([0-9]{4}-[0-9]{2}-[0-9]{2})", word)):
+                if matched.group(1) == "before":
+                    date_to = datetime.datetime.strptime(matched.group(2), '%Y-%m-%d')
+                if matched.group(1) == "after":
+                    date_from = datetime.datetime.strptime(matched.group(2), '%Y-%m-%d')
+            else:
+                words.append(word)
+        return SlackSearchTerm(tuple(words), date_from, date_to)
+
+
 @dataclasses.dataclass
 class SlackSearch:
     words: str
+    term: SlackSearchTerm
     total_count: int
     messages: list[SlackMessage]
+    is_full: bool
     is_additional: bool
     is_get_messages: bool
 
     def get_id(self) -> str:
         return hashlib.md5(self.words.encode('utf8')).hexdigest()
+
+    def is_meny_messages(self) -> bool:
+        return len(self.messages) >= 40
+
+    def is_too_meny_messages(self) -> bool:
+        return len(self.messages) >= 60
 
 
 @dataclasses.dataclass
@@ -239,11 +304,10 @@ class SlackSearches:
     _lock: RLock = dataclasses.field(default_factory=RLock, init=False)
     _lastshot_permalinks: set[str] = dataclasses.field(default_factory=set, init=False)
 
-    def add(self, results: list[SlackSearch]) -> None:
-        for result in results:
-            # 同一 permalink の SlackMessage は 1つのインスタンスにまとめる
-            result.messages = [self.messages.setdefault(message.message.permalink, message) for message in result.messages]
-        self.results = sorted([*self.results, *results], key=lambda v: v.total_count)
+    def add(self, result: SlackSearch) -> None:
+        # 同一 permalink の SlackMessage は 1つのインスタンスにまとめる
+        result.messages = [self.messages.setdefault(message.message.permalink, message) for message in result.messages]
+        self.results = sorted([*self.results, result], key=lambda v: v.total_count)
         self.total_count = sum([len(v.messages) for v in self.results])
 
     def __iter__(self):
@@ -315,9 +379,6 @@ class SlackSearches:
 
     def get_lastshot(self) -> Iterable[SlackMessage]:
         return self.lastshot.values()
-
-    def is_searched(self, words: str) -> bool:
-        return words in [result.words for result in self.results]
 
     def __enter__(self):
         return self._lock.__enter__()
