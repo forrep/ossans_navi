@@ -217,9 +217,10 @@ class SlackMessage:
         return sorted(messages, key=lambda v: v.message.timestamp, reverse=True)
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(order=True)
 class SlackSearchTerm:
-    words: tuple[str, ...]
+    _order_index: tuple[Any, ...] = dataclasses.field(init=False, repr=False)
+    words: frozenset[str]
     date_from: Optional[datetime.datetime]
     date_to: Optional[datetime.datetime]
 
@@ -231,6 +232,16 @@ class SlackSearchTerm:
                 *([f"after:{(self.date_from + datetime.timedelta(days=-1 * expand_days)).strftime("%Y-%m-%d")}"] if self.date_from else []),
                 *([f"before:{(self.date_to + datetime.timedelta(days=1 * expand_days)).strftime("%Y-%m-%d")}"] if self.date_to else []),
             ])
+        )
+
+    def __post_init__(self) -> None:
+        self._order_index = (
+            len(self.words),
+            sum([len(w) for w in self.words]),
+            tuple(sorted(self.words)),
+            (datetime.datetime.min if self.date_from is None else self.date_from) - (datetime.datetime.max if self.date_to is None else self.date_to),
+            (datetime.datetime.min if self.date_from is None else self.date_from),
+            datetime.datetime.min - (datetime.datetime.max if self.date_to is None else self.date_to),
         )
 
     def __hash__(self):
@@ -247,7 +258,7 @@ class SlackSearchTerm:
 
     def is_subset(self, other: "SlackSearchTerm") -> bool:
         return (
-            set(other.words) >= set(self.words)
+            other.words >= self.words
             and (
                 (datetime.datetime.min if other.date_from is None else other.date_from)
                 >= (datetime.datetime.min if self.date_from is None else self.date_from)
@@ -271,18 +282,21 @@ class SlackSearchTerm:
                     date_from = datetime.datetime.strptime(matched.group(2), '%Y-%m-%d')
             else:
                 words.append(word)
-        return SlackSearchTerm(tuple(words), date_from, date_to)
+        return SlackSearchTerm(frozenset(words), date_from, date_to)
 
 
 @dataclasses.dataclass
 class SlackSearch:
-    words: str
     term: SlackSearchTerm
     total_count: int
     messages: list[SlackMessage]
     is_full: bool
     is_additional: bool
     is_get_messages: bool
+
+    @property
+    def words(self) -> str:
+        return self.term.to_term()
 
     def get_id(self) -> str:
         return hashlib.md5(self.words.encode('utf8')).hexdigest()

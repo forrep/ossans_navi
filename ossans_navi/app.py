@@ -311,12 +311,17 @@ if __name__ == "__main__":
         #   4. 終了する
         event = Event()
 
-        def graceful_stop(signal, frame):
-            print("Stopping Slack app...")
-            slack_service.stop()
-            print("Slack app stopped.")
-            event.set()
+        def shutdown_handler(graceful: bool):
+            def handler(signal, frame):
+                print("Stopping Slack app...")
+                slack_service.stop()
+                print("Slack app stopped.")
+                if not graceful:
+                    EVENT_GUARD.terminate()
+                    print("Events Terminated.")
+                event.set()
+            return handler
 
-        signal.signal(signal.SIGTERM, graceful_stop)
-        signal.signal(signal.SIGINT, graceful_stop)
+        signal.signal(signal.SIGTERM, shutdown_handler(True))
+        signal.signal(signal.SIGINT, shutdown_handler(False))
         event.wait()

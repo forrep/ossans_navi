@@ -89,6 +89,15 @@ class EventGuard:
                 return False
             return self.data[thread_key][event.ts()].status == EventGuard.Status.CANCELED
 
+    def terminate(self) -> None:
+        with self:
+            logger.info("EventGuard terminate")
+            logger.info(f"EventGuard={self}")
+            for (_, val) in self.data.items():
+                for (_, data) in val.items():
+                    data.status = EventGuard.Status.CANCELED
+                    logger.info(f"EventGuard canceled: {data.event.id()}")
+
     def get_canceled_events(self, event: SlackMessageEvent) -> list[SlackMessageEvent]:
         with self:
             thread_key = f"{event.channel_id()},{event.thread_ts()}"
@@ -623,7 +632,6 @@ class SlackService:
         )
         logger.debug(f"search_messages{"(additional)" if is_additional else ""}={{query={term.to_term(True)}, total={results["messages"]["total"]}}}")
         return SlackSearch(
-            words=term.to_term(False),
             term=term,
             total_count=results["messages"]["total"],
             messages=sorted(
@@ -658,7 +666,7 @@ class SlackService:
     def search(
         self,
         slack_searches: SlackSearches,
-        terms: list[str],
+        terms_str: list[str],
         recieved_message_user: SlackUser,
         recieved_message_channel_id: str,
         recieved_message_thread_ts: str,
@@ -666,44 +674,37 @@ class SlackService:
         is_additional: bool = False,
         is_get_messages: bool = False
     ) -> None:
-        terms = SlackService._validate_words(terms)
-        terms_dict: defaultdict[frozenset[str], set[SlackSearchTerm]] = defaultdict(set)
-        for term in [SlackSearchTerm.parse(term) for term in terms]:
-            terms_dict[frozenset(term.words)].add(term)
+        terms_str = SlackService._validate_words(terms_str)
+        terms = sorted([SlackSearchTerm.parse(term) for term in terms_str])
 
         # 絞り込みのキーワード数が少なく、文字数も少ない検索条件から順番に検索する
         # なぜならば「ワードA AND ワードB」の検索結果が 10件ならば 「ワードA AND ワードB AND ワードC」の検索は実行の必要がないからスキップできるように
-        for current_term_words in sorted(terms_dict.keys(), key=lambda v: (len(v), sum([len(w) for w in v]),)):
-            current_terms = sorted(
-                terms_dict[current_term_words],
-                key=lambda v: (v.date_from.timestamp() if v.date_from else 0.0, (1 / v.date_to.timestamp()) if v.date_to else 0.0)
-            )
-            for current_term in current_terms:
-                if (
-                    any(
-                        [
-                            (result.is_full and result.term.is_subset(current_term)) or result.term == current_term
-                            for result in slack_searches.results
-                        ]
-                    )
-                ):
-                    # 検索済み結果に今回の検索条件より緩く、かつ全検索結果を取得済みならば current_term は検索の必要が無いのでスキップする
-                    continue
-                result = self._search(
-                    current_term,
-                    recieved_message_user,
-                    recieved_message_channel_id,
-                    recieved_message_thread_ts,
-                    viewable_private_channels,
-                    is_additional,
-                    is_get_messages,
+        for current_term in terms:
+            if (
+                any(
+                    [
+                        (result.is_full and result.term.is_subset(current_term)) or result.term == current_term
+                        for result in slack_searches.results
+                    ]
                 )
-                slack_searches.add(result)
-                if result.term.date_from is None and result.term.date_to is None:
-                    if result.is_meny_messages():
-                        slack_searches.add(SlackService._duplicate_search_result(result, 2))
-                    if result.is_too_meny_messages():
-                        slack_searches.add(SlackService._duplicate_search_result(result, 1))
+            ):
+                # 検索済み結果に今回の検索条件より緩く、かつ全検索結果を取得済みならば current_term は検索の必要が無いのでスキップする
+                continue
+            result = self._search(
+                current_term,
+                recieved_message_user,
+                recieved_message_channel_id,
+                recieved_message_thread_ts,
+                viewable_private_channels,
+                is_additional,
+                is_get_messages,
+            )
+            slack_searches.add(result)
+            if result.term.date_from is None and result.term.date_to is None:
+                if result.is_meny_messages():
+                    slack_searches.add(SlackService._duplicate_search_result(result, 2))
+                if result.is_too_meny_messages():
+                    slack_searches.add(SlackService._duplicate_search_result(result, 1))
 
     @staticmethod
     def _duplicate_search_result(result: SlackSearch, year: int) -> SlackSearch:
@@ -712,7 +713,6 @@ class SlackService:
         term = SlackSearchTerm(result.term.words, years_ago, None)
         filtered_contents = [content for content in result.messages if content.message.timestamp > years_ago]
         return SlackSearch(
-            words=term.to_term(),
             term=term,
             total_count=result.total_count * len(filtered_contents) // len(result.messages),
             messages=filtered_contents,
