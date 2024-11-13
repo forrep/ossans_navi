@@ -43,17 +43,17 @@ class OssansNaviService:
         if isinstance(message, SlackMessage):
             return {
                 **(
-                    OssansNaviService.slack_message_to_ai_request(message.message)
+                    OssansNaviService.slack_message_to_ai_request(message.message, limit, with_permalink, ellipsis)
                 ),
                 "channel": message.channel,
                 **(
                     {
-                        "root_message": OssansNaviService.slack_message_to_ai_request(v, limit)
+                        "root_message": OssansNaviService.slack_message_to_ai_request(v, limit, with_permalink, ellipsis)
                     } if (v := message.root_message()) else {}
                 ),
                 **(
                     {
-                        "replies": [OssansNaviService.slack_message_to_ai_request(v, limit) for v in message.messages()]
+                        "replies": [OssansNaviService.slack_message_to_ai_request(v, limit, with_permalink, ellipsis) for v in message.messages()]
                     } if len(message.messages()) > 0 else {}
                 ),
             }
@@ -645,7 +645,7 @@ class OssansNaviService:
         for content in slack_searches.get_lastshot():
             tokens = self.models.high_quality.tokenizer.content_tokens(
                 json.dumps(
-                    OssansNaviService.slack_message_to_ai_request(content),
+                    OssansNaviService.slack_message_to_ai_request(content, limit=10000),
                     ensure_ascii=False,
                     separators=(',', ':')
                 )
