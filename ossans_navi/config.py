@@ -67,6 +67,9 @@ REQUEST_LASTSHOT_TOKEN_WITH_MENTION = 20000
 # request_lastshot で許容するトークン数（メンションなし）
 REQUEST_LASTSHOT_TOKEN_NO_MENTION = 10000
 
+# 読み込む画像の最大サイズ、これを超える場合は縮小する
+MAX_IMAGE_SIZE = 1536
+
 # 開発モード（デフォルトは開発モード、起動時に --production が渡されると本番モードになる）
 DEVELOPMENT_MODE = True
 

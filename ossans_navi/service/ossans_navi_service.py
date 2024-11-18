@@ -5,14 +5,18 @@ import logging
 import re
 from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
+from io import BytesIO
 from typing import Any, Optional
+
+import html2text
+from PIL import Image, ImageFile
 
 from ossans_navi import assets, config
 from ossans_navi.common.cache import LRUCache
 from ossans_navi.service.ai_service import AiModels, AiService, AiServiceSession, LastshotResponse
 from ossans_navi.service.slack_service import SlackService
 from ossans_navi.type.ossans_navi_types import OssansNaviConfig
-from ossans_navi.type.slack_type import SlackMessage, SlackMessageEvent, SlackMessageLite, SlackSearches
+from ossans_navi.type.slack_type import SlackFile, SlackMessage, SlackMessageEvent, SlackMessageLite, SlackSearches
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +30,7 @@ class OssansNaviService:
         self.models = models
         self.event = event
         self.config = self.get_config()
+        self.slack_searches = SlackSearches()
 
     @staticmethod
     def json_dumps_converter(v) -> str:
@@ -49,12 +54,12 @@ class OssansNaviService:
                 **(
                     {
                         "root_message": OssansNaviService.slack_message_to_ai_request(v, limit, with_permalink, ellipsis)
-                    } if (v := message.root_message()) else {}
+                    } if (v := message.root_message) else {}
                 ),
                 **(
                     {
-                        "replies": [OssansNaviService.slack_message_to_ai_request(v, limit, with_permalink, ellipsis) for v in message.messages()]
-                    } if len(message.messages()) > 0 else {}
+                        "replies": [OssansNaviService.slack_message_to_ai_request(v, limit, with_permalink, ellipsis) for v in message.messages]
+                    } if len(message.messages) > 0 else {}
                 ),
             }
         if isinstance(message, SlackMessageLite):
@@ -90,7 +95,9 @@ class OssansNaviService:
                         "files": [
                             {
                                 "title": v.title,
-                                "link": v.link,
+                                **(
+                                    {"link": v.permalink} if v.is_public else {}
+                                ),
                                 **(
                                     {
                                         "description": v.description[:limit] + (ellipsis if len(v.description) > limit else "")
@@ -101,9 +108,9 @@ class OssansNaviService:
                                         "text": v.text[:limit] + (ellipsis if len(v.text) > limit else "")
                                     } if v.text else {}
                                 ),
-                            } for v in message.files if v.is_textualize()
+                            } for v in message.files if v.is_textualize
                         ]
-                    } if len([v for v in message.files if v.is_textualize()]) > 0 else {}
+                    } if len([v for v in message.files if v.is_textualize]) > 0 else {}
                 ),
                 **(
                     {
@@ -116,8 +123,8 @@ class OssansNaviService:
         self,
         system: str,
         messages: list[SlackMessageLite],
-        info: Optional[str] = None,
-        with_files: bool = False,
+        rag_info: Optional[str] = None,
+        with_image_files: bool = False,
         with_permalink: bool = False,
         limit: int = 800,
         limit_last_message: int = -1,
@@ -127,7 +134,7 @@ class OssansNaviService:
         return [
             {
                 "role": "system",
-                "content": system + ("\n\n" + info if info is not None else ""),
+                "content": system + ("\n\n" + rag_info if rag_info is not None else ""),
             },
             *[
                 {
@@ -150,13 +157,13 @@ class OssansNaviService:
                                 {
                                     "type": "image_url",
                                     "image_url": {
-                                        "url": file.image_uri()
+                                        "url": file.image_uri
                                     }
                                 }
-                                for file in message.files if file.is_image() and not file.is_analyzed and file.valid()
+                                for file in message.files if file.is_image and not file.is_analyzed and file.is_valid
                             ]
                         ]
-                        if with_files and message.has_not_analyzed_files() else
+                        if with_image_files and message.has_not_analyzed_files() else
                         json.dumps(
                             OssansNaviService.slack_message_to_ai_request(
                                 message,
@@ -188,7 +195,7 @@ class OssansNaviService:
                 ) > config.MAX_CONVERSATION_TOKENS
             )
         ):
-            if len((replies := [reply for reply in thread_messages[1:] if len(reply.files) + len(reply.attachments) > 0])) > 0:
+            if len((replies := [message for message in thread_messages[1:] if len(message.files) + len(message.attachments) > 0])) > 0:
                 # スレッド内のファイルとアタッチメントを最もメッセージから削除する
                 replies[0].files = []
                 replies[0].attachments = []
@@ -333,7 +340,7 @@ class OssansNaviService:
     @staticmethod
     def load_image_description_from_cache(thread_messages: list[SlackMessageLite]):
         for message in thread_messages:
-            if message.has_files() and len([file for file in message.files if file.is_image() and not file.is_analyzed]) > 0:
+            if message.has_files() and len([file for file in message.files if file.is_image and not file.is_analyzed]) > 0:
                 if (cached := OssansNaviService.image_cache.get(message.permalink)).found:
                     for (file, cached_file) in itertools.zip_longest(message.files, cached.value()):
                         if file is None:
@@ -360,10 +367,10 @@ class OssansNaviService:
                 messages_token
                 + sum(
                     [
-                        self.models.high_quality.tokenizer.image_tokens(file.width(), file.height())
+                        self.models.high_quality.tokenizer.image_tokens(file.width, file.height)
                         for file in itertools.chain.from_iterable(
                             [message.files for message in thread_messages]
-                        ) if file.is_image() and not file.is_analyzed
+                        ) if file.is_image and not file.is_analyzed
                     ]
                 )
             ) < 20000:
@@ -377,9 +384,13 @@ class OssansNaviService:
                     file.text = ""
         if (
             len(
-                [1 for file in itertools.chain.from_iterable([reply.files for reply in thread_messages]) if file.is_image() and not file.is_analyzed]
+                [
+                    1 for file in itertools.chain.from_iterable([message.files for message in thread_messages])
+                    if file.is_image and not file.is_analyzed
+                ]
             ) == 0
         ):
+            # 画像かつ未分析（not is_analyzed）のファイルが1枚もないなら終了、分析対象がない
             return
 
         # 添付画像を AI で解析実行
@@ -388,7 +399,7 @@ class OssansNaviService:
             self.get_ai_messages(
                 assets.get_image_description_system_prompt(self.event.channel, self.event.settings),
                 thread_messages,
-                with_files=True,
+                with_image_files=True,
                 with_permalink=True,
             )
         )
@@ -399,7 +410,7 @@ class OssansNaviService:
         # キャッシュに追加した後で再度キャッシュから情報を読み込む
         OssansNaviService.load_image_description_from_cache(thread_messages)
 
-    def slack_searches(self, thread_messages: list[SlackMessageLite]) -> Generator[SlackSearches, None, None]:
+    def do_slack_searches(self, thread_messages: list[SlackMessageLite]) -> Generator[None, None, None]:
         # Slack ワークスペースを検索するワードを生成してもらう
         # function calling を利用しない理由は、適切にキーワードを生成してくれないケースがあったり、実行回数などコントロールしづらいため
         # 具体的には \n や空白文字が連続したり、「あああああ」みたいな意味不明なキーワードが生成されたり、指示しても1つのキーワードしか生成してくれないケースなど
@@ -411,17 +422,16 @@ class OssansNaviService:
             )
         )
 
-        slack_searches = SlackSearches()
         for i in range(3):
             # 呼び出し元にイベントのキャンセル確認させるために定期的に yield で処理を戻す
-            yield slack_searches
+            yield
 
             slack_search_words = self.ai_service.request_slack_search_words(self.models.high_quality, request_slack_search_words_session)
 
             # Slack のキーワード検索を実行して、slack_searches に積み込む
             # slack_searches.add() 内ではヒット件数（total_count）が少ない方がより絞り込めた良いキーワードと判断してヒット件数の昇順で並べる
             self.slack_service.search(
-                slack_searches,
+                self.slack_searches,
                 slack_search_words,
                 self.event.user,
                 self.event.channel_id(),
@@ -429,35 +439,35 @@ class OssansNaviService:
                 self.config.viewable_private_channels
             )
 
-            if slack_searches.result_len() == 0:
+            if self.slack_searches.result_len() == 0:
                 # キーワード自体が生成されなかったケース、つまり検索が必要がない質問やメッセージに対する応答
                 # Slack検索フェーズを終了する
                 break
-            if i == 0 and slack_searches.total_count >= 10:
+            if i == 0 and self.slack_searches.total_count >= 10:
                 # 最初の検索(i==0)、かつ検索結果が10件以上ヒットした場合は Slack検索フェーズを終了
                 break
-            if i > 0 and slack_searches.total_count >= 1:
+            if i > 0 and self.slack_searches.total_count >= 1:
                 # 2回目以降の検索(i>0)、かつ検索結果が1件以上ヒットした場合は Slack検索フェーズを終了
                 # 2回検索しても1件しかヒットしないなら諦める
                 break
             # ここまで到達したらまだ別の検索ワードが必要という判断
             # もう一周、AIにキーワードを生成してもらう（AIにキーワードを生成してもらうフェーズは全体で3回まで）
-            for slack_search in slack_searches:
+            for slack_search in self.slack_searches:
                 logger.info(f"total_count={slack_search.total_count}, words={slack_search.words}, id={slack_search.get_id()}")
             request_slack_search_words_session.append_message({
                 "role": "user",
                 "content": (
-                    f"以下の検索ワードで検索してみましたが、{"結果がヒットしませんでした" if slack_searches.total_count == 0 else "ヒット件数が少なかったです"}。"
+                    f"以下の検索ワードで検索してみましたが、{"結果がヒットしませんでした" if self.slack_searches.total_count == 0 else "ヒット件数が少なかったです"}。"
                     + "出力フォーマットに従って別のSlack検索キーワードを提供してください。\n"
                     + "検索キーワードを別の表現にしたり、AND検索による絞り込みをやめて1単語だけするなど工夫してください\n"
                     + "\n"
                     + "## 検索キーワードとヒット件数\n"
-                    + "\n".join([f"検索ワード: {v.words}, ヒット件数: {len(v.messages)}件" for v in slack_searches])
+                    + "\n".join([f"検索ワード: {v.words}, ヒット件数: {len(v.messages)}件" for v in self.slack_searches])
                 )
             })
-        yield slack_searches
+        yield
 
-    def refine_slack_searches(self, slack_searches: SlackSearches, thread_messages: list[SlackMessageLite]) -> Generator[None, None, None]:
+    def refine_slack_searches(self, thread_messages: list[SlackMessageLite]) -> Generator[None, None, None]:
         """
         slack_searches の結果から有用な情報を抽出するフェーズ（refine_slack_searches）
         トークン数の上限があるので複数回に分けて実行して、大量の検索結果の中から必要な情報を絞り込む
@@ -467,7 +477,7 @@ class OssansNaviService:
             self.get_ai_messages(
                 assets.get_refine_slack_searches_system_prompt(self.event.channel, self.event.settings),
                 thread_messages,
-                assets.get_information_obtained_by_rag_prompt([], [v.words for v in slack_searches])
+                assets.get_information_obtained_by_rag_prompt([], [v.words for v in self.slack_searches])
             )
         )
         logger.info(f"{base_messages_token=}")
@@ -483,24 +493,22 @@ class OssansNaviService:
                 # 最後の refine かどうか？最後以外は新たな検索ワードを追加する処理などがある
                 is_last_refine = i + 1 == 2
                 for _ in range(refine_slack_searches_count):
-                    executor.submit(self._refine_slack_searches_safe, slack_searches, thread_messages, base_messages_token, is_last_refine)
+                    executor.submit(self._refine_slack_searches_safe, thread_messages, base_messages_token, is_last_refine)
             yield
 
     def _refine_slack_searches_safe(
         self,
-        slack_searches: SlackSearches,
         thread_messages: list[SlackMessageLite],
         base_messages_token: int,
         is_last_refine: bool
     ) -> None:
         try:
-            self._refine_slack_searches(slack_searches, thread_messages, base_messages_token, is_last_refine)
+            self._refine_slack_searches(thread_messages, base_messages_token, is_last_refine)
         except Exception as e:
             logger.error(e, exc_info=True)
 
     def _refine_slack_searches(
         self,
-        slack_searches: SlackSearches,
         thread_messages: list[SlackMessageLite],
         base_messages_token: int,
         is_last_refine: bool
@@ -509,12 +517,12 @@ class OssansNaviService:
         slack_searches の結果から有用な情報を抽出するフェーズを非同期で行う
         """
         # slack_searches から入力候補を抽出する処理は同期的に行う（slack_searches でロックを取得）
-        with slack_searches:
+        with self.slack_searches:
             # 入力可能な残りトークン数を保持する、0未満にならないように管理する
             tokens_remain = config.REQUEST_REFINE_SLACK_SEARCHES_TOKEN - base_messages_token
             tokens_full: bool = False
             current_messages: list[SlackMessage] = []
-            for slack_search in slack_searches:
+            for slack_search in self.slack_searches:
                 if tokens_full:
                     # 入力可能な余剰がなくなったら終了する
                     break
@@ -524,11 +532,11 @@ class OssansNaviService:
                 candidate_messages: list[SlackMessage] = []
                 for message in slack_search.messages:
                     # slack_searches のロックを取得してから、このメッセージがすでに使われているか？などの判定を行って、refine 対象の message を決定する
-                    if slack_searches.is_used(message.message.permalink):
+                    if self.slack_searches.is_used(message.message.permalink):
                         # ヒットしたメッセージがすでにAI入力済みだった場合は次へ
                         continue
                     # スレッド情報などを取得する（Slack API実行のため多少時間がかかる）
-                    message.initialize()
+                    self.load_slack_message(message)
                     # 今回の検索結果を追加した場合のトークン数を試算する
                     tokens = self.models.low_cost.tokenizer.content_tokens(json.dumps(
                         [OssansNaviService.slack_message_to_ai_request(message) for message in [*candidate_messages, message]],
@@ -547,11 +555,11 @@ class OssansNaviService:
                     candidate_messages.append(message)
                     # メッセージそのものと、root_message の permlink を use 状態にしておく、そして別の検索ワードで同一メッセージが何度も引っかかるのを防ぐ
                     # なぜならば、同一メッセージを何度も入力しても無駄だから
-                    slack_searches.use(message.message.permalink)
-                    if message.is_full():
-                        slack_searches.use([v.permalink for v in message.messages()])
-                        if message.root_message():
-                            slack_searches.use(message.root_message().permalink)
+                    self.slack_searches.use(message.message.permalink)
+                    if message.is_full:
+                        self.slack_searches.use([v.permalink for v in message.messages])
+                        if message.root_message:
+                            self.slack_searches.use(message.root_message.permalink)
                 # 今回入力するトークン数を slack_searches_tokens_remain から引いておく
                 tokens_remain -= self.models.low_cost.tokenizer.content_tokens(json.dumps(
                     [OssansNaviService.slack_message_to_ai_request(message) for message in candidate_messages],
@@ -574,7 +582,7 @@ class OssansNaviService:
                 thread_messages,
                 assets.get_information_obtained_by_rag_prompt(
                     [OssansNaviService.slack_message_to_ai_request(message) for message in SlackMessage.sort(current_messages)],
-                    [v.words for v in slack_searches if not v.is_get_messages]
+                    [v.words for v in self.slack_searches if not v.is_get_messages]
                 )
             )
 
@@ -592,18 +600,18 @@ class OssansNaviService:
             return
 
         # response を slack_searches へ反映する処理は同期的に行う（slack_searches でロックを取得）
-        with slack_searches:
+        with self.slack_searches:
             # 参考になった permalink は lastshot で利用するので保存しておく
             # get_next_messages も参考になった permalink なので追加する
             for refine_slack_searches_response in refine_slack_searches_responses:
-                slack_searches.add_lastshot(refine_slack_searches_response.permalinks)
-                slack_searches.add_lastshot(refine_slack_searches_response.get_next_messages)
+                self.slack_searches.add_lastshot(refine_slack_searches_response.permalinks)
+                self.slack_searches.add_lastshot(refine_slack_searches_response.get_next_messages)
                 if not is_last_refine:
                     # 最後の refine ではない→ まだ検索結果を精査するフェーズが残っている
                     if len(refine_slack_searches_response.additional_search_words) > 0:
                         # 追加の検索ワードが提供された場合は検索する
                         self.slack_service.search(
-                            slack_searches,
+                            self.slack_searches,
                             refine_slack_searches_response.additional_search_words,
                             self.event.user,
                             self.event.channel_id(),
@@ -614,7 +622,7 @@ class OssansNaviService:
                     if len(refine_slack_searches_response.get_messages) > 0:
                         # 追加の取得メッセージが提供された場合は検索する
                         self.slack_service.search(
-                            slack_searches,
+                            self.slack_searches,
                             refine_slack_searches_response.get_messages,
                             self.event.user,
                             self.event.channel_id(),
@@ -624,7 +632,7 @@ class OssansNaviService:
                             True
                         )
 
-    def lastshot(self, slack_searches: SlackSearches, thread_messages: list[SlackMessageLite]) -> list[LastshotResponse]:
+    def lastshot(self, thread_messages: list[SlackMessageLite]) -> list[LastshotResponse]:
         current_messages: list[SlackMessage] = []
         # 入力可能なトークン数を定義する、たくさん入れたら精度が上がるが費用も上がるのでほどほどのトークン数に制限する（話しかけられている時はトークン量を増やす）
         if self.event.is_mention or self.event.is_reply_to_ossans_navi():
@@ -642,7 +650,7 @@ class OssansNaviService:
             )
         )
         # GPT-4o mini が精査してくれた結果を元にトークン数が収まる範囲で入力データとする
-        for content in slack_searches.get_lastshot():
+        for content in self.slack_searches.get_lastshot():
             tokens = self.models.high_quality.tokenizer.content_tokens(
                 json.dumps(
                     OssansNaviService.slack_message_to_ai_request(content, limit=10000),
@@ -670,3 +678,94 @@ class OssansNaviService:
             ),
             n
         )
+
+    def load_slack_file(self, file: SlackFile, user_client: bool = False) -> None:
+        if file.is_initialized:
+            # ロード済みなら処理せずに終了
+            return
+        file.is_initialized = True
+        file._content = None
+        try:
+            file._content = self.slack_service.load_file(file.download_url, user_client)
+            if file.is_image:
+                bytes_io = BytesIO(file._content)
+                image: Image.Image | ImageFile.ImageFile = Image.open(bytes_io)
+                max_size = max(image.width, image.height)
+                if max_size > config.MAX_IMAGE_SIZE:
+                    resize_retio = config.MAX_IMAGE_SIZE / max_size
+                    image = image.resize((int(image.width * resize_retio), int(image.height * resize_retio)))
+                    bytes_io = BytesIO()
+                    image.save(bytes_io, format="PNG")
+                    file._content = bytes_io.getvalue()
+                    file.mimetype = 'image/png'
+                file._height = image.height
+                file._width = image.width
+            elif file.is_text:
+                file.text = file._content.decode("utf-8")
+            elif file.is_canvas:
+                html_content = file._content.decode("utf-8")
+                parser = html2text.HTML2Text()
+                parser.images_to_alt = True
+                html_parsed = parser.handle(html_content)
+                file.text = html_parsed
+                file.mimetype = "text/markdown"
+                file.filetype = "markdown"
+                file.pretty_type = "Markdown"
+        except Exception as e:
+            logger.info(f"Slack get_image failed: {str(e)}")
+
+    def load_slack_message(self, message: SlackMessage) -> None:
+        if message.is_initialized:
+            # ロード済みなら処理せずに終了
+            return
+        message.is_initialized = True
+        message._messages = []
+        message._is_full = False
+        try:
+            if message.is_private:
+                logger.debug(f"Do not get private conversations, channel_id={message.channel_id}, thread_ts={message.message.thread_ts}")
+                return
+            messages = self.slack_service.get_conversations_replies(message.channel_id, message.message.thread_ts, True)
+            if len(messages) == 0:
+                # プライベートチャネルに対する読み取り権限がないなどの理由で空配列が返ってくるパターンがある
+                # その場合は何もせずに終了する
+                return
+            if len(messages) <= 10:
+                # スレッドの件数が 10件以内の場合はスレッド内の全メッセージを入力する
+                # 起点メッセージを root_message に変更する
+                message.message = messages[0]
+                message._messages = messages[1:]
+                message._root_message = None
+                message._is_full = True
+            elif len([v for v in messages if v.ts == message.message.ts]) >= 1:
+                # 取得した最大60件のスレッド内に起点メッセージが含まれる場合（つまり先頭から60件以内に起点メッセージが存在する）
+                for (i, v) in enumerate(messages):
+                    if v.ts == message.message.ts:
+                        break
+                # reactions を取得するため起点メッセージを置き換える（search_message では reactions を取れない、conversations_replies は取れる）
+                message.message = messages[i]
+                if i == 0:
+                    # 起点メッセージ == root_message だった場合、+9メッセージを入力
+                    message._messages = messages[1:10]
+                    message._root_message = None
+                else:
+                    # 起点メッセージ != root_message だった場合、起点メッセージは変更せず、root_message と、+8メッセージを入力
+                    message._messages = messages[i + 1:i + 9]
+                    message._root_message = messages[0]
+            else:
+                # 起点メッセージがスレッド内に含まれない場合、諦めて root_message だけ追加する
+                message._root_message = messages[0]
+
+            # 続けてファイルを読み込む
+            for message_lite in [
+                message.message,
+                *([message._root_message] if message._root_message else []),
+                *(message._messages if message._messages else []),
+            ]:
+                for file in message_lite.files:
+                    # テキストファイルかcanvasだった場合はファイルをロードする
+                    # 画像は読み込んでも利用しないので読み込まない
+                    if file.is_text or file.is_canvas:
+                        self.load_slack_file(file, True)
+        except Exception as e:
+            logger.error(e, exc_info=True)

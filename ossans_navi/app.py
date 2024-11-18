@@ -1,3 +1,4 @@
+import itertools
 import json
 import logging
 import signal
@@ -189,13 +190,17 @@ def do_ossans_navi_response(say, event: SlackMessageEvent, models: AiModels):
         logger.info("Finished.")
         return
 
+    # ファイルをロードする
+    for file in itertools.chain.from_iterable([message.files for message in thread_messages]):
+        ossans_navi_service.load_slack_file(file, False)
+
     # 添付画像がある場合は画像の説明を取得する
     ossans_navi_service.analyze_image_description(thread_messages)
 
     # Slack ワークスペースを検索するワードを生成してもらう
     # get_slack_searches() は Generator で処理単位ごとに yield している
     # なぜならば、呼び出し側で EVENT_GUARD.is_canceled() をチェックするタイミングを用意するためで、ループごとに確認してキャンセルされていれば終了する
-    for slack_searches in ossans_navi_service.slack_searches(thread_messages=thread_messages):
+    for _ in ossans_navi_service.do_slack_searches(thread_messages=thread_messages):
         # 定期的にイベントがキャンセルされていないか確認して、キャンセルされていれば終了する
         if EVENT_GUARD.is_canceled(event):
             logger.info(f"Event canceled: {event.id()}({event.channel_id()},{event.thread_ts()},{event.ts()})")
@@ -205,7 +210,7 @@ def do_ossans_navi_response(say, event: SlackMessageEvent, models: AiModels):
     # slack_searches の結果から有用な情報を抽出するフェーズ（refine_slack_searches）
     # トークン数の上限があるので複数回に分けて実行して、大量の検索結果の中から必要な情報を絞り込む
     # RAG で入力する情報以外のトークン数を求めておく（システムプロンプトなど）、RAG で入力可能な情報を計算する為に使う
-    for _ in ossans_navi_service.refine_slack_searches(slack_searches=slack_searches, thread_messages=thread_messages):
+    for _ in ossans_navi_service.refine_slack_searches(thread_messages=thread_messages):
         # 定期的にイベントがキャンセルされていないか確認して、キャンセルされていれば終了する
         if EVENT_GUARD.is_canceled(event):
             logger.info(f"Event canceled: {event.id()}({event.channel_id()},{event.thread_ts()},{event.ts()})")
@@ -220,7 +225,7 @@ def do_ossans_navi_response(say, event: SlackMessageEvent, models: AiModels):
 
     # 集まった情報を元に返答を生成するフェーズ（lastshot）
     # GPT-4o で最終的な答えを生成する（GPT-4o mini で精査した情報を利用）
-    lastshot_responses = ossans_navi_service.lastshot(slack_searches=slack_searches, thread_messages=thread_messages)
+    lastshot_responses = ossans_navi_service.lastshot(thread_messages=thread_messages)
 
     logger.info(f"{lastshot_responses=}")
     if len(lastshot_responses) == 0:

@@ -12,6 +12,7 @@ requests = "^2.31.0"
 openai = "^1.21.2"
 tiktoken = "^0.7.0"
 pillow = "^10.3.0"
+html2text = "^2024.2.26"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "*"

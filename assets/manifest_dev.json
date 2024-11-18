@@ -16,7 +16,8 @@
                 "channels:history",
                 "channels:read",
                 "groups:read",
-                "search:read"
+                "search:read",
+                "files:read"
             ],
             "bot": [
                 "channels:history",

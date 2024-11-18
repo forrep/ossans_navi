@@ -1,18 +1,14 @@
 import dataclasses
 import datetime
-import html
 import json
 import logging
 import math
 import re
-from collections import defaultdict
 from enum import Enum
-from io import BytesIO
 from threading import RLock
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 import requests
-from PIL import Image, ImageFile
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 from slack_bolt.util.utils import get_boot_message
@@ -148,6 +144,7 @@ class SlackService:
         self.cache_user_presence = LRUCache[str, bool](capacity=100, expire=1 * 60 * 10)   # 10分
         self.cache_get_channel = LRUCache[str, SlackChannel](capacity=1000, expire=1 * 60 * 60)   # 60分
         self.cache_config = LRUCache[bool, dict](capacity=1, expire=1 * 60 * 60)   # 60分
+        self.cache_load_file = LRUCache[str, bytes](capacity=50, expire=1 * 60 * 60)   # 60分
         self.my_user_id: str = ""
         self.my_bot_user_id: str = ""
         self.workspace_url: str = "https://slack.com/"
@@ -371,34 +368,6 @@ class SlackService:
             text
         )
 
-    def _get_content_callable(self, token) -> Callable[[SlackFile], None]:
-        def _get_content(file: SlackFile) -> None:
-            file.get_content = None
-            file._content = None
-            try:
-                file._content = SlackService.get_file(token, file.link)
-                if file.is_image():
-                    bytes_io = BytesIO(file._content)
-                    image: Image.Image | ImageFile.ImageFile = Image.open(bytes_io)
-                    max_size = max(image.width, image.height)
-                    if max_size > MAX_IMAGE_SIZE:
-                        resize_retio = MAX_IMAGE_SIZE / max_size
-                        image = image.resize((int(image.width * resize_retio), int(image.height * resize_retio)))
-                        bytes_io = BytesIO()
-                        image.save(bytes_io, format="PNG")
-                        file._content = bytes_io.getvalue()
-                        file.mimetype = 'image/png'
-                    file._height = image.height
-                    file._width = image.width
-                if file.is_text():
-                    file.text = file._content.decode("utf-8")
-                    if file.mimetype == "text/html":
-                        # 数値文字参照を通常の文字列に変換
-                        file.text = html.unescape(file.text)
-            except Exception as e:
-                logger.info(f"Slack get_image failed: {str(e)}")
-        return _get_content
-
     def get_conversations_replies(self, channel: str, thread_ts: str, user_client: bool = False) -> list[SlackMessageLite]:
         client: SlackWrapper = self.user_client if user_client else self.bot_client
         try:
@@ -426,7 +395,7 @@ class SlackService:
                 attachment = SlackAttachment.from_dict(attachment_dict)
                 attachment.user = self.get_user(attachment_dict["author_id"]) if attachment_dict.get("author_id", "").startswith("U") else None
                 attachments.append(attachment)
-            files: list[dict[str, str]] = message.get("files", [])
+            files: list[dict[str, str | bool]] = message.get("files", [])
             results.append(SlackMessageLite(
                 timestamp=datetime.datetime.fromtimestamp(float(message["ts"])),
                 ts=message["ts"],
@@ -439,7 +408,7 @@ class SlackService:
                     + (f"?thread_ts={message["thread_ts"]}" if thread_ts != message["ts"] else "")
                 ),
                 attachments=attachments,
-                files=[SlackFile.from_dict(file, self._get_content_callable(self.bot_token)) for file in files],
+                files=[file for file in [SlackFile.from_dict(file) for file in files] if file is not None],
                 reactions=([f":{reaction["name"]}:" for reaction in message["reactions"]] if "reactions" in message else [])
             ))
         return results
@@ -485,55 +454,6 @@ class SlackService:
             lines.append(line)
         return "\n".join(lines)
 
-    def _get_messages_callable(self) -> Callable[[SlackMessage], None]:
-        def _get_messages(message: SlackMessage) -> None:
-            message.get_messages = None
-            message._messages = []
-            message._is_full = False
-            try:
-                if message.is_private:
-                    logger.debug(f"Do not get private conversations, channel_id={message.channel_id}, thread_ts={message.message.thread_ts}")
-                    return
-                messages = self.get_conversations_replies(message.channel_id, message.message.thread_ts, True)
-                if len(messages) == 0:
-                    # プライベートチャネルに対する読み取り権限がないなどの理由で空配列が返ってくるパターンがある
-                    # その場合は何もせずに終了する
-                    return
-                if len(messages) <= 10:
-                    # スレッドの件数が 10件以内の場合はスレッド内の全メッセージを入力する
-                    # 起点メッセージを root_message に変更する
-                    message.message = messages[0]
-                    message._messages = messages[1:]
-                    message._root_message = None
-                    message._is_full = True
-                elif len([v for v in messages if v.ts == message.message.ts]) >= 1:
-                    # 取得した最大60件のスレッド内に起点メッセージが含まれる場合（つまり先頭から60件以内に起点メッセージが存在する）
-                    for (i, v) in enumerate(messages):
-                        if v.ts == message.message.ts:
-                            break
-                    # reactions を取得するため起点メッセージを置き換える（search_message では reactions を取れない、conversations_replies は取れる）
-                    message.message = messages[i]
-                    if i == 0:
-                        # 起点メッセージ == root_message だった場合、+9メッセージを入力
-                        message._messages = messages[1:10]
-                        message._root_message = None
-                    else:
-                        # 起点メッセージ != root_message だった場合、起点メッセージは変更せず、root_message と、+8メッセージを入力
-                        message._messages = messages[i + 1:i + 9]
-                        message._root_message = messages[0]
-                else:
-                    # 起点メッセージがスレッド内に含まれない場合、諦めて root_message だけ追加する
-                    message._root_message = messages[0]
-            except SlackApiError as e:
-                response: SlackResponse = e.response
-                if response.get("error") == "missing_scope":
-                    logger.info(f"Do not get private channel message: channel_id={message.channel_id}, thread_ts={message.message.thread_ts}")
-                else:
-                    logger.error(e, exc_info=True)
-            except Exception as e:
-                logger.error(e, exc_info=True)
-        return _get_messages
-
     def _refine_slack_message(
         self,
         message: dict,
@@ -541,7 +461,7 @@ class SlackService:
         recieved_message_channel_id: str,
         recieved_message_thread_ts: str,
         viewable_private_channels: list[str],
-    ) -> SlackMessage | None:
+    ) -> Optional[SlackMessage]:
         """
         slcka api の検索結果 dict を SlackMessage に変換する
         プライベートチャネルの権限確認も行う
@@ -593,7 +513,7 @@ class SlackService:
         elif (num_members := len(self.get_conversations_members(message["channel"]["id"]))) >= 1:
             score_multiply = math.log2(num_members) + 1.0
         attachments: list[dict[str, str]] = message.get("attachments", [])
-        files: list[dict[str, str]] = message.get("files", [])
+        files: list[dict[str, str | bool]] = message.get("files", [])
         return SlackMessage(
             message=SlackMessageLite(
                 timestamp=datetime.datetime.fromtimestamp(float(message["ts"])),
@@ -606,13 +526,12 @@ class SlackService:
                     SlackAttachment.from_dict(attachment)
                     for attachment in attachments
                 ],
-                files=[SlackFile.from_dict(file, self._get_content_callable(self.bot_token)) for file in files]
+                files=[file for file in [SlackFile.from_dict(file) for file in files] if file is not None]
             ),
             channel=message["channel"]["name"],
             channel_id=message["channel"]["id"],
             score=message["score"] * score_multiply,
             is_private=message['channel']['is_private'],
-            get_messages=self._get_messages_callable(),
         )
 
     def _search(
@@ -690,6 +609,7 @@ class SlackService:
             ):
                 # 検索済み結果に今回の検索条件より緩く、かつ全検索結果を取得済みならば current_term は検索の必要が無いのでスキップする
                 continue
+
             result = self._search(
                 current_term,
                 recieved_message_user,
@@ -766,12 +686,16 @@ class SlackService:
         self.cache_config.put(True, config_dict_default)
         return config_dict_default
 
-    @staticmethod
-    def get_file(token: str, url: str) -> bytes:
+    def load_file(self, url: str, user_client: bool = False) -> bytes:
+        client: SlackWrapper = self.user_client if user_client else self.bot_client
         if not re.match(r'https?://(?:[^.]+\.)?slack.com/', url):
             raise ValueError(f"Not allowing host: {url}")
+        if (cached := self.cache_load_file.get(url)).found:
+            logger.info(f"Downloading(cache): {url}")
+            return cached.value()
         logger.info(f"Downloading: {url}")
-        response = requests.get(url, headers={"Authorization": f"Bearer {token}"})
+        response = requests.get(url, headers={"Authorization": f"Bearer {client.token}"})
         if not (200 <= response.status_code < 300):
             raise RuntimeError(f"Response returns error: {response.status_code}")
+        self.cache_load_file.put(url, response.content)
         return response.content

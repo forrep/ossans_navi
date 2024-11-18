@@ -5,7 +5,7 @@ import hashlib
 import itertools
 import re
 from threading import RLock
-from typing import Any, Callable, Iterable, Optional
+from typing import Any, Iterable, Optional
 
 
 @dataclasses.dataclass
@@ -53,8 +53,12 @@ class SlackChannel:
 class SlackFile:
     title: str
     mimetype: str
-    link: str
-    get_content: Optional[Callable[['SlackFile'], None]]
+    filetype: str
+    download_url: str
+    pretty_type: str
+    permalink: str
+    is_public: bool
+    is_initialized: bool = dataclasses.field(default=False, init=False)
     is_analyzed: bool = dataclasses.field(default=False, init=False)
     description: Optional[str] = dataclasses.field(default=None, init=False)
     text: Optional[str] = dataclasses.field(default=None, init=False)
@@ -63,68 +67,87 @@ class SlackFile:
     _width: int = dataclasses.field(default=0, init=False)
 
     @staticmethod
-    def from_dict(file: dict[str, str], get_content: Callable[['SlackFile'], None]) -> 'SlackFile':
+    def from_dict(file: dict[str, str | bool]) -> Optional['SlackFile']:
+        if "permalink" not in file or "is_public" not in file:
+            return None
         slack_file = SlackFile(
-            title=file.get("title", ""),
-            mimetype=file.get("mimetype", ""),
-            link=file.get("url_private", ""),
-            get_content=get_content
+            title=str(file.get("title", "")),
+            mimetype=str(file.get("mimetype", "")),
+            filetype=str(file.get("filetype", "")),
+            download_url=str(file.get("url_private", "")),
+            pretty_type=str(file.get("pretty_type", "")),
+            permalink=str(file["permalink"]),
+            is_public=bool(file["is_public"]),
         )
-        if slack_file.is_text() and file.get("plain_text"):
+        if slack_file.is_text and file.get("plain_text"):
             # text で plain_text があればそれを利用する
-            slack_file.get_content = None
-            slack_file.text = file["plain_text"]
+            slack_file.is_initialized = True
+            slack_file.text = str(file["plain_text"])
         return slack_file
 
-    def initialize(self) -> None:
-        if callable(self.get_content):
-            self.get_content(self)
-
-    def content(self) -> bytes:
-        if callable(self.get_content):
-            self.get_content(self)
+    @property
+    def content(self) -> Optional[bytes]:
         if self._content is None:
-            raise ValueError('self._content is None')
+            raise ValueError('SlackFile content is None.')
         return self._content
 
+    @property
     def is_image(self) -> bool:
-        return isinstance(self.mimetype, str) and self.mimetype.startswith("image/")
+        return self.mimetype.startswith("image/")
 
+    @property
     def is_text(self) -> bool:
-        return isinstance(self.mimetype, str) and self.mimetype.startswith("text/")
+        return self.mimetype.startswith("text/")
 
+    @property
+    def is_canvas(self) -> bool:
+        return (
+            self.mimetype == "application/vnd.slack-docs"
+            and self.filetype == "quip"
+            and self.pretty_type == "canvas"
+        )
+
+    @property
     def is_textualize(self) -> bool:
-        return self.is_text() or (self.is_image() and self.is_analyzed)
+        return self.is_text or self.is_canvas or (self.is_image and self.is_analyzed)
 
+    @property
     def width(self) -> int:
-        if callable(self.get_content):
-            self.get_content(self)
+        if not self.is_initialized:
+            raise ValueError("SlackFile is not initialized.")
         return self._width
 
+    @property
     def height(self) -> int:
-        if callable(self.get_content):
-            self.get_content(self)
+        if not self.is_initialized:
+            raise ValueError("SlackFile is not initialized.")
         return self._height
 
-    def valid(self) -> bool:
+    @property
+    def is_valid(self) -> bool:
         try:
-            return bool(self.content())
+            return bool(self.content)
         except Exception:
             return False
 
+    @property
     def image_uri(self) -> str:
-        return f"data:image/png;base64,{base64.b64encode(self.content()).decode()}"
+        if (v := self.content) is None:
+            raise ValueError("SlackFile's content is None.")
+        return f"data:image/png;base64,{base64.b64encode(v).decode()}"
 
     def to_dict(self) -> dict:
         return {
             "title": self.title,
             "mimetype": self.mimetype,
-            "link": self.link,
+            "pretty_type": self.pretty_type,
+            "download_url": self.download_url,
+            "permalink": self.permalink,
             **(
                 {
                     "width": self._width,
                     "height": self._height,
-                } if self.is_image() and self._width > 0 and self._height > 0 else {}
+                } if self.is_image and self._width > 0 and self._height > 0 else {}
             ),
             **(
                 {"description": self.description} if self.description else {}
@@ -154,7 +177,7 @@ class SlackMessageLite:
         return len(self.files) > 0
 
     def has_not_analyzed_files(self) -> bool:
-        return len([file for file in self.files if file.is_image() and not file.is_analyzed]) > 0
+        return len([file for file in self.files if file.is_image and not file.is_analyzed]) > 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -176,40 +199,29 @@ class SlackMessage:
     channel_id: str
     score: float
     is_private: bool
-    get_messages: Optional[Callable[['SlackMessage'], None]]
+    is_initialized: bool = dataclasses.field(default=False, init=False)
     _root_message: Optional[SlackMessageLite] = dataclasses.field(default=None, init=False)
-    _messages: Optional[list[SlackMessageLite]] = dataclasses.field(default=None, init=False)
+    _messages: list[SlackMessageLite] = dataclasses.field(default_factory=list, init=False)
     _is_full: bool = dataclasses.field(default=False, init=False)
 
-    def is_initialized(self) -> bool:
-        return not callable(self.get_messages)
-
-    def initialize(self) -> None:
-        if callable(self.get_messages):
-            self.get_messages(self)
-        for message in [
-            self.message,
-            *([self._root_message] if self._root_message else []),
-            *(self._messages if self._messages else []),
-        ]:
-            for file in message.files:
-                # テキストファイルだった場合はファイルのロード
-                # 画像の場合は読み込んでも利用できないので読み込まない
-                if file.is_text():
-                    file.initialize()
-
+    @property
     def root_message(self) -> SlackMessageLite | None:
-        self.initialize()
+        if not self.is_initialized:
+            raise ValueError("SlackMessage is not initialized.")
         return self._root_message
 
+    @property
     def messages(self) -> list[SlackMessageLite]:
-        self.initialize()
+        if not self.is_initialized:
+            raise ValueError("SlackMessage is not initialized.")
         if self._messages is None:
-            raise ValueError('self._messages is None')
+            raise ValueError("SlackMessage's messages is None.")
         return self._messages
 
+    @property
     def is_full(self) -> bool:
-        self.initialize()
+        if not self.is_initialized:
+            raise ValueError("SlackMessage is not initialized.")
         return self._is_full
 
     @staticmethod
@@ -235,6 +247,13 @@ class SlackSearchTerm:
         )
 
     def __post_init__(self) -> None:
+        # 並び替え専用項目を構築、以下の順に並べる
+        #   1. ワード数が少ない
+        #   2. ワードの合計文字数が少ない
+        #   3. ワードのコード順
+        #   4. 絞り込み期間が長い
+        #   5. 絞り込み期間の開始がより過去
+        #   6. 絞り込み期間の終了がより未来
         self._order_index = (
             len(self.words),
             sum([len(w) for w in self.words]),
@@ -312,6 +331,7 @@ class SlackSearch:
 class SlackSearches:
     results: list[SlackSearch] = dataclasses.field(default_factory=list, init=False)
     messages: dict[str, SlackMessage] = dataclasses.field(default_factory=dict, init=False)
+    files: dict[str, SlackFile] = dataclasses.field(default_factory=dict, init=False)
     total_count: int = dataclasses.field(default=0, init=False)
     used: set[str] = dataclasses.field(default_factory=set, init=False)
     lastshot: dict[str, SlackMessage] = dataclasses.field(default_factory=dict, init=False)
@@ -343,6 +363,7 @@ class SlackSearches:
         """
         lastshot で RAG の結果として入力するメッセージのリストに追加する
         ただし、すでにメッセージが追加済みの場合は二重で追加しない
+        渡された permalinks から検索結果内からメッセージを探す
         """
         for permalink in permalinks:
             self._add_lastshot(permalink)
@@ -354,7 +375,7 @@ class SlackSearches:
         for result in self.results:
             # 検索結果の中から起点メッセージだけを探索する
             for message in result.messages:
-                if not message.is_initialized():
+                if not message.is_initialized:
                     # initialize() されていないメッセージはまだ処理対象外なので確認の必要はない
                     # そのメッセージが initialize() されたタイミングで確認される
                     continue
@@ -362,32 +383,32 @@ class SlackSearches:
                     # lastshot に追加したい message が見つかった
                     self.lastshot[message.message.permalink] = message
                     self._lastshot_permalinks.add(message.message.permalink)
-                    if message.is_full():
+                    if message.is_full:
                         # そのメッセージにスレッド内の全メッセージが含まれている場合はそのスレッド内の全メッセージの permalink を 追加済みとしてマークする
                         # なぜならそのメッセージにはスレッド内の全メッセージが含まれているので、追加で別メッセージを読み込む必要がないため
-                        self._lastshot_permalinks.update([v.permalink for v in message.messages()])
-                        if (v := message.root_message()):
+                        self._lastshot_permalinks.update([v.permalink for v in message.messages])
+                        if (v := message.root_message):
                             self._lastshot_permalinks.add(v.permalink)
                     return
         for result in self.results:
             # root_message とスレッド内のメッセージを探索する
             for message in result.messages:
-                if not message.is_initialized():
+                if not message.is_initialized:
                     # initialize() されていないメッセージはまだ処理対象外なので確認の必要はない
                     # そのメッセージが initialize() されたタイミングで確認される
                     continue
                 if (
-                    ((v := message.root_message()) and permalink == v.permalink)
-                    or (permalink in [v.permalink for v in message.messages()])
+                    ((v := message.root_message) and permalink == v.permalink)
+                    or (permalink in [v.permalink for v in message.messages])
                 ):
                     # root_message またはスレッド内のメッセージの permalink と一致
                     self.lastshot[message.message.permalink] = message
                     self._lastshot_permalinks.add(message.message.permalink)
-                    if message.is_full():
+                    if message.is_full:
                         # そのメッセージにスレッド内の全メッセージが含まれている場合はそのスレッド内の全メッセージの permalink を 追加済みとしてマークする
                         # なぜならそのメッセージにはスレッド内の全メッセージが含まれているので、追加で別メッセージを読み込む必要がないため
-                        self._lastshot_permalinks.update([v.permalink for v in message.messages()])
-                        if (v := message.root_message()):
+                        self._lastshot_permalinks.update([v.permalink for v in message.messages])
+                        if (v := message.root_message):
                             self._lastshot_permalinks.add(v.permalink)
                     return
 
