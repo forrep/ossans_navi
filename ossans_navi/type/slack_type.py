@@ -68,13 +68,14 @@ class SlackFile:
 
     @staticmethod
     def from_dict(file: dict[str, str | bool]) -> Optional['SlackFile']:
-        if "permalink" not in file or "is_public" not in file:
+        if any([v not in file for v in ("permalink", "is_public", "url_private",)]):
+            # 必須項目が1つでも存在しなければ None を返す（呼び出し元で None を除外する想定）
             return None
         slack_file = SlackFile(
             title=str(file.get("title", "")),
             mimetype=str(file.get("mimetype", "")),
             filetype=str(file.get("filetype", "")),
-            download_url=str(file.get("url_private", "")),
+            download_url=str(file["url_private"]),
             pretty_type=str(file.get("pretty_type", "")),
             permalink=str(file["permalink"]),
             is_public=bool(file["is_public"]),
@@ -86,10 +87,14 @@ class SlackFile:
         return slack_file
 
     @property
-    def content(self) -> Optional[bytes]:
+    def content(self) -> bytes:
         if self._content is None:
-            raise ValueError('SlackFile content is None.')
+            raise ValueError("SlackFile's content is None.")
         return self._content
+
+    @content.setter
+    def content(self, value: bytes):
+        self._content = value
 
     @property
     def is_image(self) -> bool:
@@ -125,16 +130,11 @@ class SlackFile:
 
     @property
     def is_valid(self) -> bool:
-        try:
-            return bool(self.content)
-        except Exception:
-            return False
+        return self._content is not None
 
     @property
     def image_uri(self) -> str:
-        if (v := self.content) is None:
-            raise ValueError("SlackFile's content is None.")
-        return f"data:image/png;base64,{base64.b64encode(v).decode()}"
+        return f"data:image/png;base64,{base64.b64encode(self.content).decode()}"
 
     def to_dict(self) -> dict:
         return {

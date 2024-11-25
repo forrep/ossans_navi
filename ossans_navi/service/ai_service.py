@@ -71,7 +71,7 @@ class AiModels:
                     AiTokenizeGpt4o
                 )
             case _:
-                raise NotImplementedError(f"Unknown Service: {config.AiServiceType}")
+                raise NotImplementedError("Unknown Service.")
         return models
 
     def models(self) -> list[AiModel]:
@@ -125,7 +125,7 @@ class AiService:
                     azure_endpoint=config.AZURE_OPENAI_ENDPOINT,
                 )
             case _:
-                raise NotImplementedError(f"Unknown Service: {config.AiServiceType}")
+                raise NotImplementedError("Unknown Service.")
 
     def _chat_completions(
             self,

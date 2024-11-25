@@ -684,11 +684,10 @@ class OssansNaviService:
             # ロード済みなら処理せずに終了
             return
         file.is_initialized = True
-        file._content = None
         try:
-            file._content = self.slack_service.load_file(file.download_url, user_client)
+            file.content = self.slack_service.load_file(file.download_url, user_client)
             if file.is_image:
-                bytes_io = BytesIO(file._content)
+                bytes_io = BytesIO(file.content)
                 image: Image.Image | ImageFile.ImageFile = Image.open(bytes_io)
                 max_size = max(image.width, image.height)
                 if max_size > config.MAX_IMAGE_SIZE:
@@ -696,14 +695,14 @@ class OssansNaviService:
                     image = image.resize((int(image.width * resize_retio), int(image.height * resize_retio)))
                     bytes_io = BytesIO()
                     image.save(bytes_io, format="PNG")
-                    file._content = bytes_io.getvalue()
+                    file.content = bytes_io.getvalue()
                     file.mimetype = 'image/png'
                 file._height = image.height
                 file._width = image.width
             elif file.is_text:
-                file.text = file._content.decode("utf-8")
+                file.text = file.content.decode("utf-8")
             elif file.is_canvas:
-                html_content = file._content.decode("utf-8")
+                html_content = file.content.decode("utf-8")
                 parser = html2text.HTML2Text()
                 parser.images_to_alt = True
                 html_parsed = parser.handle(html_content)

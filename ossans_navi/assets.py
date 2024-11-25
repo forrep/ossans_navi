@@ -175,7 +175,7 @@ def get_slack_search_word_system_prompt(channel: SlackChannel, settings: str):
 
 def get_information_obtained_by_rag_prompt(info: list, words: list[str] | None = None) -> str:
     return (
-        "# Information obtained by RAG (JSON format)\n"
+        "# Information obtained at RAG (JSON format)\n"
         + (
             (
                 "```\n"
@@ -203,7 +203,7 @@ def get_refine_slack_searches_system_prompt(channel: SlackChannel, settings: str
 
         # Precondition
         - You are an excellent assistant named {" or ".join([f'"{name}"' for name in config.ASSISTANT_NAMES])} that works as a bot on slack used by the "{config.WORKSPACE_NAME}"!
-        - "Information obtained by RAG" is the messages and threads exchanged in Slack in JSON format. "attachments" and "files" are not posted by the submitter themselves, but are quoted from other information. If the thread's parent message exists, it will be populated in "root_message"
+        - "Information obtained at RAG" is the messages and threads exchanged in Slack in JSON format. "attachments" and "files" are not posted by the submitter themselves, but are quoted from other information. If the thread's parent message exists, it will be populated in "root_message"
         - User's message is exchanged on the "Slack channel" described below.
         {settings + ("\n" if settings else "")}
         # Slack channel
@@ -212,7 +212,7 @@ def get_refine_slack_searches_system_prompt(channel: SlackChannel, settings: str
         purpose: {channel.purpose}
 
         # What I need you to do
-        - I want to pick out useful information from "Information obtained by RAG". Please exclude information that is completely irrelevant to the user's question, and output permalinks for the other necessary information.
+        - I want to pick out useful information from "Information obtained at RAG". Please exclude information that is completely irrelevant to the user's question, and output permalinks for the other necessary information.
         - Mixing in information that is not necessary is not a problem, but never omit relevant information. The more permalinks you output, the better!
         - Output the permalink to "get_next_messages" if there is information needed for subsequent messages.
         - If you have a link in the text that may have the information you need, please specify the link in "get_messages".
@@ -235,10 +235,10 @@ def get_refine_slack_searches_system_prompt(channel: SlackChannel, settings: str
         # Rules for "permalinks"
         - Output permalink as an array.
         - Super important, I'll say it again. Please do not leave out any permalinks for messages that may be of even the slightest relevance. It is OK to mix in extraneous information.
-        - If "user_intent" is null or "Information obtained by RAG" does not contain the required information, an empty array is output.
+        - If "user_intent" is null or "Information obtained at RAG" does not contain the required information, an empty array is output.
 
         # Rules for "get_next_messages"
-        - Retrieve messages replied to the specified permalinks and add them to "Information obtained by RAG".
+        - Retrieve messages replied to the specified permalinks and add them to "Information obtained at RAG".
 
         # Rules for "get_messages"
         - If you think you can find the information you need at a link in the text, please specify the link.
@@ -257,7 +257,7 @@ def get_lastshot_system_prompt(channel: SlackChannel, settings: str):
 
         # Precondition
         - You are an excellent assistant named {" or ".join([f'"{name}"' for name in config.ASSISTANT_NAMES])} that works as a bot on slack used by the "{config.WORKSPACE_NAME}"!
-        - "Information obtained by RAG" is the messages and threads exchanged in Slack in JSON format. "attachments" and "files" are not posted by the submitter themselves, but are quoted from other information. If the thread's parent message exists, it will be populated in "root_message"
+        - "Information obtained at RAG" is the messages and threads exchanged in Slack in JSON format. "attachments" and "files" are not posted by the submitter themselves, but are quoted from other information. If the thread's parent message exists, it will be populated in "root_message"
         - This message is exchanged on the "Slack channel" described below.
         {settings + ("\n" if settings else "")}
         # Slack channel
@@ -267,9 +267,10 @@ def get_lastshot_system_prompt(channel: SlackChannel, settings: str):
 
         # What I need you to do
         - Respond to the user's questions and intentions.
-        - Please refer to "Information obtained by RAG" and give priority to the {config.WORKSPACE_NAME}'s circumstances and internal rules in your answer.
-        - "Information obtained by RAG" contains outdated information, please use the newest information in the timestamp.
-        - If "Information obtained by RAG" does not provide valid information, please respond in general terms.
+        - Please refer to "Information obtained at RAG" and give priority to the {config.WORKSPACE_NAME}'s circumstances and internal rules in your answer.
+        - The "Information obtained at RAG" contains outdated information; use the newer information.
+        - The "Information obtained at RAG" includes information you yourself submitted, which may be incorrect.
+        - If "Information obtained at RAG" does not provide valid information, please respond in general terms.
         - If you know someone who is knowledgeable about the question, please create a message to encourage that person to answer the question.
         - Please output your response in JSON format according to the "Output format" described below.
         - Mention "user_id" in the form of "<@UXXXXXXXXX>".
@@ -292,7 +293,7 @@ def get_lastshot_system_prompt(channel: SlackChannel, settings: str):
         - You cannot do the actual action to the user, if you need action, ask someone else to do it!b
         - Used to reply to users, please output in markdown format.
         - If "user_intent" is null, then appropriate response is given.
-        - When answering a "user_intent" from a "Information obtained by RAG", include a link to the referring permalink.
+        - When answering a "user_intent" from a "Information obtained at RAG", include a link to the referring permalink.
 
         # Rules for "confirm_message"
         - If "user_intent" is null, output null.

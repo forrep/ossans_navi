@@ -5,7 +5,7 @@ import signal
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event
-from typing import Final
+from typing import Final, Generator
 
 from ossans_navi import config
 from ossans_navi.service.ai_service import AiModels, AiService
@@ -70,7 +70,12 @@ def do_ossans_navi_response_safe(say, event: SlackMessageEvent):
             + f"is_mention={event.is_mention}, is_dm={event.is_dm()}, is_talk_to_other={event.is_talk_to_other}"
         )
 
-        do_ossans_navi_response(say, event, models)
+        for _ in do_ossans_navi_response(say, event, models):
+            # yield のタイミングで処理が戻されるごとにイベントがキャンセルされていないか確認して、キャンセルされていれば終了する
+            if EVENT_GUARD.is_canceled(event):
+                logger.info(f"Event canceled: {event.id()}({event.channel_id()},{event.thread_ts()},{event.ts()})")
+                logger.info("Finished.")
+                break
     except Exception as e:
         logger.error("do_ossans_navi_response return error")
         logger.error(e, exc_info=True)
@@ -87,11 +92,16 @@ def do_ossans_navi_response_safe(say, event: SlackMessageEvent):
             logger.info(f"    tokens_out = {model.tokens_out}")
 
 
-def do_ossans_navi_response(say, event: SlackMessageEvent, models: AiModels):
+def do_ossans_navi_response(say, event: SlackMessageEvent, models: AiModels) -> Generator[None, None, None]:
     ossans_navi_service = OssansNaviService(ai_service=ai_service, slack_service=slack_service, models=models, event=event)
+
+    # yield で呼び出し元に戻すとイベントのキャンセルチェックをして、キャンセルされていれば終了する
+    yield
+
     if event.is_dm() and ossans_navi_service.special_command():
-        # DM の場合は special_command の判定を行う
+        # DM の場合は special_command() を実行、そして True が返ってきたら special_command を実行しているので通常のメッセージ処理は終了する
         return
+
     if event.is_talk_to_other:
         logger.info("Talk to other, finished.")
         return
@@ -99,15 +109,17 @@ def do_ossans_navi_response(say, event: SlackMessageEvent, models: AiModels):
     if not event.user:
         logger.info("User not found, finished")
         return
+
     if event.user.is_bot or event.user.is_guest:
         # OssansNavi はパブリックチャネルを無制限に検索して情報源にするため、パブリックチャネルに対する読み取り制限があるユーザーは利用できない
         logger.info("sending_user is bot or guest, finished.")
         return
 
-    # production で起動、開発用チャネルには応答しない
+    # production で起動している場合は開発用チャネルには応答しない
     if not config.DEVELOPMENT_MODE and event.channel_id() in (config.DEVELOPMENT_CHANNELS):
         logger.info(f"Now in production mode. Ignoring development channel: {event.channel_id()}")
         return
+
     # development で起動、DMで、かつ developer に入ってないなら応答しない
     # development で起動、非DMで、かつ非開発用チャネルには応答しない
     if config.DEVELOPMENT_MODE:
@@ -119,6 +131,8 @@ def do_ossans_navi_response(say, event: SlackMessageEvent, models: AiModels):
             if event.channel_id() not in (config.DEVELOPMENT_CHANNELS):
                 logger.info(f"Now in development mode. Ignoring non development channel: {event.channel_id()}")
                 return
+
+    # DM の topic から設定を取得する
     event.settings = slack_service.get_dm_info_with_ossans_navi(event.user.user_id)
 
     # スレッドでやりとりされた履歴メッセージを取得
@@ -153,10 +167,7 @@ def do_ossans_navi_response(say, event: SlackMessageEvent, models: AiModels):
         return
 
     # 定期的にイベントがキャンセルされていないか確認して、キャンセルされていれば終了する
-    if EVENT_GUARD.is_canceled(event):
-        logger.info(f"Event canceled: {event.id()}({event.channel_id()},{event.thread_ts()},{event.ts()})")
-        logger.info("Finished.")
-        return
+    yield
 
     # メッセージの仕分けを行う、質問かどうか判別する
     (event.classification, emoji_to_react) = ossans_navi_service.classify(thread_messages)
@@ -185,12 +196,12 @@ def do_ossans_navi_response(say, event: SlackMessageEvent, models: AiModels):
         return
 
     # 定期的にイベントがキャンセルされていないか確認して、キャンセルされていれば終了する
-    if EVENT_GUARD.is_canceled(event):
-        logger.info(f"Event canceled: {event.id()}({event.channel_id()},{event.thread_ts()},{event.ts()})")
-        logger.info("Finished.")
-        return
+    yield
 
-    # ファイルをロードする
+    # メッセージ内に含まれるファイルをロードする
+    # ## このタイミングまでファイルをロードしない理由
+    # ossans_navi_service.classify 以前のフェーズは大量のメッセージが流入することを考慮が必要
+    # 重い処理や費用の増加する処理は classify を通過して応答フェーズに入った後に実施する
     for file in itertools.chain.from_iterable([message.files for message in thread_messages]):
         ossans_navi_service.load_slack_file(file, False)
 
@@ -202,26 +213,14 @@ def do_ossans_navi_response(say, event: SlackMessageEvent, models: AiModels):
     # なぜならば、呼び出し側で EVENT_GUARD.is_canceled() をチェックするタイミングを用意するためで、ループごとに確認してキャンセルされていれば終了する
     for _ in ossans_navi_service.do_slack_searches(thread_messages=thread_messages):
         # 定期的にイベントがキャンセルされていないか確認して、キャンセルされていれば終了する
-        if EVENT_GUARD.is_canceled(event):
-            logger.info(f"Event canceled: {event.id()}({event.channel_id()},{event.thread_ts()},{event.ts()})")
-            logger.info("Finished.")
-            return
+        yield
 
     # slack_searches の結果から有用な情報を抽出するフェーズ（refine_slack_searches）
     # トークン数の上限があるので複数回に分けて実行して、大量の検索結果の中から必要な情報を絞り込む
     # RAG で入力する情報以外のトークン数を求めておく（システムプロンプトなど）、RAG で入力可能な情報を計算する為に使う
     for _ in ossans_navi_service.refine_slack_searches(thread_messages=thread_messages):
         # 定期的にイベントがキャンセルされていないか確認して、キャンセルされていれば終了する
-        if EVENT_GUARD.is_canceled(event):
-            logger.info(f"Event canceled: {event.id()}({event.channel_id()},{event.thread_ts()},{event.ts()})")
-            logger.info("Finished.")
-            return
-
-    # 定期的にイベントがキャンセルされていないか確認して、キャンセルされていれば終了する
-    if EVENT_GUARD.is_canceled(event):
-        logger.info(f"Event canceled: {event.id()}({event.channel_id()},{event.thread_ts()},{event.ts()})")
-        logger.info("Finished.")
-        return
+        yield
 
     # 集まった情報を元に返答を生成するフェーズ（lastshot）
     # GPT-4o で最終的な答えを生成する（GPT-4o mini で精査した情報を利用）
@@ -256,10 +255,7 @@ def do_ossans_navi_response(say, event: SlackMessageEvent, models: AiModels):
             do_response = True
 
     # 定期的にイベントがキャンセルされていないか確認して、キャンセルされていれば終了する
-    if EVENT_GUARD.is_canceled(event):
-        logger.info(f"Event canceled: {event.id()}({event.channel_id()},{event.thread_ts()},{event.ts()})")
-        logger.info("Finished.")
-        return
+    yield
 
     if do_response:
         say(

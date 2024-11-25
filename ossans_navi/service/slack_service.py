@@ -21,8 +21,6 @@ from ossans_navi.service.slack_wrapper import SlackWrapper
 from ossans_navi.type.slack_type import (SlackAttachment, SlackChannel, SlackFile, SlackMessage, SlackMessageEvent, SlackMessageLite, SlackSearch,
                                          SlackSearches, SlackSearchTerm, SlackUser)
 
-MAX_IMAGE_SIZE = 1536
-
 logger = logging.getLogger(__name__)
 
 
@@ -468,7 +466,7 @@ class SlackService:
         読み取り対象外のメッセージは None を返す
         """
         if (
-            # 以下の条件に合致する場合は該当メッセージは参照しない
+            # 以下の条件のいずれかに合致する場合は該当メッセージは参照しない
             # セーフモードがONで、かつプライベートチャネルで、かつ safe_mode_viewable_channels に含まれていないチャネルの場合
             (config.SAFE_MODE and message['channel']['is_private'] and message['channel']['id'] not in viewable_private_channels)
             # プライベートチャネル、かつ元メッセージ送信者がそのチャネルに参加していない場合
@@ -484,8 +482,14 @@ class SlackService:
         ):
             return None
         message_user = self.get_user(message["user"])
-        if message_user.is_bot:
-            # ボットのメッセージは情報源にしない
+        if message_user.user_id != self.my_bot_user_id and message_user.is_bot:
+            # OssansNavi 以外のボットのメッセージは情報源にしない
+            # ボットのメッセージは情報源にしない理由
+            #   ログメッセージなど大量のメッセージが引っかかり応答速度の低下してトークン数も浪費する可能性があるため
+            # OssansNavi のメッセージは情報源とする理由
+            #   ユーザーが OssansNavi へ画像を渡して情報を教えてくれるケースがある
+            #   しかしユーザーのメッセージは画像のためキーワード検索ができない、一方で OssansNavi が返信したメッセージには画像内容も含めてテキスト化される
+            #   そのため OssansNavi のメッセージを情報源とすれば、このパターンの情報も拾える
             return None
         if not (
             matcher := re.match(
@@ -545,7 +549,7 @@ class SlackService:
         is_get_messages: bool
     ) -> SlackSearch:
         results = self.user_client.search_messages(
-            query=f"{term.to_term(True)}{' ' + self.search_messages_exclude if self.search_messages_exclude else ''}",
+            query=term.to_term(True),
             count=100,
             sort="score",
         )
