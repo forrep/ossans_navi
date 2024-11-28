@@ -342,7 +342,7 @@ class OssansNaviService:
         for message in thread_messages:
             if message.has_files() and len([file for file in message.files if file.is_image and not file.is_analyzed]) > 0:
                 if (cached := OssansNaviService.image_cache.get(message.permalink)).found:
-                    for (file, cached_file) in itertools.zip_longest(message.files, cached.value()):
+                    for (file, cached_file) in itertools.zip_longest(message.files, cached.value):
                         if file is None:
                             break
                         file.is_analyzed = True
@@ -532,7 +532,7 @@ class OssansNaviService:
                 candidate_messages: list[SlackMessage] = []
                 for message in slack_search.messages:
                     # slack_searches のロックを取得してから、このメッセージがすでに使われているか？などの判定を行って、refine 対象の message を決定する
-                    if self.slack_searches.is_used(message.message.permalink):
+                    if self.slack_searches.is_used(message.permalink):
                         # ヒットしたメッセージがすでにAI入力済みだった場合は次へ
                         continue
                     # スレッド情報などを取得する（Slack API実行のため多少時間がかかる）
@@ -555,7 +555,7 @@ class OssansNaviService:
                     candidate_messages.append(message)
                     # メッセージそのものと、root_message の permlink を use 状態にしておく、そして別の検索ワードで同一メッセージが何度も引っかかるのを防ぐ
                     # なぜならば、同一メッセージを何度も入力しても無駄だから
-                    self.slack_searches.use(message.message.permalink)
+                    self.slack_searches.use(message.permalink)
                     if message.is_full:
                         self.slack_searches.use([v.permalink for v in message.messages])
                         if message.root_message:
@@ -650,7 +650,7 @@ class OssansNaviService:
             )
         )
         # GPT-4o mini が精査してくれた結果を元にトークン数が収まる範囲で入力データとする
-        for content in self.slack_searches.get_lastshot():
+        for content in self.slack_searches.lastshot_messages:
             tokens = self.models.high_quality.tokenizer.content_tokens(
                 json.dumps(
                     OssansNaviService.slack_message_to_ai_request(content, limit=10000),

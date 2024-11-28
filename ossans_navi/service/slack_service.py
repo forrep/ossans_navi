@@ -134,7 +134,6 @@ class SlackService:
         self.app_client = SlackWrapper(token=self.app_token)
         self.user_client = SlackWrapper(token=self.user_token)
         self.bot_client = SlackWrapper(token=self.bot_token)
-        self.search_messages_exclude = ""
         self.cache_get_user = LRUCache[str, SlackUser](capacity=1000, expire=1 * 60 * 60 * 4)  # 4時間
         self.cache_get_bot = LRUCache[str, SlackUser](capacity=1000, expire=1 * 60 * 60 * 4)   # 4時間
         self.cache_get_conversations_members = LRUCache[str, list[str]](capacity=1000, expire=1 * 60 * 60 * 4)  # 4時間
@@ -157,7 +156,6 @@ class SlackService:
         self.my_user_id = response_user["user_id"]
         self.my_bot_user_id = response_bot["user_id"]
         self.workspace_url = response_bot["url"]
-        self.search_messages_exclude = f"-from:<@{response_bot["user_id"]}>"
         logger.info(f"App start with: {response_app["app_name"]}")
         self.socket_mode_hander.connect()
         logger.info(get_boot_message())
@@ -167,7 +165,7 @@ class SlackService:
 
     def get_user(self, user_id: str) -> SlackUser:
         if (cached := self.cache_get_user.get(user_id)).found:
-            return cached.value()
+            return cached.value
         try:
             response = self.bot_client.users_info(user=user_id)
             response_user: dict[str, Any] = response['user']
@@ -198,7 +196,7 @@ class SlackService:
 
     def get_bot(self, bot_id: str) -> SlackUser:
         if (cached := self.cache_get_bot.get(bot_id)).found:
-            return cached.value()
+            return cached.value
         try:
             response = self.bot_client.bots_info(bot=bot_id)
             response_bot: dict[str, Any] = response['bot']
@@ -231,7 +229,7 @@ class SlackService:
     def get_channel(self, channel_id: str, user_client: bool = False) -> SlackChannel:
         client: SlackWrapper = self.user_client if user_client else self.bot_client
         if (cached := self.cache_get_channel.get(channel_id)).found:
-            return cached.value()
+            return cached.value
         try:
             response = client.conversations_info(channel=channel_id)
             response_channel: dict[str, Any] = response["channel"]
@@ -276,7 +274,7 @@ class SlackService:
 
     def get_presence(self, user_id: str) -> bool:
         if (cached := self.cache_user_presence.get(user_id)).found:
-            return cached.value()
+            return cached.value
         try:
             response = self.bot_client.users_getPresence(user=user_id)
             user_presence = response["presence"] == "active"
@@ -297,7 +295,7 @@ class SlackService:
 
     def get_conversations_members(self, channel_id: str) -> list[str]:
         if (cached := self.cache_get_conversations_members.get(channel_id)).found:
-            return cached.value()
+            return cached.value
         try:
             response = self.user_client.conversations_members(channel=channel_id, limit=1000)
             response_members: list[str] = response["members"]
@@ -323,7 +321,7 @@ class SlackService:
 
     def get_channels(self) -> dict[str, dict]:
         if (cached := self.cache_get_channels.get(True)).found:
-            return cached.value()
+            return cached.value
         try:
             response = self.bot_client.conversations_list(limit=1000)
             response_channels = response["channels"]
@@ -664,7 +662,7 @@ class SlackService:
 
     def get_config_dict(self) -> dict:
         if (cached := self.cache_config.get(True)).found:
-            return cached.value()
+            return cached.value
         config_dict_default: dict = {"type": "config"}
         channel: dict = self.bot_client.conversations_open(users="USLACKBOT").get("channel", {})
         channel_id = channel.get("id")
@@ -696,7 +694,7 @@ class SlackService:
             raise ValueError(f"Not allowing host: {url}")
         if (cached := self.cache_load_file.get(url)).found:
             logger.info(f"Downloading(cache): {url}")
-            return cached.value()
+            return cached.value
         logger.info(f"Downloading: {url}")
         response = requests.get(url, headers={"Authorization": f"Bearer {client.token}"})
         if not (200 <= response.status_code < 300):

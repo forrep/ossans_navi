@@ -13,6 +13,7 @@ class CacheEntry(Generic[V]):
     _expired: float
     found: bool
 
+    @property
     def value(self) -> V:
         if not self.found:
             raise ValueError('Not found Error')

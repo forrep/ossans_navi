@@ -224,6 +224,20 @@ class SlackMessage:
             raise ValueError("SlackMessage is not initialized.")
         return self._is_full
 
+    @property
+    def permalink(self) -> str:
+        return self.message.permalink
+
+    @property
+    def files(self):
+        if not self.is_initialized:
+            raise ValueError("SlackMessage is not initialized.")
+        return [
+            *self.message.files,
+            *(v.files if (v := self.root_message) else []),
+            *(itertools.chain.from_iterable([v.files for v in self.messages])),
+        ]
+
     @staticmethod
     def sort(messages: list['SlackMessage']) -> list['SlackMessage']:
         return sorted(messages, key=lambda v: v.message.timestamp, reverse=True)
@@ -247,7 +261,7 @@ class SlackSearchTerm:
         )
 
     def __post_init__(self) -> None:
-        # 並び替え専用項目を構築、以下の順に並べる
+        # 並び替え専用項目（_order_index）を構築、以下の順に並べる
         #   1. ワード数が少ない
         #   2. ワードの合計文字数が少ない
         #   3. ワードのコード順
@@ -334,13 +348,13 @@ class SlackSearches:
     files: dict[str, SlackFile] = dataclasses.field(default_factory=dict, init=False)
     total_count: int = dataclasses.field(default=0, init=False)
     used: set[str] = dataclasses.field(default_factory=set, init=False)
-    lastshot: dict[str, SlackMessage] = dataclasses.field(default_factory=dict, init=False)
+    _lastshot: dict[str, SlackMessage] = dataclasses.field(default_factory=dict, init=False)
     _lock: RLock = dataclasses.field(default_factory=RLock, init=False)
     _lastshot_permalinks: set[str] = dataclasses.field(default_factory=set, init=False)
 
     def add(self, result: SlackSearch) -> None:
         # 同一 permalink の SlackMessage は 1つのインスタンスにまとめる
-        result.messages = [self.messages.setdefault(message.message.permalink, message) for message in result.messages]
+        result.messages = [self.messages.setdefault(message.permalink, message) for message in result.messages]
         self.results = sorted([*self.results, result], key=lambda v: v.total_count)
         self.total_count = sum([len(v.messages) for v in self.results])
 
@@ -379,10 +393,10 @@ class SlackSearches:
                     # initialize() されていないメッセージはまだ処理対象外なので確認の必要はない
                     # そのメッセージが initialize() されたタイミングで確認される
                     continue
-                if permalink == message.message.permalink:
+                if permalink == message.permalink:
                     # lastshot に追加したい message が見つかった
-                    self.lastshot[message.message.permalink] = message
-                    self._lastshot_permalinks.add(message.message.permalink)
+                    self._lastshot[message.permalink] = message
+                    self._lastshot_permalinks.add(message.permalink)
                     if message.is_full:
                         # そのメッセージにスレッド内の全メッセージが含まれている場合はそのスレッド内の全メッセージの permalink を 追加済みとしてマークする
                         # なぜならそのメッセージにはスレッド内の全メッセージが含まれているので、追加で別メッセージを読み込む必要がないため
@@ -402,8 +416,8 @@ class SlackSearches:
                     or (permalink in [v.permalink for v in message.messages])
                 ):
                     # root_message またはスレッド内のメッセージの permalink と一致
-                    self.lastshot[message.message.permalink] = message
-                    self._lastshot_permalinks.add(message.message.permalink)
+                    self._lastshot[message.permalink] = message
+                    self._lastshot_permalinks.add(message.permalink)
                     if message.is_full:
                         # そのメッセージにスレッド内の全メッセージが含まれている場合はそのスレッド内の全メッセージの permalink を 追加済みとしてマークする
                         # なぜならそのメッセージにはスレッド内の全メッセージが含まれているので、追加で別メッセージを読み込む必要がないため
@@ -412,8 +426,9 @@ class SlackSearches:
                             self._lastshot_permalinks.add(v.permalink)
                     return
 
-    def get_lastshot(self) -> Iterable[SlackMessage]:
-        return self.lastshot.values()
+    @property
+    def lastshot_messages(self) -> Iterable[SlackMessage]:
+        return self._lastshot.values()
 
     def __enter__(self):
         return self._lock.__enter__()
