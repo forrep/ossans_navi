@@ -6,7 +6,7 @@ import re
 from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
-from typing import Any, Optional
+from typing import Any, Optional, overload
 
 import html2text
 from PIL import Image, ImageFile
@@ -16,7 +16,7 @@ from ossans_navi.common.cache import LRUCache
 from ossans_navi.service.ai_service import AiModels, AiService, AiServiceSession, LastshotResponse
 from ossans_navi.service.slack_service import SlackService
 from ossans_navi.type.ossans_navi_types import OssansNaviConfig
-from ossans_navi.type.slack_type import SlackFile, SlackMessage, SlackMessageEvent, SlackMessageLite, SlackSearches
+from ossans_navi.type.slack_type import SlackFile, SlackMessage, SlackMessageEvent, SlackMessageLite, SlackSearches, SlackSearchTerm
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +31,8 @@ class OssansNaviService:
         self.event = event
         self.config = self.get_config()
         self.slack_searches = SlackSearches()
+        self.slack_file_permalinks: dict[str, SlackFile] = {}
+        """同一 permalink に紐づく SlackFile を一つのインスタンスにまとめるために permalink から SlackFile を取得する辞書"""
 
     @staticmethod
     def json_dumps_converter(v) -> str:
@@ -95,9 +97,7 @@ class OssansNaviService:
                         "files": [
                             {
                                 "title": v.title,
-                                **(
-                                    {"link": v.permalink} if v.is_public else {}
-                                ),
+                                "link": v.permalink,
                                 **(
                                     {
                                         "description": v.description[:limit] + (ellipsis if len(v.description) > limit else "")
@@ -108,9 +108,9 @@ class OssansNaviService:
                                         "text": v.text[:limit] + (ellipsis if len(v.text) > limit else "")
                                     } if v.text else {}
                                 ),
-                            } for v in message.files if v.is_textualize
+                            } for v in message.files if v.is_textualize and v.is_public
                         ]
-                    } if len([v for v in message.files if v.is_textualize]) > 0 else {}
+                    } if len([v for v in message.files if v.is_textualize and v.is_public]) > 0 else {}
                 ),
                 **(
                     {
@@ -179,8 +179,29 @@ class OssansNaviService:
             ],
         ]
 
+    @overload
+    def _integrate_duplicated_slack_file(self, messages: SlackMessageLite) -> SlackMessageLite:
+        ...
+
+    @overload
+    def _integrate_duplicated_slack_file(self, messages: list[SlackMessageLite]) -> list[SlackMessageLite]:
+        ...
+
+    def _integrate_duplicated_slack_file(self, messages: SlackMessageLite | list[SlackMessageLite]) -> SlackMessageLite | list[SlackMessageLite]:
+        if isinstance(messages, SlackMessageLite):
+            messages.files = [self.slack_file_permalinks.setdefault(file.permalink, file) for file in messages.files]
+            return messages
+        elif isinstance(messages, list):
+            for message in messages:
+                message.files = [self.slack_file_permalinks.setdefault(file.permalink, file) for file in message.files]
+            return messages
+        raise TypeError(f"invalid type {type(messages)}")
+
     def get_thread_messages(self) -> list[SlackMessageLite]:
-        thread_messages = self.slack_service.get_conversations_replies(self.event.channel_id(), self.event.thread_ts())
+        # SlackMessageLite を取得した後に _integrate_duplicated_slack_file で含まれる SlackFile のインスタンスを1つにまとめる
+        thread_messages = self._integrate_duplicated_slack_file(
+            self.slack_service.get_conversations_replies(self.event.channel_id(), self.event.thread_ts())
+        )
         logger.info(
             "conversations_replies="
             + json.dumps([v.to_dict() for v in thread_messages], ensure_ascii=False, default=OssansNaviService.json_dumps_converter)
@@ -410,6 +431,50 @@ class OssansNaviService:
         # キャッシュに追加した後で再度キャッシュから情報を読み込む
         OssansNaviService.load_image_description_from_cache(thread_messages)
 
+    def search(
+        self,
+        terms_strs: list[str],
+        is_additional: bool = False,
+        is_get_messages: bool = False
+    ) -> None:
+        # 文字列の検索ワードをパースして SlackSearchTerm に変換、同時に無効な条件を削除
+        terms = [term for term in [SlackSearchTerm.parse(term_str) for term_str in terms_strs] if term is not None]
+
+        # 絞り込みのキーワード数が少なく、文字数も少ない検索条件から順番に検索する
+        # なぜならば「ワードA AND ワードB」の検索結果が 10件ならば 「ワードA AND ワードB AND ワードC」は実行する必要がなくスキップできるため
+        for current_term in sorted(terms):
+            if (
+                any(
+                    [
+                        (result.is_full and result.term.is_subset(current_term)) or result.term == current_term
+                        for result in self.slack_searches.results
+                    ]
+                )
+            ):
+                # 今回の検索条件（current_term）が部分集合（サブセット）となる検索済み結果が slack_searches 内にすでにあり
+                # かつ、それが全件取得済み（is_full）ならば current_term は検索の必要が無いのでスキップする
+                # つまり「ワードA AND ワードB」の検索結果を 10件取得済みならば 「ワードA AND ワードB AND ワードC」を検索する必要が無い
+                continue
+
+            result = self.slack_service.search(
+                current_term,
+                self.event.user,
+                self.event.channel_id(),
+                self.event.thread_ts(),
+                self.config.viewable_private_channels,
+                is_additional,
+                is_get_messages,
+            )
+            # 複数のメッセージに同一のファイルが紐づく可能性がある。
+            # それらは別のインスタンスとなっているので SlackFile.permalink 単位で一つのインスタンスにまとめる
+            self._integrate_duplicated_slack_file([message.message for message in result.messages])
+            self.slack_searches.add(result)
+            if result.term.date_from is None and result.term.date_to is None:
+                if result.is_meny_messages():
+                    self.slack_searches.add(SlackService.duplicate_search_result(result, 2))
+                if result.is_too_meny_messages():
+                    self.slack_searches.add(SlackService.duplicate_search_result(result, 1))
+
     def do_slack_searches(self, thread_messages: list[SlackMessageLite]) -> Generator[None, None, None]:
         # Slack ワークスペースを検索するワードを生成してもらう
         # function calling を利用しない理由は、適切にキーワードを生成してくれないケースがあったり、実行回数などコントロールしづらいため
@@ -428,16 +493,9 @@ class OssansNaviService:
 
             slack_search_words = self.ai_service.request_slack_search_words(self.models.high_quality, request_slack_search_words_session)
 
-            # Slack のキーワード検索を実行して、slack_searches に積み込む
-            # slack_searches.add() 内ではヒット件数（total_count）が少ない方がより絞り込めた良いキーワードと判断してヒット件数の昇順で並べる
-            self.slack_service.search(
-                self.slack_searches,
-                slack_search_words,
-                self.event.user,
-                self.event.channel_id(),
-                self.event.thread_ts(),
-                self.config.viewable_private_channels
-            )
+            # Slack API でキーワード検索を実行して self.slack_searches に積み込む処理
+            # slack_searches 内ではヒット件数（total_count）が少ない方がより絞り込めた良いキーワードと判断してヒット件数の昇順で並べる
+            self.search(slack_search_words)
 
             if self.slack_searches.result_len() == 0:
                 # キーワード自体が生成されなかったケース、つまり検索が必要がない質問やメッセージに対する応答
@@ -610,27 +668,10 @@ class OssansNaviService:
                     # 最後の refine ではない→ まだ検索結果を精査するフェーズが残っている
                     if len(refine_slack_searches_response.additional_search_words) > 0:
                         # 追加の検索ワードが提供された場合は検索する
-                        self.slack_service.search(
-                            self.slack_searches,
-                            refine_slack_searches_response.additional_search_words,
-                            self.event.user,
-                            self.event.channel_id(),
-                            self.event.thread_ts(),
-                            self.config.viewable_private_channels,
-                            True,
-                        )
+                        self.search(refine_slack_searches_response.additional_search_words, True)
                     if len(refine_slack_searches_response.get_messages) > 0:
                         # 追加の取得メッセージが提供された場合は検索する
-                        self.slack_service.search(
-                            self.slack_searches,
-                            refine_slack_searches_response.get_messages,
-                            self.event.user,
-                            self.event.channel_id(),
-                            self.event.thread_ts(),
-                            self.config.viewable_private_channels,
-                            True,
-                            True
-                        )
+                        self.search(refine_slack_searches_response.get_messages, True, True)
 
     def lastshot(self, thread_messages: list[SlackMessageLite]) -> list[LastshotResponse]:
         current_messages: list[SlackMessage] = []
@@ -724,7 +765,9 @@ class OssansNaviService:
             if message.is_private:
                 logger.debug(f"Do not get private conversations, channel_id={message.channel_id}, thread_ts={message.message.thread_ts}")
                 return
-            messages = self.slack_service.get_conversations_replies(message.channel_id, message.message.thread_ts, True)
+            messages = self._integrate_duplicated_slack_file(
+                self.slack_service.get_conversations_replies(message.channel_id, message.message.thread_ts, True)
+            )
             if len(messages) == 0:
                 # プライベートチャネルに対する読み取り権限がないなどの理由で空配列が返ってくるパターンがある
                 # その場合は何もせずに終了する

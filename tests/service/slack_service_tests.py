@@ -1,11 +1,11 @@
 import os
-import textwrap
 
 import pytest
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 from slack_sdk.errors import SlackApiError
 
+from ossans_navi.assets import dedent
 from ossans_navi.service.slack_service import SlackService
 from ossans_navi.service.slack_wrapper import SlackWrapper
 from ossans_navi.type.slack_type import SlackChannel, SlackUser
@@ -19,7 +19,7 @@ def set_env_vers():
 
 
 def test_convert_markdown_to_mrkdwn_title():
-    markdown_text = textwrap.dedent("""
+    markdown_text = dedent("""
     - list1
         - list2
     　- list3
@@ -36,9 +36,8 @@ def test_convert_markdown_to_mrkdwn_title():
     some text `strong text` normal text
     some text`strong text`normal text
     link to [example.com](https://example.com/) here
-    """
-    ).strip()
-    assert SlackService.convert_markdown_to_mrkdwn(markdown_text) == textwrap.dedent("""
+    """, 4).strip()
+    assert SlackService.convert_markdown_to_mrkdwn(markdown_text) == dedent("""
     • list1
         • list2
     　• list3
@@ -55,22 +54,21 @@ def test_convert_markdown_to_mrkdwn_title():
     some text `strong text` normal text
     some text `strong text` normal text
     link to <https://example.com/|example.com> here
-    """
-    ).strip()
+    """, 4).strip()
 
 
 def test_convert_markdown_to_mrkdwn_codeblock():
-    markdown_text = textwrap.dedent("""
+    markdown_text = dedent("""
     ```markdown
     # title
     ## title
     some text **strong text** normal text
     ```
-    
+
     ```html
     code block
     ```
-    
+
     ```1234
     code block
     ```
@@ -88,19 +86,18 @@ def test_convert_markdown_to_mrkdwn_codeblock():
     ```markdown
     - line1
     ```
-    """
-    ).strip()
-    assert SlackService.convert_markdown_to_mrkdwn(markdown_text) == textwrap.dedent("""
+    """, 4).strip()
+    assert SlackService.convert_markdown_to_mrkdwn(markdown_text) == dedent("""
     ```
     # title
     ## title
     some text **strong text** normal text
     ```
-    
+
     ```
     code block
     ```
-    
+
     ```
     1234
     code block
@@ -120,20 +117,7 @@ def test_convert_markdown_to_mrkdwn_codeblock():
     ```
     - line1
     ```
-    """
-    ).strip()
-
-
-def test_validate_words():
-    assert SlackService._validate_words([
-        "テスト1 from:<@テストさんのユーザーID> テスト2",
-        "from:<@U7EJL55XX>",
-        "テスト1 from:<@テスト>",
-        "テスト from:<@U7EJL55XX>",
-    ]) == [
-        "from:<@U7EJL55XX>",
-        "テスト from:<@U7EJL55XX>",
-    ]
+    """, 4).strip()
 
 
 @pytest.fixture

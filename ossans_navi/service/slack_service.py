@@ -19,7 +19,7 @@ from ossans_navi import config
 from ossans_navi.common.cache import LRUCache
 from ossans_navi.service.slack_wrapper import SlackWrapper
 from ossans_navi.type.slack_type import (SlackAttachment, SlackChannel, SlackFile, SlackMessage, SlackMessageEvent, SlackMessageLite, SlackSearch,
-                                         SlackSearches, SlackSearchTerm, SlackUser)
+                                         SlackSearchTerm, SlackUser)
 
 logger = logging.getLogger(__name__)
 
@@ -536,7 +536,7 @@ class SlackService:
             is_private=message['channel']['is_private'],
         )
 
-    def _search(
+    def search(
         self,
         term: SlackSearchTerm,
         recieved_message_user: SlackUser,
@@ -576,60 +576,7 @@ class SlackService:
         )
 
     @staticmethod
-    def _validate_words(words: list[str]) -> list[str]:
-        results = []
-        for word in words:
-            if re.search(r'\bfrom:(?!<@[A-Z0-9]+>)', word):
-                continue
-            results.append(word)
-        return results
-
-    def search(
-        self,
-        slack_searches: SlackSearches,
-        terms_str: list[str],
-        recieved_message_user: SlackUser,
-        recieved_message_channel_id: str,
-        recieved_message_thread_ts: str,
-        viewable_private_channels: list[str],
-        is_additional: bool = False,
-        is_get_messages: bool = False
-    ) -> None:
-        terms_str = SlackService._validate_words(terms_str)
-        terms = sorted([SlackSearchTerm.parse(term) for term in terms_str])
-
-        # 絞り込みのキーワード数が少なく、文字数も少ない検索条件から順番に検索する
-        # なぜならば「ワードA AND ワードB」の検索結果が 10件ならば 「ワードA AND ワードB AND ワードC」の検索は実行の必要がないからスキップできるように
-        for current_term in terms:
-            if (
-                any(
-                    [
-                        (result.is_full and result.term.is_subset(current_term)) or result.term == current_term
-                        for result in slack_searches.results
-                    ]
-                )
-            ):
-                # 検索済み結果に今回の検索条件より緩く、かつ全検索結果を取得済みならば current_term は検索の必要が無いのでスキップする
-                continue
-
-            result = self._search(
-                current_term,
-                recieved_message_user,
-                recieved_message_channel_id,
-                recieved_message_thread_ts,
-                viewable_private_channels,
-                is_additional,
-                is_get_messages,
-            )
-            slack_searches.add(result)
-            if result.term.date_from is None and result.term.date_to is None:
-                if result.is_meny_messages():
-                    slack_searches.add(SlackService._duplicate_search_result(result, 2))
-                if result.is_too_meny_messages():
-                    slack_searches.add(SlackService._duplicate_search_result(result, 1))
-
-    @staticmethod
-    def _duplicate_search_result(result: SlackSearch, year: int) -> SlackSearch:
+    def duplicate_search_result(result: SlackSearch, year: int) -> SlackSearch:
         """指定した結果を指定の年数内のメッセージで絞り込んで新しい検索結果を生成する、同時に検索ワードに after:yyyy-mm-dd を付与する"""
         years_ago = datetime.datetime.now() - (datetime.timedelta(days=365) * year) - datetime.timedelta(days=1)
         term = SlackSearchTerm(result.term.words, years_ago, None)

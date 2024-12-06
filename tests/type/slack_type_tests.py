@@ -42,3 +42,15 @@ def test_slack_search_term():
     o5_2 = SlackSearchTerm(("ワード1", "ワード2",), datetime.datetime(2024, 11, 8, 0, 0, 0, 0), datetime.datetime(2024, 12, 6, 0, 0, 0, 0))
     o5_3 = SlackSearchTerm(("ワード1", "ワード2",), datetime.datetime(2024, 11, 9, 0, 0, 0, 0), datetime.datetime(2024, 12, 7, 0, 0, 0, 0))
     assert sorted([o5_1, o5_2, o5_3]) == sorted([o5_3, o5_2, o5_1]) == [o5_1, o5_2, o5_3]
+
+    # 不正フォーマットが指定されたら None を返却する
+    o6_1 = SlackSearchTerm.parse("ワード1 from:<@テストさんのユーザーID> ワード2")
+    assert o6_1 is None
+
+    o7_1 = SlackSearchTerm.parse("ワード1 ワード2")
+    o7_2 = SlackSearchTerm(frozenset(("ワード1", "ワード2",)), None, None)
+    assert o7_1 == o7_2
+
+    o8_1 = SlackSearchTerm.parse("ワード1 ワード2 after:2024-11-09 before:2024-12-07")
+    o8_2 = SlackSearchTerm(frozenset(("ワード1", "ワード2",)), datetime.datetime(2024, 11, 9, 0, 0, 0, 0), datetime.datetime(2024, 12, 7, 0, 0, 0, 0))
+    assert o8_1 == o8_2

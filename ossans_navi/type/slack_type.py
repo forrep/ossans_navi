@@ -303,7 +303,11 @@ class SlackSearchTerm:
         )
 
     @staticmethod
-    def parse(term: str) -> "SlackSearchTerm":
+    def parse(term: str) -> Optional["SlackSearchTerm"]:
+        if re.search(r'\bfrom:(?!<@[A-Z0-9]+>)', term):
+            # from:@XXX と指定するはずが from:<@名前> のような不正フォーマットが指定されると Slack API がエラーを返すので有効な絞り込み条件として採用しない
+            # ※ LLM がたまに生成してしまう
+            return None
         words: list[str] = []
         date_from: Optional[datetime.datetime] = None
         date_to: Optional[datetime.datetime] = None
@@ -347,7 +351,7 @@ class SlackSearches:
     messages: dict[str, SlackMessage] = dataclasses.field(default_factory=dict, init=False)
     files: dict[str, SlackFile] = dataclasses.field(default_factory=dict, init=False)
     total_count: int = dataclasses.field(default=0, init=False)
-    used: set[str] = dataclasses.field(default_factory=set, init=False)
+    _used: set[str] = dataclasses.field(default_factory=set, init=False)
     _lastshot: dict[str, SlackMessage] = dataclasses.field(default_factory=dict, init=False)
     _lock: RLock = dataclasses.field(default_factory=RLock, init=False)
     _lastshot_permalinks: set[str] = dataclasses.field(default_factory=set, init=False)
@@ -366,12 +370,12 @@ class SlackSearches:
 
     def use(self, permalinks: list[str] | str) -> None:
         if isinstance(permalinks, list):
-            self.used.update(permalinks)
+            self._used.update(permalinks)
         if isinstance(permalinks, str):
-            self.used.add(permalinks)
+            self._used.add(permalinks)
 
     def is_used(self, permalink: str) -> bool:
-        return permalink in self.used
+        return permalink in self._used
 
     def add_lastshot(self, permalinks: list[str]) -> None:
         """
