@@ -2,6 +2,7 @@ import datetime
 import json
 import re
 import time
+from typing import Any
 
 from ossans_navi import config
 from ossans_navi.type.slack_type import SlackChannel
@@ -173,7 +174,7 @@ def get_slack_search_word_system_prompt(channel: SlackChannel, settings: str):
     ).strip()
 
 
-def get_information_obtained_by_rag_prompt(info: list, words: list[str] | None = None) -> str:
+def get_information_obtained_by_rag_prompt(info: list[dict[str, Any]], words: list[str] | None = None) -> str:
     return (
         "# Information obtained at RAG (JSON format)\n"
         + (

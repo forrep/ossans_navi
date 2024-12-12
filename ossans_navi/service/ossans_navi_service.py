@@ -40,27 +40,86 @@ class OssansNaviService:
             return v.strftime('%Y-%m-%d %H:%M:%S')
         raise TypeError(f"Object of type {type(v).__name__} is not JSON serializable")
 
+    @overload
     @staticmethod
     def slack_message_to_ai_request(
         message: SlackMessage | SlackMessageLite,
         limit: int = 800,
         with_permalink: bool = True,
         ellipsis: str = "...",
+        check_dup_files: bool = False,
+        check_dup_files_dict: Optional[dict[str, int]] = None,
     ) -> dict[str, Any]:
+        ...
+
+    @overload
+    @staticmethod
+    def slack_message_to_ai_request(
+        message: list[SlackMessage],
+        limit: int = 800,
+        with_permalink: bool = True,
+        ellipsis: str = "...",
+        check_dup_files: bool = False,
+        check_dup_files_dict: Optional[dict[str, int]] = None,
+    ) -> list[dict[str, Any]]:
+        ...
+
+    @staticmethod
+    def slack_message_to_ai_request(
+        message: SlackMessage | SlackMessageLite | list[SlackMessage],
+        limit: int = 800,
+        with_permalink: bool = True,
+        ellipsis: str = "...",
+        check_dup_files: bool = False,
+        check_dup_files_dict: Optional[dict[str, int]] = None,
+    ) -> dict[str, Any] | list[dict[str, Any]]:
+        check_dup_files_dict = {} if check_dup_files_dict is None else check_dup_files_dict
+        if isinstance(message, list):
+            return [
+                OssansNaviService.slack_message_to_ai_request(
+                    v,
+                    limit,
+                    with_permalink,
+                    ellipsis,
+                    check_dup_files,
+                    check_dup_files_dict,
+                ) for v in message
+            ]
         if isinstance(message, SlackMessage):
             return {
                 **(
-                    OssansNaviService.slack_message_to_ai_request(message.message, limit, with_permalink, ellipsis)
+                    OssansNaviService.slack_message_to_ai_request(
+                        message.message,
+                        limit,
+                        with_permalink,
+                        ellipsis,
+                        check_dup_files,
+                        check_dup_files_dict,
+                    )
                 ),
                 "channel": message.channel,
                 **(
                     {
-                        "root_message": OssansNaviService.slack_message_to_ai_request(v, limit, with_permalink, ellipsis)
+                        "root_message": OssansNaviService.slack_message_to_ai_request(
+                            v,
+                            limit,
+                            with_permalink,
+                            ellipsis,
+                            check_dup_files,
+                            check_dup_files_dict,
+                        )
                     } if (v := message.root_message) else {}
                 ),
                 **(
                     {
-                        "replies": [OssansNaviService.slack_message_to_ai_request(v, limit, with_permalink, ellipsis) for v in message.messages]
+                        "replies": [OssansNaviService.slack_message_to_ai_request(
+                            v,
+                            limit,
+                            with_permalink,
+                            ellipsis,
+                            check_dup_files,
+                            check_dup_files_dict,
+                        ) for v in message.messages]
                     } if len(message.messages) > 0 else {}
                 ),
             }
@@ -99,15 +158,23 @@ class OssansNaviService:
                                 "title": v.title,
                                 "link": v.permalink,
                                 **(
-                                    {
-                                        "description": v.description[:limit] + (ellipsis if len(v.description) > limit else "")
-                                    } if v.description else {}
-                                ),
-                                **(
-                                    {
-                                        "text": v.text[:limit] + (ellipsis if len(v.text) > limit else "")
-                                    } if v.text else {}
-                                ),
+                                    {} if (
+                                        # 重複ファイルをチェックする、かつ1度登場している場合は、description と text を入力しない
+                                        check_dup_files
+                                        and (1 if v.permalink in check_dup_files_dict else check_dup_files_dict.setdefault(v.permalink, 0)) > 0
+                                    ) else {
+                                        **(
+                                            {
+                                                "description": v.description[:limit] + (ellipsis if len(v.description) > limit else "")
+                                            } if v.description else {}
+                                        ),
+                                        **(
+                                            {
+                                                "text": v.text[:limit] + (ellipsis if len(v.text) > limit else "")
+                                            } if v.text else {}
+                                        ),
+                                    }
+                                )
                             } for v in message.files if v.is_textualize and v.is_public
                         ]
                     } if len([v for v in message.files if v.is_textualize and v.is_public]) > 0 else {}
@@ -691,10 +758,16 @@ class OssansNaviService:
             )
         )
         # GPT-4o mini が精査してくれた結果を元にトークン数が収まる範囲で入力データとする
+        check_dup_files_dict: dict[str, int] = {}
         for content in self.slack_searches.lastshot_messages:
             tokens = self.models.high_quality.tokenizer.content_tokens(
                 json.dumps(
-                    OssansNaviService.slack_message_to_ai_request(content, limit=10000),
+                    OssansNaviService.slack_message_to_ai_request(
+                        content,
+                        limit=10000,
+                        check_dup_files=True,
+                        check_dup_files_dict=check_dup_files_dict
+                    ),
                     ensure_ascii=False,
                     separators=(',', ':')
                 )
@@ -712,7 +785,7 @@ class OssansNaviService:
                 assets.get_lastshot_system_prompt(self.event.channel, self.event.settings),
                 thread_messages,
                 assets.get_information_obtained_by_rag_prompt(
-                    [OssansNaviService.slack_message_to_ai_request(message, limit=10000) for message in SlackMessage.sort(current_messages)]
+                    OssansNaviService.slack_message_to_ai_request(SlackMessage.sort(current_messages), limit=10000, check_dup_files=True)
                 ),
                 limit=10000,
                 limit_last_message=30000,
