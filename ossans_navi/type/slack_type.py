@@ -477,28 +477,83 @@ class SlackMessageEvent:
     def channel(self, value: SlackChannel):
         self._channel = value
 
+    @property
     def channel_id(self) -> str:
         return self.source["channel"]
 
+    @property
     def text(self) -> str:
+        if self.is_message_changed():
+            # メッセージが変更された場合、変更後のメッセージを返す
+            return self.source["message"]["text"]
+        if self.is_message_deleted():
+            # メッセージが削除された場合、固定メッセージを返す
+            return "This message was deleted."
         return self.source["text"]
 
+    @property
     def user_id(self) -> str:
+        if self.is_message_changed():
+            # メッセージが変更された場合、変更後のユーザー ID を返す
+            return self.source["message"]["user"]
+        if self.is_message_deleted():
+            # メッセージが削除された場合、変更前のユーザー ID を返す（そもそも変更後のメッセージというデータが存在しないため）
+            return self.source["previous_message"]["user"]
         return self.source["user"]
 
+    @property
     def ts(self) -> str:
+        if self.is_message_changed():
+            # メッセージが変更された場合でも、元メッセージの送信日時（ts）を返す
+            # ts は変更されないので self.source["previous_message"]["ts"] と self.source["message"]["ts"] は同じ内容のはずだがパターン網羅はできていない
+            # self.source["ts"] には更新日時が保持されているが使わない
+            return self.source["previous_message"]["ts"]
+        if self.is_message_deleted():
+            # メッセージが削除された場合でも、元メッセージの送信日時（ts）を返す
+            # is_message_changed() と is_message_deleted() のパターンで分岐の必要は無いが、分かりやすさのため分岐している
+            return self.source["previous_message"]["ts"]
         return self.source["ts"]
 
+    @property
+    def event_ts(self) -> str:
+        """
+        イベントのタイムスタンプを返却する、 event_ts という名称だが source["ts"] を返す
+        通常イベントでは source["ts"] に送信日、更新イベントでは source["ts"] に更新日が保持されている
+        SlackMessageEvent.ts は更新イベントでも元イベントの ts を返すため、常に最新の ts を返却する当メソッドとは仕様が異なる
+        source["event_ts"] と source["ts"] は同じ値が保持されているようだが、正確な仕様が不明のため、ここでは source["ts"] を返却している
+        なぜならば、更新・削除イベントで元イベントを探すために source["previous_message"]["ts"] と source["ts"] を比較するシーンで、
+        source["event_ts"] を利用するよりも整合性が取れている
+        """
+        return self.source["ts"]
+
+    @property
     def thread_ts(self) -> str:
-        # スレッドの場合はスレッドの大元メッセージの ts を保持する thread_ts を利用、スレッドではない場合はそのメッセージからスレッドを作るので ts を利用
+        # スレッドの場合は親メッセージの ts を持つ thread_ts を返す
+        # スレッドではない場合はそのメッセージからスレッドを作るので ts を返す
+        if self.is_message_changed():
+            # メッセージが変更された場合でも、元メッセージの thread_ts を返す
+            # thread_ts は変更されないので self.source["previous_message"]["thread_ts"] と self.source["message"]["thread_ts"] は同じ内容のはずだがパターン網羅はできていない
+            return (
+                self.source["previous_message"]["thread_ts"]
+                if "thread_ts" in self.source["previous_message"] else
+                self.source["previous_message"]["ts"]
+            )
+        if self.is_message_deleted():
+            # メッセージが削除された場合でも、元メッセージの thread_ts を返す
+            # 削除には2パターンあり、スレッドのルートメッセージ削除された場合は message_changed イベントで論理削除される、この場合は source["message"] と source["previous_message"] の両方が存在する
+            # しかし message_deleted イベントの場合は source["message"] が存在しないため、両方のパターンで使える source["previous_message"] を利用する
+            # is_message_changed と is_message_deleted は同一の仕様だが、コメントなど分かりやすさのために処理を分けている
+            return (
+                self.source["previous_message"]["thread_ts"]
+                if "thread_ts" in self.source["previous_message"] else
+                self.source["previous_message"]["ts"]
+            )
         return self.source["thread_ts"] if "thread_ts" in self.source else self.source["ts"]
 
-    def timestamp(self) -> str:
-        return datetime.datetime.fromtimestamp(float(self.ts())).strftime('%Y-%m-%d %H:%M:%S')
-
     def _mentions(self) -> list[str]:
-        return [user_id[0] for user_id in re.findall(r'<@([A-Z0-9]+)(\|[^>]+?)?>', self.text())]
+        return [user_id[0] for user_id in re.findall(r'<@([A-Z0-9]+)(\|[^>]+?)?>', self.text)]
 
+    @property
     def mentions(self) -> list[str]:
         return [
             *(self._mentions()),
@@ -510,7 +565,7 @@ class SlackMessageEvent:
         ]
 
     def _is_broadcast(self) -> bool:
-        return bool(re.search(r'<!(?:channel|here)>', self.text()))
+        return bool(re.search(r'<!(?:channel|here)>', self.text))
 
     def is_broadcast(self) -> bool:
         return any([
@@ -522,24 +577,82 @@ class SlackMessageEvent:
         return not self.is_talk_to_other and self.is_next_message_from_ossans_navi
 
     def is_thread(self) -> bool:
+        if self.is_message_changed() or self.is_message_deleted():
+            # 変更イベント・削除イベントでは元メッセージを元にスレッド判定を行う
+            # スレッドかどうかは変化しないので self.source["previous_message"] と self.source["message"] で同じ判定が可能なはずだがパターン網羅はできていない
+            return "thread_ts" in self.source["previous_message"]
         return 'thread_ts' in self.source
 
     def is_message_post(self) -> bool:
         """
         応答が必要なメッセージ（1, 2 の条件に当てはまる）に True を返却
-        1. text, channel, user, ts が存在する
-        2. 次のいずれかに当てはまる
+        1. type: message である
+        2. text, channel, user, ts が存在する
+        3. 次のいずれかに当てはまる
             - subtype が存在しない → 通常メッセージ
             - subtype が file_share → テキストスニペットの送信
             - subtype が thread_broadcast のいずれか → チャネルにも投稿するチェックを入れてスレッド返信
         """
         return (
-            all(v in self.source for v in ("text", "channel", "user", "ts", ))
+            self.source.get("type") == "message"
+            and all(v in self.source for v in ("text", "channel", "user", "ts", ))
             and (
                 "subtype" not in self.source
                 or self.source["subtype"] in ("file_share", "thread_broadcast")
             )
         )
+
+    def is_message_changed(self) -> bool:
+        """
+        メッセージの編集イベントである場合は True を返却
+        """
+        if (
+            self.source.get("type") == "message"
+            and self.source.get("subtype") == "message_changed"
+            and all(v in self.source for v in ("message", "previous_message", "channel", "ts", ))
+        ):
+            message: dict[str, dict | str] = self.source["message"]
+            if (
+                message.get("type") == "message"
+                and all(v in message for v in ("text", "user", "ts", ))
+                # 普通の更新イベント時は "hidden" パラメータが存在しない
+                # hidden: True は更新イベントに見せかけてスレッドのルートメッセージを削除した場合に発生するイベント
+                and message.get("hidden", False) is False
+            ):
+                return True
+        return False
+
+    def is_message_deleted(self) -> bool:
+        """
+        メッセージの削除イベントである場合は True を返却
+        """
+        message: dict[str, dict | str]
+        if (
+            self.source.get("type") == "message"
+            and self.source.get("subtype") == "message_changed"
+            and all(v in self.source for v in ("message", "previous_message", "channel", "ts", ))
+        ):
+            message = self.source["message"]
+            if (
+                message.get("type") == "message"
+                and all(v in message for v in ("text", "user", "ts", ))
+                # 普通の更新イベント時は "hidden" パラメータが存在しない
+                # hidden: True は更新イベントに見せかけてスレッドのルートメッセージを削除した場合に発生するイベント
+                and message.get("hidden", False) is True
+            ):
+                return True
+        elif (
+            self.source.get("type") == "message"
+            and self.source.get("subtype") == "message_deleted"
+            and all(v in self.source for v in ("previous_message", "channel", "ts", ))
+        ):
+            message = self.source["previous_message"]
+            if (
+                message.get("type") == "message"
+                and all(v in message for v in ("text", "user", "ts"))
+            ):
+                return True
+        return False
 
     def is_open_channel(self) -> bool:
         return self.source.get("channel_type") == "channel"
@@ -551,7 +664,7 @@ class SlackMessageEvent:
         return self.classification in ("question",)
 
     def _is_mention_to_subteam(self) -> bool:
-        return bool(re.search(r'<!subteam\^[^>]+>', self.text()))
+        return bool(re.search(r'<!subteam\^[^>]+>', self.text))
 
     def is_mention_to_subteam(self) -> bool:
         return any([
@@ -563,4 +676,4 @@ class SlackMessageEvent:
         return dataclasses.asdict(self)
 
     def id(self) -> str:
-        return hashlib.sha256(f"{self.channel_id()},{self.thread_ts()},{self.ts()}".encode('utf8')).hexdigest()[:16]
+        return hashlib.sha256(f"{self.channel_id},{self.thread_ts},{self.ts}".encode('utf8')).hexdigest()[:16]

@@ -27,38 +27,65 @@ logger = logging.getLogger(__name__)
 def handle_message_events(say, event: dict[str, dict]):
     logger.info("event=" + json.dumps(event, ensure_ascii=False))
     message_event = SlackMessageEvent(event)
-    if not message_event.is_message_post():
-        logger.info("This is not message_post event, finished")
-        return
 
     def future_callback(v):
-        logger.info(f"Event finished: {message_event.id()} ({message_event.channel_id()},{message_event.thread_ts()},{message_event.ts()})")
+        logger.info(f"Event finished: {message_event.id()} ({message_event.channel_id},{message_event.thread_ts},{message_event.ts})")
+        # 応答まで至ったパターンはロックを取ってから finish が必要なのですでに終了済み、重複して終了しても問題なし
+        # それ以外パターンはまだ finish してないのでここで finish が必要
         EVENT_GUARD.finish(message_event)
 
-    # 処理キューに入れる
+    # ロックを取得してから処理キューに入れる処理
+    # ロックしないと応答が二重になるケースが発生する
     with EVENT_GUARD:
-        EVENT_GUARD.queue(message_event)
+        if message_event.is_message_post():
+            # メッセージの投稿イベントの場合
+            EVENT_GUARD.queue(message_event)
+            logger.info(f"Event queued(message_post): {message_event.id()} ({message_event.channel_id},{message_event.thread_ts},{message_event.ts})")
+        elif message_event.is_message_changed():
+            # 更新イベントの場合
+            if EVENT_GUARD.is_queueed_or_running(message_event):
+                # 更新イベントは、元メッセージが QUEUED か RUNNING の場合（つまりまだ応答してない）場合に限ってキューに追加する
+                # このパターンのためにロックが必要、ロックしてないと is_queueed_or_running 判定後に応答が終了する可能性もある
+                EVENT_GUARD.queue(message_event)
+                logger.info(
+                    f"Event queued(message_changed): {message_event.id()} ({message_event.channel_id},{message_event.thread_ts},{message_event.ts})"
+                )
+            else:
+                logger.info("This message_changed event is terminated because it is not QUEUED or RUNNING.")
+                return
+        elif message_event.is_message_deleted():
+            # 削除イベントの場合
+            if EVENT_GUARD.is_queueed_or_running(message_event):
+                # 削除された場合は、元メッセージに応答する必要がなくなる
+                # 削除イベントは、該当メッセージが QUEUED か RUNNING の場合（つまりまだ応答してない）場合、そのキューをキャンセルする
+                EVENT_GUARD.cancel(message_event)
+                return
+            else:
+                logger.info("This message_deleted event is terminated because it is not QUEUED or RUNNING.")
+                return
+        else:
+            logger.info("This is not message_post or message_changed event, finished")
+            return
         future = _EXECUTOR.submit(do_ossans_navi_response_safe, say, message_event)
-        logger.info(f"Event queued: {message_event.id()} ({message_event.channel_id()},{message_event.thread_ts()},{message_event.ts()})")
         future.add_done_callback(future_callback)
 
 
 def do_ossans_navi_response_safe(say, event: SlackMessageEvent):
     with EVENT_GUARD:
         if EVENT_GUARD.is_canceled(event):
-            logger.info(f"Event canceled: {event.id()} ({event.channel_id()},{event.thread_ts()},{event.ts()})")
+            logger.info(f"Event canceled: {event.id()} ({event.channel_id},{event.thread_ts},{event.ts})")
             logger.info("Finished.")
             return
-        logger.info(f"Event started: {event.id()} ({event.channel_id()},{event.thread_ts()},{event.ts()})")
+        logger.info(f"Event started: {event.id()} ({event.channel_id},{event.thread_ts},{event.ts})")
         EVENT_GUARD.start(event)
 
     models = AiModels.new()
     try:
         # event の構築作業
         event.canceled_events.extend(EVENT_GUARD.get_canceled_events(event))
-        event.user = slack_service.get_user(event.user_id())
-        event.channel = slack_service.get_channel(event.channel_id())
-        mentions = [slack_service.get_user(user_id) for user_id in event.mentions()]
+        event.user = slack_service.get_user(event.user_id)
+        event.channel = slack_service.get_channel(event.channel_id)
+        mentions = [slack_service.get_user(user_id) for user_id in event.mentions]
         if event.is_dm() or len([user for user in mentions if user.user_id in slack_service.my_bot_user_id]) > 0:
             # DM でのやりとり、またはメンションされている場合を「メンション」と扱う
             event.is_mention = True
@@ -73,7 +100,7 @@ def do_ossans_navi_response_safe(say, event: SlackMessageEvent):
         for _ in do_ossans_navi_response(say, event, models):
             # yield のタイミングで処理が戻されるごとにイベントがキャンセルされていないか確認して、キャンセルされていれば終了する
             if EVENT_GUARD.is_canceled(event):
-                logger.info(f"Event canceled: {event.id()}({event.channel_id()},{event.thread_ts()},{event.ts()})")
+                logger.info(f"Event canceled: {event.id()}({event.channel_id},{event.thread_ts},{event.ts})")
                 logger.info("Finished.")
                 break
     except Exception as e:
@@ -81,7 +108,7 @@ def do_ossans_navi_response_safe(say, event: SlackMessageEvent):
         logger.error(e, exc_info=True)
         if event.is_mention:
             try:
-                say(text=f"申し訳ありません、次のエラーが発生したため回答できません\n\n```{str(e)}```", thread_ts=event.thread_ts())
+                say(text=f"申し訳ありません、次のエラーが発生したため回答できません\n\n```{str(e)}```", thread_ts=event.thread_ts)
             except Exception as e:
                 logger.error(e, exc_info=True)
     finally:
@@ -116,8 +143,8 @@ def do_ossans_navi_response(say, event: SlackMessageEvent, models: AiModels) -> 
         return
 
     # production で起動している場合は開発用チャネルには応答しない
-    if not config.DEVELOPMENT_MODE and event.channel_id() in (config.DEVELOPMENT_CHANNELS):
-        logger.info(f"Now in production mode. Ignoring development channel: {event.channel_id()}")
+    if not config.DEVELOPMENT_MODE and event.channel_id in (config.DEVELOPMENT_CHANNELS):
+        logger.info(f"Now in production mode. Ignoring development channel: {event.channel_id}")
         return
 
     # development で起動、DMで、かつ developer に入ってないなら応答しない
@@ -128,8 +155,8 @@ def do_ossans_navi_response(say, event: SlackMessageEvent, models: AiModels) -> 
                 logger.info(f"Now in development mode. Ignoring non developer: {event.user.name}")
                 return
         else:
-            if event.channel_id() not in (config.DEVELOPMENT_CHANNELS):
-                logger.info(f"Now in development mode. Ignoring non development channel: {event.channel_id()}")
+            if event.channel_id not in (config.DEVELOPMENT_CHANNELS):
+                logger.info(f"Now in development mode. Ignoring non development channel: {event.channel_id}")
                 return
 
     # DM の topic から設定を取得する
@@ -177,8 +204,8 @@ def do_ossans_navi_response(say, event: SlackMessageEvent, models: AiModels) -> 
         if event.is_reply_to_ossans_navi():
             # OssansNavi へ話かけているならリアクションで返す
             slack_service.add_reaction(
-                event.channel_id(),
-                event.ts(),
+                event.channel_id,
+                event.ts,
                 (
                     emoji_to_react
                     if (
@@ -258,31 +285,41 @@ def do_ossans_navi_response(say, event: SlackMessageEvent, models: AiModels) -> 
     yield
 
     if do_response:
-        say(
-            text=(
-                slack_service.disable_mention_if_not_active(
-                    SlackService.convert_markdown_to_mrkdwn(lastshot_response.response_message) + "\n"
-                    + (
-                        # 詳しい人へパスするメッセージはオープンチャネルの場合のみ投稿する
-                        SlackService.convert_markdown_to_mrkdwn(lastshot_response.confirm_message) if (
-                            isinstance(lastshot_response.confirm_message, str)
-                            and len(lastshot_response.confirm_message) > 0
-                            and event.is_open_channel()
-                        ) else ""
+        with EVENT_GUARD:
+            # 同タイミングでキャンセルされた場合に応答しないため、ロックした状態で応答処理をする
+            if EVENT_GUARD.is_canceled(event):
+                logger.info(f"Event canceled: {event.id()}({event.channel_id},{event.thread_ts},{event.ts})")
+                logger.info("Finished.")
+                return
+            say(
+                text=(
+                    slack_service.disable_mention_if_not_active(
+                        SlackService.convert_markdown_to_mrkdwn(lastshot_response.response_message) + "\n"
+                        + (
+                            # 詳しい人へパスするメッセージはオープンチャネルの場合のみ投稿する
+                            SlackService.convert_markdown_to_mrkdwn(lastshot_response.confirm_message) if (
+                                isinstance(lastshot_response.confirm_message, str)
+                                and len(lastshot_response.confirm_message) > 0
+                                and event.is_open_channel()
+                            ) else ""
+                        )
                     )
-                )
-            ),
-            thread_ts=event.thread_ts()
-        )
-        if config.RESPONSE_LOGGING_CHANNEL:
-            slack_service.chat_post_message(
-                config.RESPONSE_LOGGING_CHANNEL,
-                json.dumps({
-                    "cost": models.get_total_cost(),
-                    "channel": event.channel_id(),
-                    "thread_ts": event.thread_ts(),
-                }, ensure_ascii=False)
+                ),
+                thread_ts=event.thread_ts
             )
+            if config.RESPONSE_LOGGING_CHANNEL:
+                slack_service.chat_post_message(
+                    config.RESPONSE_LOGGING_CHANNEL,
+                    json.dumps({
+                        "cost": models.get_total_cost(),
+                        "channel": event.channel_id,
+                        "thread_ts": event.thread_ts,
+                    }, ensure_ascii=False)
+                )
+            # 応答した場合はロックしたまま finish する
+            # さもないと、応答しているのに同タイミングで is_queueed_or_running の判定が True となる可能性があるため
+            EVENT_GUARD.finish(event)
+
     # ここまで至ると正常終了
     logger.info("Finished normally.")
 

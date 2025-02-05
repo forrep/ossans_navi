@@ -40,48 +40,95 @@ class EventGuard:
         self.data: dict[str, dict[str, EventGuard.EventGuardData]] = {}
         self._lock = RLock()
 
+    @staticmethod
+    def _thread_key(event: SlackMessageEvent) -> str:
+        return f"{event.channel_id},{event.thread_ts}"
+
     def queue(self, event: SlackMessageEvent) -> None:
         with self:
-            thread_key = f"{event.channel_id()},{event.thread_ts()}"
+            thread_key = EventGuard._thread_key(event)
             val = self.data.setdefault(thread_key, {})
             canceled_events = []
             for key in val.keys():
-                val[key].status = EventGuard.Status.CANCELED
-                canceled_events.append(val[key].event)
-                canceled_events.extend(val[key].canceled_events)
-            val[event.ts()] = EventGuard.EventGuardData(EventGuard.Status.QUEUED, event, canceled_events)
+                if val[key].status in (EventGuard.Status.QUEUED, EventGuard.Status.RUNNING):
+                    # 同一スレッド内で QUEUED, RUNNING のイベントはキャンセルする、スレッド内では同時に1つのイベントに対する処理しか実行しない
+                    # キャンセルしたイベントを canceled_events に保持する、キャンセルしたイベントの内容も踏まえて処理するため
+                    # 例: メッセージ1で @ossans_navi にメンションされ、メッセージ2 はメンションが無い場合でも @ossans_navi のメンションとして処理する
+                    val[key].status = EventGuard.Status.CANCELED
+                    canceled_events.extend(val[key].canceled_events)
+                    if val[key].event.ts != event.ts:
+                        # キューに入っているイベントの ts と今回のイベントの ts が一致する場合は更新イベントであり、元メッセージがイベントとして登録されている
+                        # その場合は更新前の同一メッセージを canceled_events として扱わない、更新前のメッセージの情報は使う必要が無い
+                        canceled_events.append(val[key].event)
+            val[event.event_ts] = EventGuard.EventGuardData(EventGuard.Status.QUEUED, event, canceled_events)
             logger.info(f"EventGuard queued: {event.id()}")
             logger.info(f"EventGuard={self}")
 
     def start(self, event: SlackMessageEvent) -> None:
         with self:
-            thread_key = f"{event.channel_id()},{event.thread_ts()}"
+            thread_key = EventGuard._thread_key(event)
             val = self.data.setdefault(thread_key, {})
-            val[event.ts()].status = EventGuard.Status.RUNNING
+            val[event.event_ts].status = EventGuard.Status.RUNNING
             logger.info(f"EventGuard started: {event.id()}")
+            logger.info(f"EventGuard={self}")
+
+    def cancel(self, event: SlackMessageEvent) -> None:
+        """
+        削除イベントの時だけ利用する
+        削除された元イベントの情報をキューから探して CANCELED にする
+        """
+        with self:
+            thread_key = EventGuard._thread_key(event)
+            if thread_key not in self.data:
+                return
+            if event.ts not in self.data[thread_key]:
+                return
+            self.data[thread_key][event.ts].status = EventGuard.Status.CANCELED
+            logger.info(f"EventGuard canceled: {event.id()}")
             logger.info(f"EventGuard={self}")
 
     def finish(self, event: SlackMessageEvent) -> None:
         with self:
-            thread_key = f"{event.channel_id()},{event.thread_ts()}"
+            thread_key = EventGuard._thread_key(event)
             if thread_key not in self.data:
                 return
-            if event.ts() not in self.data[thread_key]:
+            if event.event_ts not in self.data[thread_key]:
                 return
-            del self.data[thread_key][event.ts()]
+            del self.data[thread_key][event.event_ts]
             if len(self.data[thread_key]) == 0:
                 del self.data[thread_key]
             logger.info(f"EventGuard finished: {event.id()}")
             logger.info(f"EventGuard={self}")
 
-    def is_canceled(self, event: SlackMessageEvent) -> bool:
+    def is_queueed_or_running(self, event: SlackMessageEvent) -> bool:
+        """
+        イベントが QUEUEED or RUNNING かどうかを返す
+        ただし更新イベントの場合は元イベントの QUEUEED or RUNNING かどうかを返す
+        引数の event が更新イベントの場合は、そのイベントから元イベントを探して状態をチェックする
+        EventGuard.is_canceled はそのイベント自体の状態を返却するので当メソッドと仕様が異なる
+        """
         with self:
-            thread_key = f"{event.channel_id()},{event.thread_ts()}"
+            thread_key = EventGuard._thread_key(event)
             if thread_key not in self.data:
                 return False
-            if event.ts() not in self.data[thread_key]:
+            # 更新イベントでは event.ts が元イベントの ts を返却する、それによって更新イベントから元イベントの情報を参照できる
+            if event.ts not in self.data[thread_key]:
                 return False
-            return self.data[thread_key][event.ts()].status == EventGuard.Status.CANCELED
+            return self.data[thread_key][event.ts].status in (EventGuard.Status.QUEUED, EventGuard.Status.RUNNING)
+
+    def is_canceled(self, event: SlackMessageEvent) -> bool:
+        """
+        イベントが CANCELED かどうかを返す
+        更新イベントの場合でもそのイベント自体が CANCELED かどうかを返却する
+        EventGuard.is_queueed_or_running は元イベントの状態を返却するので当メソッドと仕様が異なる
+        """
+        with self:
+            thread_key = EventGuard._thread_key(event)
+            if thread_key not in self.data:
+                return False
+            if event.event_ts not in self.data[thread_key]:
+                return False
+            return self.data[thread_key][event.event_ts].status == EventGuard.Status.CANCELED
 
     def terminate(self) -> None:
         with self:
@@ -94,22 +141,22 @@ class EventGuard:
 
     def get_canceled_events(self, event: SlackMessageEvent) -> list[SlackMessageEvent]:
         with self:
-            thread_key = f"{event.channel_id()},{event.thread_ts()}"
+            thread_key = EventGuard._thread_key(event)
             if thread_key not in self.data:
                 return []
-            if event.ts() not in self.data[thread_key]:
+            if event.event_ts not in self.data[thread_key]:
                 return []
-            return self.data[thread_key][event.ts()].canceled_events
+            return self.data[thread_key][event.event_ts].canceled_events
 
     def __str__(self) -> str:
         return str(
             {
                 thread_key: {
-                    ts: {
+                    event_ts: {
                         "status": data.status.name,
                         "event_id": data.event.id(),
                         "canceled_events": [event.id() for event in data.canceled_events]
-                    } for (ts, data) in val.items()
+                    } for (event_ts, data) in val.items()
                 }
                 for (thread_key, val) in self.data.items()
             }

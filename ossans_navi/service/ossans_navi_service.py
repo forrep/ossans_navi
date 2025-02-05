@@ -49,6 +49,7 @@ class OssansNaviService:
         ellipsis: str = "...",
         check_dup_files: bool = False,
         check_dup_files_dict: Optional[dict[str, int]] = None,
+        allow_private_files: bool = False,
     ) -> dict[str, Any]:
         ...
 
@@ -61,6 +62,7 @@ class OssansNaviService:
         ellipsis: str = "...",
         check_dup_files: bool = False,
         check_dup_files_dict: Optional[dict[str, int]] = None,
+        allow_private_files: bool = False,
     ) -> list[dict[str, Any]]:
         ...
 
@@ -72,6 +74,7 @@ class OssansNaviService:
         ellipsis: str = "...",
         check_dup_files: bool = False,
         check_dup_files_dict: Optional[dict[str, int]] = None,
+        allow_private_files: bool = False,
     ) -> dict[str, Any] | list[dict[str, Any]]:
         check_dup_files_dict = {} if check_dup_files_dict is None else check_dup_files_dict
         if isinstance(message, list):
@@ -175,9 +178,9 @@ class OssansNaviService:
                                         ),
                                     }
                                 )
-                            } for v in message.files if v.is_textualize and v.is_public
+                            } for v in message.files if v.is_textualize and (allow_private_files or v.is_public)
                         ]
-                    } if len([v for v in message.files if v.is_textualize and v.is_public]) > 0 else {}
+                    } if len([v for v in message.files if v.is_textualize and (allow_private_files or v.is_public)]) > 0 else {}
                 ),
                 **(
                     {
@@ -214,7 +217,8 @@ class OssansNaviService:
                                     OssansNaviService.slack_message_to_ai_request(
                                         message,
                                         limit=(limit_last_message if i + 1 == len(messages) else limit),
-                                        with_permalink=with_permalink
+                                        with_permalink=with_permalink,
+                                        allow_private_files=True,
                                     ),
                                     ensure_ascii=False,
                                     separators=(',', ':'),
@@ -235,7 +239,8 @@ class OssansNaviService:
                             OssansNaviService.slack_message_to_ai_request(
                                 message,
                                 limit=(limit_last_message if i + 1 == len(messages) else limit),
-                                with_permalink=with_permalink
+                                with_permalink=with_permalink,
+                                allow_private_files=True,
                             ),
                             ensure_ascii=False,
                             separators=(',', ':'),
@@ -267,7 +272,7 @@ class OssansNaviService:
     def get_thread_messages(self) -> list[SlackMessageLite]:
         # SlackMessageLite を取得した後に _integrate_duplicated_slack_file で含まれる SlackFile のインスタンスを1つにまとめる
         thread_messages = self._integrate_duplicated_slack_file(
-            self.slack_service.get_conversations_replies(self.event.channel_id(), self.event.thread_ts())
+            self.slack_service.get_conversations_replies(self.event.channel_id, self.event.thread_ts)
         )
         logger.info(
             "conversations_replies="
@@ -329,7 +334,7 @@ class OssansNaviService:
         special_command を実行した場合は True を返す、special command ではなければ False を返す
         呼び出し元は False が返った場合は元の処理を継続する、True の場合は special_command を実行しているので処理を打ち切る
         """
-        if (match := re.match(r'config\s+(trusted_bots|admin_users|viewable_private_channels)\s+(show|add|remove)(?:\s+(.+))?', self.event.text())):
+        if (match := re.match(r'config\s+(trusted_bots|admin_users|viewable_private_channels)\s+(show|add|remove)(?:\s+(.+))?', self.event.text)):
             if (
                 not (
                     # 管理者権限を持つユーザーのみ special_command を実行可能、管理者権限のルールは以下のいずれかを満たすこと
@@ -374,7 +379,7 @@ class OssansNaviService:
                         self.slack_service.store_config_dict(self.config.to_dict())
                 text += ("\n• " if len(now_users) > 0 else "\nempty")
                 text += "\n• ".join([f"<@{bot.user_id}>" for bot in now_users.values()])
-                self.slack_service.chat_post_message(channel=self.event.channel_id(), thread_ts=self.event.thread_ts(), text=text)
+                self.slack_service.chat_post_message(channel=self.event.channel_id, thread_ts=self.event.thread_ts, text=text)
             if category == "admin_users":
                 # 現在有効な admin_users を取得
                 now_users = {
@@ -395,7 +400,7 @@ class OssansNaviService:
                         self.slack_service.store_config_dict(self.config.to_dict())
                 text += ("\n• " if len(now_users) > 0 else "\nempty")
                 text += "\n• ".join([f"<@{user.user_id}>" for user in now_users.values()])
-                self.slack_service.chat_post_message(channel=self.event.channel_id(), thread_ts=self.event.thread_ts(), text=text)
+                self.slack_service.chat_post_message(channel=self.event.channel_id, thread_ts=self.event.thread_ts, text=text)
             if category == "viewable_private_channels":
                 #  現在有効な viewable_private_channels を取得
                 now_channels = {
@@ -421,7 +426,7 @@ class OssansNaviService:
                         self.slack_service.store_config_dict(self.config.to_dict())
                 text += ("\n• " if len(now_channels) > 0 else "\nempty")
                 text += "\n• ".join([f"<#{channel.channel_id}>" for channel in now_channels.values()])
-                self.slack_service.chat_post_message(channel=self.event.channel_id(), thread_ts=self.event.thread_ts(), text=text)
+                self.slack_service.chat_post_message(channel=self.event.channel_id, thread_ts=self.event.thread_ts, text=text)
             return True
         return False
 
@@ -526,8 +531,8 @@ class OssansNaviService:
             result = self.slack_service.search(
                 current_term,
                 self.event.user,
-                self.event.channel_id(),
-                self.event.thread_ts(),
+                self.event.channel_id,
+                self.event.thread_ts,
                 self.config.viewable_private_channels,
                 is_additional,
                 is_get_messages,
