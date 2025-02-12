@@ -1,7 +1,7 @@
 # OssansNavi
 OssansNavi は起動するだけで Slack ワークスペースに蓄積された情報をふまえた応答してくれるチャットボットです
 
-必要なのは普段利用している Slack ワークスペースと OpenAI (Azure OpenAI) の API とアプリを起動する環境だけです
+必要なのは普段利用している Slack ワークスペースと OpenAI (Azure OpenAI) の APIキーとアプリを起動する環境だけです
 
 ## 主な機能
 - Slack のパブリックチャネルを情報源として応答します
@@ -72,18 +72,18 @@ OSN_AI_SERVICE_TYPE=azure_openai
 OSN_AZURE_OPENAI_API_KEY=684...
 # Azure OpenAI EndPoint ドメイン
 OSN_AZURE_OPENAI_ENDPOINT=https://*.openai.azure.com/
-# Azure OpenAI 低コストモデルの DEPLOYMENT_NAME
-OSN_AZURE_OPENAI_MODEL_LOW_COST=gpt-4o-mini
+# Azure OpenAI 低コストモデルの DEPLOYMENT_NAME（デフォルト: gpt-4o-mini）
+# OSN_AZURE_OPENAI_MODEL_LOW_COST=gpt-4o-mini
 # Azure OpenAI 低コストモデルの入力コスト（1,000,000 tokens あたり） ※省略可 ※任意の通貨単位を設定可
-OSN_AZURE_OPENAI_MODEL_LOW_COST_IN=0.15
+# OSN_AZURE_OPENAI_MODEL_LOW_COST_IN=0.15
 # Azure OpenAI 低コストモデルの出力コスト（1,000,000 tokens あたり） ※省略可 ※任意の通貨単位を設定可
-OSN_AZURE_OPENAI_MODEL_LOW_COST_OUT=0.60
-# Azure OpenAI 高クオリティモデルの DEPLOYMENT_NAME
-OSN_AZURE_OPENAI_MODEL_HIGH_QUALITY=gpt-4o
+# OSN_AZURE_OPENAI_MODEL_LOW_COST_OUT=0.60
+# Azure OpenAI 高クオリティモデルの DEPLOYMENT_NAME（デフォルト: gpt-4o）
+# OSN_AZURE_OPENAI_MODEL_HIGH_QUALITY=gpt-4o
 # Azure OpenAI 高クオリティモデルの入力コスト（1,000,000 tokens あたり） ※省略可 ※任意の通貨単位を設定可
-OSN_AZURE_OPENAI_MODEL_HIGH_QUALITY_IN=2.50
+# OSN_AZURE_OPENAI_MODEL_HIGH_QUALITY_IN=2.50
 # Azure OpenAI 高クオリティモデルの出力コスト（1,000,000 tokens あたり） ※省略可 ※任意の通貨単位を設定可
-OSN_AZURE_OPENAI_MODEL_HIGH_QUALITY_OUT=10.0
+# OSN_AZURE_OPENAI_MODEL_HIGH_QUALITY_OUT=10.0
 
 # -- アプリの設定 --
 # Slack ワークスペースの名称、典型的には社名等を指定、システムプロンプトで入力されて OssansNavi が自身の稼働する環境を認識するために利用
@@ -103,12 +103,12 @@ OSN_AI_SERVICE_TYPE=openai とした場合は OSN_AZURE_ の代わりに、以�
 ```properties
 OSN_AI_SERVICE_TYPE=openai
 OSN_OPENAI_API_KEY=684...
-OSN_OPENAI_MODEL_LOW_COST=gpt-4o-mini
-OSN_OPENAI_MODEL_LOW_COST_IN=0.15
-OSN_OPENAI_MODEL_LOW_COST_OUT=0.60
-OSN_OPENAI_MODEL_HIGH_QUALITY=gpt-4o
-OSN_OPENAI_MODEL_HIGH_QUALITY_IN=2.50
-OSN_OPENAI_MODEL_HIGH_QUALITY_OUT=10.0
+# OSN_OPENAI_MODEL_LOW_COST=gpt-4o-mini
+# OSN_OPENAI_MODEL_LOW_COST_IN=0.15
+# OSN_OPENAI_MODEL_LOW_COST_OUT=0.60
+# OSN_OPENAI_MODEL_HIGH_QUALITY=gpt-4o
+# OSN_OPENAI_MODEL_HIGH_QUALITY_IN=2.50
+# OSN_OPENAI_MODEL_HIGH_QUALITY_OUT=10.0
 ```
 
 ### 4. バックエンドアプリの起動
