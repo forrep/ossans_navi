@@ -9,11 +9,13 @@ from io import BytesIO
 from typing import Any, Optional, overload
 
 import html2text
+from google.genai.types import Schema, Type
 from PIL import Image, ImageFile
 
 from ossans_navi import assets, config
 from ossans_navi.common.cache import LRUCache
-from ossans_navi.service.ai_service import AiModels, AiService, AiServiceSession, LastshotResponse
+from ossans_navi.service.ai_service import (AiModels, AiPrompt, AiPromptContent, AiPromptImage, AiPromptMessage, AiPromptRole, AiService,
+                                            LastshotResponse)
 from ossans_navi.service.slack_service import SlackService
 from ossans_navi.type.ossans_navi_types import OssansNaviConfig
 from ossans_navi.type.slack_type import SlackFile, SlackMessage, SlackMessageEvent, SlackMessageLite, SlackSearches, SlackSearchTerm
@@ -198,44 +200,18 @@ class OssansNaviService:
         with_permalink: bool = False,
         limit: int = 800,
         limit_last_message: int = -1,
-    ) -> list[dict[str, Any]]:
+        schema: Optional[Schema] = None,
+    ) -> AiPrompt:
         if limit_last_message < 0:
             limit_last_message = limit
-        return [
-            {
-                "role": "system",
-                "content": system + ("\n\n" + rag_info if rag_info is not None else ""),
-            },
-            *[
-                {
-                    "role": "assistant" if message.user.user_id in self.slack_service.my_bot_user_id else "user",
-                    "content": (
-                        [
-                            {
-                                "type": "text",
-                                "text": json.dumps(
-                                    OssansNaviService.slack_message_to_ai_request(
-                                        message,
-                                        limit=(limit_last_message if i + 1 == len(messages) else limit),
-                                        with_permalink=with_permalink,
-                                        allow_private_files=True,
-                                    ),
-                                    ensure_ascii=False,
-                                    separators=(',', ':'),
-                                )
-                            },
-                            *[
-                                {
-                                    "type": "image_url",
-                                    "image_url": {
-                                        "url": file.image_uri
-                                    }
-                                }
-                                for file in message.files if file.is_image and not file.is_analyzed and file.is_valid
-                            ]
-                        ]
-                        if with_image_files and message.has_not_analyzed_files() else
-                        json.dumps(
+
+        return AiPrompt(
+            system=(system + ("\n\n" + rag_info if rag_info is not None else "")),
+            messages=[
+                AiPromptMessage(
+                    role=AiPromptRole.ASSISTANT if message.user.user_id in self.slack_service.my_bot_user_id else AiPromptRole.USER,
+                    content=AiPromptContent(
+                        text=json.dumps(
                             OssansNaviService.slack_message_to_ai_request(
                                 message,
                                 limit=(limit_last_message if i + 1 == len(messages) else limit),
@@ -244,12 +220,22 @@ class OssansNaviService:
                             ),
                             ensure_ascii=False,
                             separators=(',', ':'),
+                        ),
+                        images=(
+                            [
+                                AiPromptImage(data=file.content)
+                                for file in message.files if file.is_image and not file.is_analyzed and file.is_valid
+                            ]
+                            if with_image_files and message.has_not_analyzed_files() else []
                         )
+
                     ),
-                    "name": message.user.user_id
-                } for (i, message) in enumerate(messages)
+                    name=message.user.user_id,
+                )
+                for (i, message) in enumerate(messages)
             ],
-        ]
+            schema=schema
+        )
 
     @overload
     def _integrate_duplicated_slack_file(self, messages: SlackMessageLite) -> SlackMessageLite:
@@ -284,7 +270,7 @@ class OssansNaviService:
             len(thread_messages) >= 3
             and (
                 self.models.low_cost.tokenizer.messages_tokens(
-                    self.get_ai_messages("", thread_messages)
+                    self.get_ai_messages("", thread_messages).to_openai_prompt()
                 ) > config.MAX_CONVERSATION_TOKENS
             )
         ):
@@ -318,6 +304,7 @@ class OssansNaviService:
             self.get_ai_messages(
                 assets.get_classification_system_prompt(self.event.channel, self.event.settings),
                 thread_messages,
+                schema=assets.ClassificationSchema
             )
         )
 
@@ -453,7 +440,7 @@ class OssansNaviService:
                 assets.get_image_description_system_prompt(self.event.channel, self.event.settings),
                 thread_messages,
                 with_permalink=True,
-            )
+            ).to_openai_prompt()
         )
         for i in range(len(thread_messages)):
             if (
@@ -494,6 +481,13 @@ class OssansNaviService:
                 thread_messages,
                 with_image_files=True,
                 with_permalink=True,
+                schema=Schema(
+                    type=Type.OBJECT,
+                    properties={
+                        message.permalink: assets.ImageDescriptionItemSchema for message in thread_messages
+                    },
+                    required=[message.permalink for message in thread_messages]
+                )
             )
         )
         logger.info("image_description=" + json.dumps(image_description, ensure_ascii=False))
@@ -552,18 +546,17 @@ class OssansNaviService:
         # function calling を利用しない理由は、適切にキーワードを生成してくれないケースがあったり、実行回数などコントロールしづらいため
         # 具体的には \n や空白文字が連続したり、「あああああ」みたいな意味不明なキーワードが生成されたり、指示しても1つのキーワードしか生成してくれないケースなど
         # 普通にレスポンスとしてキーワードを生成してもらった方が高い精度で生成される
-        request_slack_search_words_session = AiServiceSession(
-            self.get_ai_messages(
-                assets.get_slack_search_word_system_prompt(self.event.channel, self.event.settings),
-                thread_messages
-            )
+        request_slack_search_words_prompt = self.get_ai_messages(
+            assets.get_slack_search_word_system_prompt(self.event.channel, self.event.settings),
+            thread_messages,
+            schema=assets.SlackSearchWordSchema,
         )
 
         for i in range(3):
             # 呼び出し元にイベントのキャンセル確認させるために定期的に yield で処理を戻す
             yield
 
-            slack_search_words = self.ai_service.request_slack_search_words(self.models.high_quality, request_slack_search_words_session)
+            slack_search_words = self.ai_service.request_slack_search_words(self.models.high_quality, request_slack_search_words_prompt)
 
             # Slack API でキーワード検索を実行して self.slack_searches に積み込む処理
             # slack_searches 内ではヒット件数（total_count）が少ない方がより絞り込めた良いキーワードと判断してヒット件数の昇順で並べる
@@ -584,17 +577,21 @@ class OssansNaviService:
             # もう一周、AIにキーワードを生成してもらう（AIにキーワードを生成してもらうフェーズは全体で3回まで）
             for slack_search in self.slack_searches:
                 logger.info(f"total_count={slack_search.total_count}, words={slack_search.words}, id={slack_search.get_id()}")
-            request_slack_search_words_session.append_message({
-                "role": "user",
-                "content": (
-                    f"以下の検索ワードで検索してみましたが、{"結果がヒットしませんでした" if self.slack_searches.total_count == 0 else "ヒット件数が少なかったです"}。"
-                    + "出力フォーマットに従って別のSlack検索キーワードを提供してください。\n"
-                    + "検索キーワードを別の表現にしたり、AND検索による絞り込みをやめて1単語だけするなど工夫してください\n"
-                    + "\n"
-                    + "## 検索キーワードとヒット件数\n"
-                    + "\n".join([f"検索ワード: {v.words}, ヒット件数: {len(v.messages)}件" for v in self.slack_searches])
+            request_slack_search_words_prompt.messages.append(
+                AiPromptMessage(
+                    role=AiPromptRole.USER,
+                    content=AiPromptContent(
+                        text=(
+                            f"以下の検索ワードで検索してみましたが、{"結果がヒットしませんでした" if self.slack_searches.total_count == 0 else "ヒット件数が少なかったです"}。"
+                            + "出力フォーマットに従って別のSlack検索キーワードを提供してください。\n"
+                            + "検索キーワードを別の表現にしたり、AND検索による絞り込みをやめて1単語だけするなど工夫してください\n"
+                            + "\n"
+                            + "## 検索キーワードとヒット件数\n"
+                            + "\n".join([f"検索ワード: {v.words}, ヒット件数: {len(v.messages)}件" for v in self.slack_searches])
+                        )
+                    ),
                 )
-            })
+            )
         yield
 
     def refine_slack_searches(self, thread_messages: list[SlackMessageLite]) -> Generator[None, None, None]:
@@ -608,7 +605,7 @@ class OssansNaviService:
                 assets.get_refine_slack_searches_system_prompt(self.event.channel, self.event.settings),
                 thread_messages,
                 assets.get_information_obtained_by_rag_prompt([], [v.words for v in self.slack_searches])
-            )
+            ).to_openai_prompt()
         )
         logger.info(f"{base_messages_token=}")
         # メンションされた場合か、OssansNavi のメッセージの次のメッセージの場合はちゃんと調べる、それ以外は手を抜いて調べる
@@ -707,19 +704,20 @@ class OssansNaviService:
                 # ヒット件数がゼロ件などの理由で入力可能な検索結果が存在しなかったら refine_slack_searches フェーズを終了する
                 logger.info("current_messages is empty, finished.")
                 return
-            refine_slack_searches_messages = self.get_ai_messages(
+            refine_slack_searches_prompt = self.get_ai_messages(
                 assets.get_refine_slack_searches_system_prompt(self.event.channel, self.event.settings),
                 thread_messages,
                 assets.get_information_obtained_by_rag_prompt(
                     [OssansNaviService.slack_message_to_ai_request(message) for message in SlackMessage.sort(current_messages)],
                     [v.words for v in self.slack_searches if not v.is_get_messages]
-                )
+                ),
+                schema=assets.RefineSlackSearchesSchema
             )
 
         # AI への問い合わせ部分だけ並列で処理する
         refine_slack_searches_responses = self.ai_service.request_refine_slack_searches(
             self.models.low_cost,
-            refine_slack_searches_messages
+            refine_slack_searches_prompt
         )
         logger.info(f"{refine_slack_searches_responses=}")
 
@@ -760,7 +758,7 @@ class OssansNaviService:
                 thread_messages,
                 limit=10000,
                 limit_last_message=30000,
-            )
+            ).to_openai_prompt()
         )
         # GPT-4o mini が精査してくれた結果を元にトークン数が収まる範囲で入力データとする
         check_dup_files_dict: dict[str, int] = {}
@@ -794,6 +792,7 @@ class OssansNaviService:
                 ),
                 limit=10000,
                 limit_last_message=30000,
+                schema=assets.LastshotSchema,
             ),
             n
         )
@@ -812,10 +811,10 @@ class OssansNaviService:
                 if max_size > config.MAX_IMAGE_SIZE:
                     resize_retio = config.MAX_IMAGE_SIZE / max_size
                     image = image.resize((int(image.width * resize_retio), int(image.height * resize_retio)))
-                    bytes_io = BytesIO()
-                    image.save(bytes_io, format="PNG")
-                    file.content = bytes_io.getvalue()
-                    file.mimetype = 'image/png'
+                bytes_io = BytesIO()
+                image.save(bytes_io, format="PNG")
+                file.content = bytes_io.getvalue()
+                file.mimetype = 'image/png'
                 file._height = image.height
                 file._width = image.width
             elif file.is_text:

@@ -1,16 +1,17 @@
+import base64
 import dataclasses
 import itertools
 import json
 import logging
 import threading
 import time
-from typing import Iterable, Optional
+from enum import Enum
+from typing import Any, Iterable, Optional
 
+from google import genai
+from google.genai import types
 from openai import NOT_GIVEN, AzureOpenAI, InternalServerError, NotGiven, OpenAI, RateLimitError
 from openai.types.chat import ChatCompletion
-from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
-from openai.types.chat.chat_completion_tool_choice_option_param import ChatCompletionToolChoiceOptionParam
-from openai.types.chat.chat_completion_tool_param import ChatCompletionToolParam
 
 from ossans_navi import config
 from ossans_navi.common.logger import shrink_message
@@ -25,6 +26,7 @@ _LOCK = threading.Lock()
 @dataclasses.dataclass
 class AiModel:
     name: str
+    ai_service_type: AiServiceType
     cost_in: float
     cost_out: float
     tokenizer: AiTokenize
@@ -47,12 +49,14 @@ class AiModels:
             case AiServiceType.OPENAI:
                 models.low_cost = AiModel(
                     config.OPENAI_MODEL_LOW_COST,
+                    config.AI_SERVICE_TYPE,
                     config.OPENAI_MODEL_LOW_COST_IN,
                     config.OPENAI_MODEL_LOW_COST_OUT,
                     AiTokenizeGpt4o
                 )
                 models.high_quality = AiModel(
                     config.OPENAI_MODEL_HIGH_QUALITY,
+                    config.AI_SERVICE_TYPE,
                     config.OPENAI_MODEL_HIGH_QUALITY_IN,
                     config.OPENAI_MODEL_HIGH_QUALITY_OUT,
                     AiTokenizeGpt4o
@@ -60,14 +64,31 @@ class AiModels:
             case AiServiceType.AZURE_OPENAI:
                 models.low_cost = AiModel(
                     config.AZURE_OPENAI_MODEL_LOW_COST,
+                    config.AI_SERVICE_TYPE,
                     config.AZURE_OPENAI_MODEL_LOW_COST_IN,
                     config.AZURE_OPENAI_MODEL_LOW_COST_OUT,
                     AiTokenizeGpt4o
                 )
                 models.high_quality = AiModel(
                     config.AZURE_OPENAI_MODEL_HIGH_QUALITY,
+                    config.AI_SERVICE_TYPE,
                     config.AZURE_OPENAI_MODEL_HIGH_QUALITY_IN,
                     config.AZURE_OPENAI_MODEL_HIGH_QUALITY_OUT,
+                    AiTokenizeGpt4o
+                )
+            case AiServiceType.GEMINI:
+                models.low_cost = AiModel(
+                    config.GEMINI_MODEL_LOW_COST,
+                    config.AI_SERVICE_TYPE,
+                    config.GEMINI_MODEL_LOW_COST_IN,
+                    config.GEMINI_MODEL_LOW_COST_OUT,
+                    AiTokenizeGpt4o
+                )
+                models.high_quality = AiModel(
+                    config.GEMINI_MODEL_HIGH_QUALITY,
+                    config.AI_SERVICE_TYPE,
+                    config.GEMINI_MODEL_HIGH_QUALITY_IN,
+                    config.GEMINI_MODEL_HIGH_QUALITY_OUT,
                     AiTokenizeGpt4o
                 )
             case _:
@@ -87,12 +108,128 @@ class AiModels:
         return sum([model.get_total_cost() for model in self.models()])
 
 
-@dataclasses.dataclass
-class AiServiceSession:
-    messages: list
+class AiPromptRole(Enum):
+    ASSISTANT = "assistant"
+    USER = "user"
 
-    def append_message(self, message: dict) -> None:
-        self.messages.append(message)
+
+@dataclasses.dataclass
+class AiPromptImage:
+    data: bytes
+
+    @property
+    def image_uri(self) -> str:
+        return f"data:image/png;base64,{base64.b64encode(self.data).decode()}"
+
+
+@dataclasses.dataclass
+class AiPromptContent:
+    text: str
+    images: list[AiPromptImage] = dataclasses.field(default_factory=list)
+
+    def to_openai_prompt(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "type": "text",
+                "text": self.text,
+            },
+            *[
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": image.image_uri
+                    }
+                }
+                for image in self.images
+            ]
+        ]
+
+    def to_gemini_prompt(self) -> list[types.Part]:
+        return [
+            types.Part.from_text(text=self.text),
+            *[types.Part.from_bytes(data=image.data, mime_type="image/png") for image in self.images]
+        ]
+
+
+@dataclasses.dataclass
+class AiPromptMessage:
+    role: AiPromptRole
+    content: AiPromptContent
+    name: Optional[str] = dataclasses.field(default=None)
+
+    def to_openai_prompt(self) -> dict[str, str | list[dict[str, Any]]]:
+        return {
+            "role": self.role.value,
+            "content": self.content.to_openai_prompt(),
+            **({"name": self.name} if self.name else {})
+        }
+
+    def to_gemini_prompt(self) -> types.Content:
+        return types.Content(
+            # Gemini は user, model の2種類
+            role="model" if self.role == AiPromptRole.ASSISTANT else self.role.value,
+            parts=self.content.to_gemini_prompt()
+        )
+
+
+@dataclasses.dataclass
+class AiPrompt:
+    system: str
+    messages: list[AiPromptMessage]
+    schema: Optional[type] = dataclasses.field(default=None)
+
+    def to_openai_prompt(self) -> list[dict[str, str | list[dict[str, Any]]]]:
+        return [
+            {
+                "role": "system",
+                "content": self.system,
+            },
+            *[
+                message.to_openai_prompt() for message in self.messages
+            ],
+        ]
+
+    def to_gemini_prompt(self) -> list[types.Content]:
+        return [
+            message.to_gemini_prompt() for message in self.messages
+        ]
+
+    def to_gemini_system_prompt(self) -> types.Content:
+        return types.Content(parts=[types.Part.from_text(text=self.system)])
+
+
+@dataclasses.dataclass
+class AiResponseMessage:
+    content: dict[str, Any]
+    role: AiPromptRole
+
+
+@dataclasses.dataclass
+class AiResponse:
+    choices: list[AiResponseMessage]
+
+    @staticmethod
+    def from_openai_response(response: ChatCompletion) -> 'AiResponse':
+        # response の形式
+        #   { "choices": [ { "message": { "content": "encoded_json_contents", "role": "assistant" }, "other_key": "some_value" } ] }
+        # この中の encoded_json_contents から slack_search_words を取り出す処理
+        return AiResponse([
+            AiResponseMessage(
+                content=json.loads(v if (v := choice.message.content) else "{}"),
+                role=AiPromptRole.ASSISTANT,
+            )
+            for choice in response.choices
+        ])
+
+    @staticmethod
+    def from_gemini_response(response: types.GenerateContentResponse) -> 'AiResponse':
+        return AiResponse([
+            AiResponseMessage(
+                content=json.loads(v if (v := candidate.content.parts[0].text) else "{}"),
+                role=AiPromptRole.ASSISTANT,
+            )
+            for candidate in response.candidates
+        ])
 
 
 @dataclasses.dataclass
@@ -115,27 +252,93 @@ class AiService:
     def __init__(self) -> None:
         match config.AI_SERVICE_TYPE:
             case AiServiceType.OPENAI:
-                self.client = OpenAI(
-                    api_key=config.OPENAI_API_KEY,
-                )
+                self.client_openai = OpenAI(api_key=config.OPENAI_API_KEY)
             case AiServiceType.AZURE_OPENAI:
-                self.client = AzureOpenAI(
+                self.client_openai = AzureOpenAI(
                     api_key=config.AZURE_OPENAI_API_KEY,
                     api_version=config.AZURE_OPENAI_API_VERSION,
                     azure_endpoint=config.AZURE_OPENAI_ENDPOINT,
                 )
+            case AiServiceType.GEMINI:
+                self.client_gemini = genai.Client(api_key=config.GEMINI_API_KEY)
             case _:
-                raise NotImplementedError("Unknown Service.")
+                raise NotImplementedError("Unknown AiServiceType")
 
     def _chat_completions(
             self,
             model: AiModel,
-            messages: Iterable[ChatCompletionMessageParam],
-            tools: Iterable[ChatCompletionToolParam] | NotGiven = NOT_GIVEN,
-            tool_choice: ChatCompletionToolChoiceOptionParam | NotGiven = NOT_GIVEN,
+            prompt: AiPrompt,
             n: int | NotGiven = NOT_GIVEN,
-            max_tokens: int | NotGiven = NOT_GIVEN
-    ) -> ChatCompletion:
+    ) -> AiResponse:
+        if model.ai_service_type in (AiServiceType.OPENAI, AiServiceType.AZURE_OPENAI):
+            return self._chat_completions_openai(
+                model,
+                prompt,
+                n,
+            )
+        elif model.ai_service_type == AiServiceType.GEMINI:
+            return self._chat_completions_gemini(
+                model,
+                prompt,
+                n,
+            )
+        else:
+            raise NotImplementedError("Unknown AiServiceType.")
+
+    def _chat_completions_gemini(
+            self,
+            model: AiModel,
+            prompt: AiPrompt,
+            n: int | NotGiven = NOT_GIVEN,
+    ) -> AiResponse:
+        messages: Iterable = prompt.to_gemini_prompt()
+        logger.debug(f"_chat_completions model={model.name}, system=" + str(prompt.to_gemini_system_prompt()) + ", messages=" + str(messages))
+        start_time = time.time()
+        last_exception: Optional[Exception] = None
+        response: types.GenerateContentResponse = None
+        for _ in range(10):
+            try:
+                response = self.client_gemini.models.generate_content(
+                    model=model.name,
+                    config=types.GenerateContentConfig(
+                        system_instruction=prompt.to_gemini_system_prompt(),
+                        candidate_count=n if n != NOT_GIVEN else 1,
+                        response_mime_type="application/json",
+                        response_schema=prompt.schema
+                    ),
+                    contents=messages,
+                )
+                break
+            except Exception as e:
+                # しばらく待ってからリトライする
+                # n>=2 の場合にエラーが発生するケースがあるのでリトライは n=1 とする
+                n = 1
+                logger.error(e)
+                last_exception = e
+                time.sleep(30)
+
+        if response is None:
+            # 実行に失敗していた場合は例外を送出
+            raise last_exception or RuntimeError()
+        logger.info(f"elapsed: {time.time() - start_time}")
+        logger.info("response=" + str(response))
+        # 利用したトークン数を加算する
+        if response.usage_metadata:
+            model.tokens_in += response.usage_metadata.prompt_token_count
+            model.tokens_out += response.usage_metadata.candidates_token_count
+        if not response.candidates:
+            # 応答がない場合は例外を送出
+            logger.error("Error empty choices, response=" + str(response))
+            raise last_exception or RuntimeError()
+        return AiResponse.from_gemini_response(response)
+
+    def _chat_completions_openai(
+            self,
+            model: AiModel,
+            prompt: AiPrompt,
+            n: int | NotGiven = NOT_GIVEN,
+    ) -> AiResponse:
+        messages: Iterable = prompt.to_openai_prompt()
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(f"_chat_completions model={model.name}, messages=" + json.dumps(messages, ensure_ascii=False))
         else:
@@ -145,14 +348,11 @@ class AiService:
         response = None
         for _ in range(10):
             try:
-                response = self.client.chat.completions.create(
+                response = self.client_openai.chat.completions.create(
                     model=model.name,
                     response_format={"type": "json_object"},
                     messages=messages,
-                    tools=tools,
-                    tool_choice=tool_choice,
                     n=n,
-                    max_tokens=max_tokens,
                     timeout=300,
                 )
                 break
@@ -183,25 +383,24 @@ class AiService:
         if response.usage:
             model.tokens_in += response.usage.prompt_tokens
             model.tokens_out += response.usage.completion_tokens
-        return response
-
-    def request_classification(self, model: AiModel, messages: list) -> tuple[str, str]:
-        response = self._chat_completions(model, messages, n=5)
-        messages = [{k: (json.loads(v) if k == 'content' else v) for (k, v) in choice.message} for choice in response.choices]
-        if len(messages) == 0:
+        if not response.choices:
+            # 応答がない場合は例外を送出
             logger.error("Error empty choices, response=" + str(response))
-            raise ValueError()
+            raise last_exception or RuntimeError()
+        return AiResponse.from_openai_response(response)
+
+    def request_classification(self, model: AiModel, prompt: AiPrompt) -> tuple[str, str]:
+        response = self._chat_completions(model, prompt, n=5)
         message_type: dict[str, int] = {}
         slack_emoji_name: dict[str, int] = {}
-        for message in messages:
+        for message in response.choices:
             if (
-                'content' in message
-                and 'message_type' in message['content']
-                and isinstance(message['content']['message_type'], str)
+                'message_type' in message.content
+                and isinstance(message.content['message_type'], str)
             ):
-                message_type[message['content']['message_type']] = message_type.get(message['content']['message_type'], 0) + 1
-                if "slack_emoji_name" in message['content'] and len(message['content']["slack_emoji_name"]) > 0:
-                    slack_emoji_name[message['content']["slack_emoji_name"]] = slack_emoji_name.get(message['content']["slack_emoji_name"], 0) + 1
+                message_type[message.content['message_type']] = message_type.get(message.content['message_type'], 0) + 1
+                if "slack_emoji_name" in message.content and len(message.content["slack_emoji_name"]) > 0:
+                    slack_emoji_name[message.content["slack_emoji_name"]] = slack_emoji_name.get(message.content["slack_emoji_name"], 0) + 1
         sorted_message_type: list[tuple[str, int]] = sorted(message_type.items(), key=lambda v: (v[1], v[0]), reverse=True)
         sorted_slack_emoji_name: list[tuple[str, int]] = sorted(slack_emoji_name.items(), key=lambda v: (v[1], v[0]), reverse=True)
         decided_message_type = "other"
@@ -212,16 +411,10 @@ class AiService:
             decided_slack_emoji_name = sorted_slack_emoji_name[0][0]
         return (decided_message_type, decided_slack_emoji_name)
 
-    def request_image_description(self, model: AiModel, messages: list) -> dict[str, list[dict[str, str]]]:
-        response = self._chat_completions(model, messages)
-        messages = [{k: (json.loads(v) if k == 'content' else v) for (k, v) in choice.message} for choice in response.choices]
-        if len(messages) == 0:
-            logger.error("Error empty choices, response=" + str(response))
-            raise ValueError()
-        message: dict = messages[0]
-        if 'content' not in message:
-            return {}
-        content: dict[str, list[dict[str, str]]] = message['content']
+    def request_image_description(self, model: AiModel, prompt: AiPrompt) -> dict[str, list[dict[str, str]]]:
+        response = self._chat_completions(model, prompt)
+        message = response.choices[0]
+        content: dict[str, list[dict[str, str]]] = message.content
         if (
             isinstance(content, dict)
             and sum([1 for permalink in content.keys() if isinstance(permalink, str)]) == len(content)
@@ -237,86 +430,75 @@ class AiService:
         else:
             return {}
 
-    def request_slack_search_words(self, model: AiModel, session: AiServiceSession) -> list[str]:
-        response = self._chat_completions(model, session.messages, n=5)
-        if len(response.choices) == 0:
-            logger.error("Error empty choices, response=" + str(response))
-            raise ValueError()
-        # response の形式
-        #   { "choices": [ { "message": { "content": "encoded_json_contents", "role": "assistant" }, "other_key": "some_value" } ] }
-        # この中の encoded_json_contents から slack_search_words を取り出す処理
-        messages = [{k: (json.loads(v) if k == 'content' else v) for (k, v) in choice.message} for choice in response.choices]
+    def request_slack_search_words(self, model: AiModel, prompt: AiPrompt) -> list[str]:
+        # Gemini は n=2 で十分なバリエーションを生成してくれる
+        n = 2 if model.ai_service_type == AiServiceType.GEMINI else 5
+        response = self._chat_completions(model, prompt, n=n)
         slack_search_words: list[str] = list(set(
             itertools.chain.from_iterable(
                 [
-                    [slack_search_words for slack_search_words in message['content']['slack_search_words']]
-                    for message in messages if 'content' in message and 'slack_search_words' in message['content']
+                    [slack_search_words for slack_search_words in message.content['slack_search_words']]
+                    for message in response.choices if 'slack_search_words' in message.content
                 ]
             )
         ))
-        # もう一度、問い合わせる可能性があるので今回の返答をセッションに積む、型を dict へ変換
-        session.messages.append({k: v for (k, v) in response.choices[0].message if k in ("content", "role")})
+        # もう一度、問い合わせる可能性があるので今回の返答をセッションに積む
+        prompt.messages.append(
+            AiPromptMessage(
+                role=AiPromptRole.ASSISTANT,
+                content=AiPromptContent(text=json.dumps(v if (v := response.choices[0].content) else "{}", ensure_ascii=False))
+            )
+        )
         return slack_search_words
 
     @staticmethod
-    def _analyze_refine_slack_searches_response(response: ChatCompletion) -> list[RefineResponse]:
-        messages: list[dict[str, dict]] = []
-        for choice in response.choices:
-            try:
-                # JSON がパースできない場合もある、そのときは無視する
-                messages.append(
-                    {k: (json.loads(v) if k == 'content' else v) for (k, v) in choice.message}
-                )
-            except json.JSONDecodeError:
-                pass
+    def _analyze_refine_slack_searches_response(response: AiResponse) -> list[RefineResponse]:
         return [
             RefineResponse(
-                [v for v in message['content'].get('permalinks', []) if isinstance(v, str)],
-                [v for v in message['content'].get('get_next_messages', []) if isinstance(v, str)],
-                [v for v in message['content'].get('get_messages', []) if isinstance(v, str)],
-                [v for v in message['content'].get('additional_search_words', []) if isinstance(v, str)],
+                [v for v in message.content.get('permalinks', []) if isinstance(v, str)],
+                [v for v in message.content.get('get_next_messages', []) if isinstance(v, str)],
+                [v for v in message.content.get('get_messages', []) if isinstance(v, str)],
+                [v for v in message.content.get('additional_search_words', []) if isinstance(v, str)],
             )
-            for message in messages if (
-                'content' in message
-                and isinstance(message['content'].get('permalinks', []), list)
-                and isinstance(message['content'].get('get_next_messages', []), list)
-                and isinstance(message['content'].get('get_messages', []), list)
-                and isinstance(message['content'].get('additional_search_words', []), list)
+            for message in response.choices if (
+                isinstance(message.content.get('permalinks', []), list)
+                and isinstance(message.content.get('get_next_messages', []), list)
+                and isinstance(message.content.get('get_messages', []), list)
+                and isinstance(message.content.get('additional_search_words', []), list)
             )
         ]
 
-    def request_refine_slack_searches(self, model: AiModel, messages: list) -> list[RefineResponse]:
-        response = self._chat_completions(model, messages, n=5)
-        if len(response.choices) == 0:
-            logger.error("Error empty choices, response=" + str(response))
-            raise ValueError()
+    def request_refine_slack_searches(self, model: AiModel, prompt: AiPrompt) -> list[RefineResponse]:
+        # Gemini は n=2 で十分な網羅性がある
+        n = 2 if model.ai_service_type == AiServiceType.GEMINI else 5
+        response = self._chat_completions(model, prompt, n=n)
         return AiService._analyze_refine_slack_searches_response(response)
 
     @staticmethod
-    def _analyze_lastshot_response(response: ChatCompletion) -> list[LastshotResponse]:
-        messages = [{k: (json.loads(v) if k == 'content' else v) for (k, v) in choice.message} for choice in response.choices]
+    def _analyze_lastshot_response(response: AiResponse) -> list[LastshotResponse]:
         return [
             LastshotResponse(
-                message['content']['user_intent'],
-                message['content']['response_message'],
-                message['content']['confirm_message'] if isinstance(message['content']['confirm_message'], str) else None,
-                message['content']['response_quality'],
+                message.content['user_intent'],
+                message.content['response_message'],
+                message.content['confirm_message'] if isinstance(message.content['confirm_message'], str) else None,
+                message.content['response_quality'],
             )
-            for message in messages if (
-                'content' in message
-                and 'user_intent' in message['content']
-                and 'response_message' in message['content']
-                and 'confirm_message' in message['content']
-                and 'response_quality' in message['content']
-                and isinstance(message['content']['response_message'], str)
-                and len(message['content']['response_message']) > 0
-                and isinstance(message['content']['response_quality'], bool)
+            for message in response.choices if (
+                'user_intent' in message.content
+                and 'response_message' in message.content
+                and 'confirm_message' in message.content
+                and 'response_quality' in message.content
+                and isinstance(message.content['response_message'], str)
+                and len(message.content['response_message']) > 0
+                and isinstance(message.content['response_quality'], bool)
             )
         ]
 
-    def request_lastshot(self, model: AiModel, messages: list, n: int = 1) -> list[LastshotResponse]:
+    def request_lastshot(self, model: AiModel, prompt: AiPrompt, n: int = 1) -> list[LastshotResponse]:
+        n = 1 if model.ai_service_type == AiServiceType.GEMINI else n
         for _ in range(2):
-            response = self._chat_completions(model, messages, n=n)
+            # Gemini は大きいプロンプトのパターンで n>=2 が原因となるエラーケースがある、よって n=1 とする
+            response = self._chat_completions(model, prompt, n=1 if model.ai_service_type == AiServiceType.GEMINI else n)
             if len(result := AiService._analyze_lastshot_response(response)) > 0:
                 return result
         logger.error("Error empty choices, response=" + str(response))

@@ -22,6 +22,8 @@ def test_convert_markdown_to_mrkdwn_title():
     markdown_text = dedent("""
     - list1
         - list2
+    * list1
+        * list2
     　- list3
     -list10
     # title
@@ -38,6 +40,8 @@ def test_convert_markdown_to_mrkdwn_title():
     link to [example.com](https://example.com/) here
     """, 4).strip()
     assert SlackService.convert_markdown_to_mrkdwn(markdown_text) == dedent("""
+    • list1
+        • list2
     • list1
         • list2
     　• list3

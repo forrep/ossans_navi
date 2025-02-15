@@ -1,12 +1,14 @@
 # OssansNavi
-OssansNavi は起動するだけで Slack ワークスペースに蓄積された情報をふまえた応答してくれるチャットボットです
+「社内でラーメン好きな人を教えて！」という質問に回答できるチャットボットが OssansNavi です
 
-必要なのは普段利用している Slack ワークスペースと OpenAI (Azure OpenAI) の APIキーとアプリを起動する環境だけです
+Slack ワークスペースを情報源として、あたかもグループの一員のような豊富な知識で応答してくれます  
+Slack 内の情報では解決できない場合は、過去のやりとりから詳しい人を探して自然にその人にパスしてくれます
 
-## 主な機能
-- Slack のパブリックチャネルを情報源として応答します
-- プライベートチャネルはデフォルトでは参照しません（特定のプライベートチャネルを参照する設定あり）
-- パブリックチャネルの参照に制限のあるユーザー（ゲスト等）には応答しません
+普段利用している Slack ワークスペースと Gemini/OpenAI/Azure OpenAI いずれかのAPIキーを用意して、アプリを起動するだけで利用できます
+
+## 細かい仕様
+- パブリックチャネルを利用します、プライベートチャネルはデフォルトでは参照しません（特定のプライベートチャネルを参照する設定あり）
+- ゲストやコネクトのユーザーには応答しません
 - OssansNavi のボットユーザーが参加しているチャネルや DM で応答します
 - OssansNavi をメンションすると確実に応答してくれます
 - OssansNavi をメンションしなくても応答可能ならば応答します
@@ -56,7 +58,8 @@ https://api.slack.com/apps で先ほど追加したアプリを選択して設�
 ### 3. バックエンドアプリの設定
 バックエンドアプリの設定を記述した `.env` ファイルを用意します。
 
-以下の内容を `.env` という名前で保存してください。`OSN_SLACK_APP_TOKEN` `OSN_SLACK_BOT_TOKEN` `OSN_SLACK_USER_TOKEN` には、前の手順で発行したトークンをそれぞれ設定します。LLM には openai, azure_openai のどちらかを利用可能です。
+以下の内容を `.env` という名前で保存してください。`OSN_SLACK_APP_TOKEN` `OSN_SLACK_BOT_TOKEN` `OSN_SLACK_USER_TOKEN` には、前の手順で発行したトークンをそれぞれ設定します。
+LLM には Gemini, OpenAI, Azure OpenAI を利用可能で、以下は Gemini を利用する例です。
 
 ```properties
 # Slack トークン
@@ -64,26 +67,19 @@ OSN_SLACK_APP_TOKEN=xapp-...
 OSN_SLACK_BOT_TOKEN=xoxb-...
 OSN_SLACK_USER_TOKEN=xoxp-...
 
-# 利用するLLMの種類（openai, azure_openai）
-OSN_AI_SERVICE_TYPE=azure_openai
-
-# -- Azure OpenAI の設定 --
-# Azure OpenAI APIキー
-OSN_AZURE_OPENAI_API_KEY=684...
-# Azure OpenAI EndPoint ドメイン
-OSN_AZURE_OPENAI_ENDPOINT=https://*.openai.azure.com/
-# Azure OpenAI 低コストモデルの DEPLOYMENT_NAME（デフォルト: gpt-4o-mini）
-# OSN_AZURE_OPENAI_MODEL_LOW_COST=gpt-4o-mini
-# Azure OpenAI 低コストモデルの入力コスト（1,000,000 tokens あたり） ※省略可 ※任意の通貨単位を設定可
-# OSN_AZURE_OPENAI_MODEL_LOW_COST_IN=0.15
-# Azure OpenAI 低コストモデルの出力コスト（1,000,000 tokens あたり） ※省略可 ※任意の通貨単位を設定可
-# OSN_AZURE_OPENAI_MODEL_LOW_COST_OUT=0.60
-# Azure OpenAI 高クオリティモデルの DEPLOYMENT_NAME（デフォルト: gpt-4o）
-# OSN_AZURE_OPENAI_MODEL_HIGH_QUALITY=gpt-4o
-# Azure OpenAI 高クオリティモデルの入力コスト（1,000,000 tokens あたり） ※省略可 ※任意の通貨単位を設定可
-# OSN_AZURE_OPENAI_MODEL_HIGH_QUALITY_IN=2.50
-# Azure OpenAI 高クオリティモデルの出力コスト（1,000,000 tokens あたり） ※省略可 ※任意の通貨単位を設定可
-# OSN_AZURE_OPENAI_MODEL_HIGH_QUALITY_OUT=10.0
+# 利用するLLMの種類（gemini, openai, azure_openai） Geminiの例
+OSN_AI_SERVICE_TYPE=gemini
+OSN_GEMINI_API_KEY=AIz...
+# 低コストモデルの名称（デフォルト: gemini-2.0-flash）
+# OSN_GEMINI_MODEL_LOW_COST=gemini-2.0-flash
+# 低コストモデルの入出力コスト（1,000,000 tokens あたり） ※省略可 ※任意の通貨単位を設定可
+# OSN_GEMINI_MODEL_LOW_COST_IN=0.1
+# OSN_GEMINI_MODEL_LOW_COST_OUT=0.4
+# 高クオリティモデルの名称（デフォルト: gemini-2.0-flash）
+# OSN_GEMINI_MODEL_HIGH_QUALITY=gemini-2.0-flash
+# 高クオリティモデルの入出力コスト（1,000,000 tokens あたり） ※省略可 ※任意の通貨単位を設定可
+# OSN_GEMINI_MODEL_HIGH_QUALITY_IN=0.1
+# OSN_GEMINI_MODEL_HIGH_QUALITY_OUT=0.4
 
 # -- アプリの設定 --
 # Slack ワークスペースの名称、典型的には社名等を指定、システムプロンプトで入力されて OssansNavi が自身の稼働する環境を認識するために利用
@@ -96,11 +92,13 @@ OSN_LANGUAGE=Japanese
 OSN_LOG_LEVEL=INFO
 # OssansNavi の応答をロギングするチャネル ※省略可 例: {"channel": "CXXXXXXXX", "thread_ts", "cost": 0.04}
 # OSN_RESPONSE_LOGGING_CHANNEL=
+# 読み込む画像の一辺の最大サイズ、これを超える場合は縮小する
+# OSN_MAX_IMAGE_SIZE=2304
 ```
 
-OSN_AI_SERVICE_TYPE=openai とした場合は OSN_AZURE_ の代わりに、以下の OpenAI の設定をします。
-
+#### OpenAI 設定例
 ```properties
+# -- OpenAI の設定 --
 OSN_AI_SERVICE_TYPE=openai
 OSN_OPENAI_API_KEY=684...
 # OSN_OPENAI_MODEL_LOW_COST=gpt-4o-mini
@@ -109,6 +107,21 @@ OSN_OPENAI_API_KEY=684...
 # OSN_OPENAI_MODEL_HIGH_QUALITY=gpt-4o
 # OSN_OPENAI_MODEL_HIGH_QUALITY_IN=2.50
 # OSN_OPENAI_MODEL_HIGH_QUALITY_OUT=10.0
+```
+
+#### Azure OpenAI 設定例
+```properties
+# -- Azure OpenAI の設定 --
+OSN_AI_SERVICE_TYPE=azure_openai
+OSN_AZURE_OPENAI_API_KEY=684...
+# Azure OpenAI EndPoint ドメイン
+OSN_AZURE_OPENAI_ENDPOINT=https://*.openai.azure.com/
+# OSN_AZURE_OPENAI_MODEL_LOW_COST=gpt-4o-mini
+# OSN_AZURE_OPENAI_MODEL_LOW_COST_IN=0.15
+# OSN_AZURE_OPENAI_MODEL_LOW_COST_OUT=0.60
+# OSN_AZURE_OPENAI_MODEL_HIGH_QUALITY=gpt-4o
+# OSN_AZURE_OPENAI_MODEL_HIGH_QUALITY_IN=2.50
+# OSN_AZURE_OPENAI_MODEL_HIGH_QUALITY_OUT=10.0
 ```
 
 ### 4. バックエンドアプリの起動

@@ -486,7 +486,7 @@ class SlackService:
                     is_codeblock = True
                     line = "```" + ("\n" + matcher.group(1) if matcher.group(1) else "")
                 else:
-                    line = re.sub(r'^([ 　]*)- ', lambda v: f"{v.group(1)}• ", line)
+                    line = re.sub(r'^([ 　]*)[*-] ', lambda v: f"{v.group(1)}• ", line)
                     line = re.sub(r'^#{1,4} .+$', lambda v: f"*{v.group(0)}*", line)
                     line = re.sub(r' ?\*\*([^*]+)\*\* ?', lambda v: f" *{v.group(1)}* ", line)
                     line = re.sub(r' ?(?<!``)`([^`]+)`(?!``) ?', lambda v: f" `{v.group(1)}` ", line)

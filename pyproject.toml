@@ -13,6 +13,7 @@ openai = "^1.21.2"
 tiktoken = "^0.7.0"
 pillow = "^10.3.0"
 html2text = "^2024.2.26"
+google-genai = "^1.2.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "*"
@@ -38,6 +39,10 @@ data_file = "${COVERAGE_DATA_FILE-.coverage}"
 
 [tool.isort]
 line_length = 149
+
+[[tool.mypy.overrides]]
+module = "google.*"
+ignore_missing_imports = true
 
 [tool.logging]
 version = 1

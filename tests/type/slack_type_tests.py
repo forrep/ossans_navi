@@ -1,7 +1,8 @@
 import datetime
 
 from ossans_navi.type.slack_type import SlackMessageEvent, SlackSearchTerm
-import tests.type.slack_messages_sample as slack_messages_sample
+
+from . import slack_messages_sample
 
 
 def test_slack_search_term():

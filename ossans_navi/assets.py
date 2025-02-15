@@ -4,6 +4,8 @@ import re
 import time
 from typing import Any
 
+from google.genai.types import Schema, Type
+
 from ossans_navi import config
 from ossans_navi.type.slack_type import SlackChannel
 
@@ -14,6 +16,20 @@ def get_now() -> str:
 
 def dedent(text, indent: int = 8) -> str:
     return re.sub(f"^ {{{indent}}}", '', text, 0, re.MULTILINE)
+
+
+ImageDescriptionItemSchema = Schema(
+    type=Type.ARRAY,
+    items=Schema(
+        type=Type.OBJECT,
+        properties={
+            "text": Schema(type=Type.STRING),
+            "description": Schema(type=Type.STRING),
+        },
+        required=["text", "description"],
+        property_ordering=["text", "description"],
+    ),
+)
 
 
 def get_image_description_system_prompt(channel: SlackChannel, settings: str):
@@ -43,23 +59,23 @@ def get_image_description_system_prompt(channel: SlackChannel, settings: str):
         {{
             message1_permalink: [
                 {{
-                    "description": message1_image1_description,
-                    "text": message1_image1_text
+                    "text": message1_image1_text,
+                    "description": message1_image1_description
                 }},
                 {{
-                    "description": message1_image2_description,
-                    "text": message1_image2_text
+                    "text": message1_image2_text,
+                    "description": message1_image2_description
                 }},
                 ...
             ],
             message2_permalink: [
                 {{
-                    "description": message2_image1_description,
-                    "text": message2_image1_text
+                    "text": message2_image1_text,
+                    "description": message2_image1_description
                 }},
                 {{
-                    "description": message2_image2_description,
-                    "text": message2_image2_text
+                    "text": message2_image2_text,
+                    "description": message2_image2_description
                 }},
                 ...
             ],
@@ -67,6 +83,18 @@ def get_image_description_system_prompt(channel: SlackChannel, settings: str):
         }}
         """
     ).strip()
+
+
+ClassificationSchema = Schema(
+    type=Type.OBJECT,
+    properties={
+        "response_text": Schema(type=Type.STRING),
+        "message_type": Schema(type=Type.STRING),
+        "slack_emoji_name": Schema(type=Type.STRING),
+    },
+    required=["response_text", "message_type", "slack_emoji_name"],
+    property_ordering=["response_text", "message_type", "slack_emoji_name"],
+)
 
 
 def get_classification_system_prompt(channel: SlackChannel, settings: str):
@@ -116,6 +144,19 @@ def get_classification_system_prompt(channel: SlackChannel, settings: str):
         - Anything other than :+1: or :thumbsup: would be great!
         """
     ).strip()
+
+
+SlackSearchWordSchema = Schema(
+    type=Type.OBJECT,
+    properties={
+        "user_intent": Schema(type=Type.STRING),
+        "date_range": Schema(type=Type.STRING),
+        "how_to_find_out": Schema(type=Type.STRING),
+        "slack_search_words": Schema(type=Type.ARRAY, items=Schema(type=Type.STRING)),
+    },
+    required=["user_intent", "date_range", "how_to_find_out", "slack_search_words"],
+    property_ordering=["user_intent", "date_range", "how_to_find_out", "slack_search_words"],
+)
 
 
 def get_slack_search_word_system_prompt(channel: SlackChannel, settings: str):
@@ -196,6 +237,20 @@ def get_information_obtained_by_rag_prompt(info: list[dict[str, Any]], words: li
     )
 
 
+RefineSlackSearchesSchema = Schema(
+    type=Type.OBJECT,
+    properties={
+        "user_intent": Schema(type=Type.STRING),
+        "permalinks": Schema(type=Type.ARRAY, items=Schema(type=Type.STRING)),
+        "get_next_messages": Schema(type=Type.ARRAY, items=Schema(type=Type.STRING)),
+        "get_messages": Schema(type=Type.ARRAY, items=Schema(type=Type.STRING)),
+        "additional_search_words": Schema(type=Type.ARRAY, items=Schema(type=Type.STRING)),
+    },
+    required=["user_intent", "permalinks", "get_next_messages", "get_messages", "additional_search_words"],
+    property_ordering=["user_intent", "permalinks", "get_next_messages", "get_messages", "additional_search_words"],
+)
+
+
 def get_refine_slack_searches_system_prompt(channel: SlackChannel, settings: str):
     return dedent(
         f"""
@@ -250,6 +305,19 @@ def get_refine_slack_searches_system_prompt(channel: SlackChannel, settings: str
     ).strip()
 
 
+LastshotSchema = Schema(
+    type=Type.OBJECT,
+    properties={
+        "user_intent": Schema(type=Type.STRING),
+        "response_message": Schema(type=Type.STRING),
+        "confirm_message": Schema(type=Type.STRING),
+        "response_quality": Schema(type=Type.BOOLEAN),
+    },
+    required=["user_intent", "response_message", "confirm_message", "response_quality"],
+    property_ordering=["user_intent", "response_message", "confirm_message", "response_quality"],
+)
+
+
 def get_lastshot_system_prompt(channel: SlackChannel, settings: str):
     return dedent(
         f"""
@@ -267,7 +335,7 @@ def get_lastshot_system_prompt(channel: SlackChannel, settings: str):
         purpose: {channel.purpose}
 
         # What I need you to do
-        - Respond to the user's questions and intentions.
+        - Respond to the user's questions or intentions.
         - Please refer to "Information obtained at RAG" and give priority to the {config.WORKSPACE_NAME}'s circumstances and internal rules in your answer.
         - The "Information obtained at RAG" contains outdated information; use the newer information.
         - The "Information obtained at RAG" includes information you yourself submitted, which may be incorrect.
@@ -276,6 +344,7 @@ def get_lastshot_system_prompt(channel: SlackChannel, settings: str):
         - Please output your response in JSON format according to the "Output format" described below.
         - Mention "user_id" in the form of "<@UXXXXXXXXX>".
         - When you make a Mention, the other person will be notified, so please keep usage to a minimum!
+        - Use a name, not an ID, to refer to a specific person.
         - Please think in {config.LANGUAGE} and respond in {config.LANGUAGE}.
 
         # Output format
