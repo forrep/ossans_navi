@@ -308,9 +308,9 @@ def get_refine_slack_searches_system_prompt(channel: SlackChannel, settings: str
 LastshotSchema = Schema(
     type=Type.OBJECT,
     properties={
-        "user_intent": Schema(type=Type.STRING),
+        "user_intent": Schema(type=Type.STRING, nullable=True),
         "response_message": Schema(type=Type.STRING),
-        "confirm_message": Schema(type=Type.STRING),
+        "confirm_message": Schema(type=Type.STRING, nullable=True),
         "response_quality": Schema(type=Type.BOOLEAN),
     },
     required=["user_intent", "response_message", "confirm_message", "response_quality"],
