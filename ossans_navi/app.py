@@ -197,7 +197,7 @@ def do_ossans_navi_response(say, event: SlackMessageEvent, models: AiModels) -> 
     yield
 
     # メッセージの仕分けを行う、質問かどうか判別する
-    (event.classification, emoji_to_react) = ossans_navi_service.classify(thread_messages)
+    event.classification = ossans_navi_service.classify(thread_messages)
 
     if not event.is_need_response() and not event.is_mention:
         # 質問・相談ではなく、メンションされていない場合はここで終了
@@ -206,18 +206,7 @@ def do_ossans_navi_response(say, event: SlackMessageEvent, models: AiModels) -> 
             slack_service.add_reaction(
                 event.channel_id,
                 event.ts,
-                (
-                    emoji_to_react
-                    if (
-                        emoji_to_react
-                        and (
-                            event.classification not in config.SLACK_REACTIONS
-                            or emoji_to_react not in ('+1', ':+1:', 'thumbsup', ':thumbsup:')
-                        )
-                    )
-                    else config.SLACK_REACTIONS.get(event.classification)
-                ),
-                config.SLACK_REACTIONS.get(event.classification)
+                event.slack_emoji_names
             )
             logger.info("Finished with reaction.")
         return

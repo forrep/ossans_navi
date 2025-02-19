@@ -450,7 +450,7 @@ class SlackMessageEvent:
     is_talk_to_other: bool = dataclasses.field(default=False, init=False)
     is_joined: bool = dataclasses.field(default=False, init=False)
     is_next_message_from_ossans_navi: bool = dataclasses.field(default=False, init=False)
-    classification: str = dataclasses.field(default="other", init=False)
+    classification: Optional[dict[str, str | list[str]]] = dataclasses.field(init=False)
     settings: str = dataclasses.field(default="", init=False)
     canceled_events: list['SlackMessageEvent'] = dataclasses.field(default_factory=list, init=False)
 
@@ -661,7 +661,56 @@ class SlackMessageEvent:
         return self.source.get("channel_type") == "im"
 
     def is_need_response(self) -> bool:
-        return self.classification in ("question",)
+        if self.user_intentions_type in ("need_answers_to_questions",):
+            return True
+        if self.user_intentions_type in ("ask_someone_to_do_something",):
+            if self.who_to_talk_to in ("to_someone_well_informed",):
+                return True
+        if self.who_to_talk_to in ("to_assistant_bot",):
+            return True
+        if self.user_emotions in ("be_troubled",):
+            if self.who_to_talk_to in ("to_someone_well_informed",):
+                return True
+        return False
+
+    @property
+    def user_intentions_type(self) -> str:
+        return v if isinstance((v := (self.classification or {}).get("user_intentions_type")), str) else "other"
+
+    @property
+    def who_to_talk_to(self) -> str:
+        return v if isinstance((v := (self.classification or {}).get("who_to_talk_to")), str) else "cannot_determine"
+
+    @property
+    def user_emotions(self) -> str:
+        return v if isinstance((v := (self.classification or {}).get("user_emotions")), str) else "no_emotions"
+
+    @property
+    def slack_emoji_names(self) -> list[str]:
+        return [
+            *(v if isinstance(v := (self.classification or {}).get("slack_emoji_names"), list) else []),
+            *(
+                [v] if isinstance(
+                    (
+                        v := {
+                            "need_answers_to_questions": None,                                # 質問
+                            "ask_someone_to_do_something": None,                              # 依頼
+                            "report_to_someone": "spiral_note_pad",                           # 報告
+                            "advice_to_someone": "teacher",                                   # アドバイス
+                            "agree_with_someone": "smile",                                    # 同意
+                            "sympathize_with_someone": "relaxed",                             # 共感
+                            "comfirm_with_someone": "wink",                                   # 確認
+                            "praise_someone_or_something": "thumbsup",                        # 感嘆
+                            "disappointed_in_someone_or_something": "disappointed_relieved",  # 失望
+                            "sharing_information": "spiral_note_pad",                         # 共有
+                            "note_for_self": "pencil",                                        # メモ
+                            "other": None,
+                        }.get(self.user_intentions_type)
+                    ),
+                    str
+                ) else []
+            )
+        ]
 
     def _is_mention_to_subteam(self) -> bool:
         return bool(re.search(r'<!subteam\^[^>]+>', self.text))

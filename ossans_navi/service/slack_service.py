@@ -459,19 +459,19 @@ class SlackService:
     def chat_post_message(self, channel: str, text: str, thread_ts: Optional[str] = None) -> None:
         self.bot_client.chat_postMessage(channel=channel, text=text, thread_ts=thread_ts)
 
-    def add_reaction(self, channel: str, ts: str, name: str | None, fallback: str | None = None) -> None:
-        if not isinstance(name, str):
+    def add_reaction(self, channel: str, ts: str, names: list[str]) -> None:
+        if not isinstance(names, list) or len(names) == 0:
             return
-        name = re.sub(r'^:(.+):$', lambda v: v.group(1), name)
+        name = re.sub(r'^:(.+):$', lambda v: v.group(1), names[0])
         try:
             self.bot_client.reactions_add(channel=channel, timestamp=ts, name=name)
         except SlackApiError as e:
             response: SlackResponse = e.response
             if response.get("error") == "invalid_name":
                 logger.info("Reaction not found: " + name)
-                if fallback:
-                    # OssansNavi が生成したリアクションが存在しない場合は fallback を利用する
-                    self.add_reaction(channel, ts, fallback)
+                if len(names) >= 2:
+                    # OssansNavi が生成したリアクションが存在しない場合は次の候補を利用する
+                    self.add_reaction(channel, ts, names[1:])
                     return
             logger.error("reactions_add() return error.")
             logger.error(e, exc_info=True)

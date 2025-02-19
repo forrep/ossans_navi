@@ -5,12 +5,14 @@ import json
 import logging
 import threading
 import time
+from collections import defaultdict
 from enum import Enum
+from operator import itemgetter
 from typing import Any, Iterable, Optional
 
 from google import genai
 from google.genai import types
-from openai import NOT_GIVEN, AzureOpenAI, InternalServerError, NotGiven, OpenAI, RateLimitError
+from openai import AzureOpenAI, InternalServerError, OpenAI, RateLimitError
 from openai.types.chat import ChatCompletion
 
 from ossans_navi import config
@@ -176,7 +178,8 @@ class AiPromptMessage:
 class AiPrompt:
     system: str
     messages: list[AiPromptMessage]
-    schema: Optional[type] = dataclasses.field(default=None)
+    schema: Optional[types.Schema] = dataclasses.field(default=None)
+    choices: int = dataclasses.field(default=1)
 
     def to_openai_prompt(self) -> list[dict[str, str | list[dict[str, Any]]]]:
         return [
@@ -196,6 +199,46 @@ class AiPrompt:
 
     def to_gemini_system_prompt(self) -> types.Content:
         return types.Content(parts=[types.Part.from_text(text=self.system)])
+
+    def to_gemini_dict(self) -> dict[str, Any]:
+        return {
+            "generationConfig": {
+                "candidateCount": self.choices,
+                **(
+                    {
+                        "responseMimeType": "application/json",
+                        "responseSchema": self.schema.model_dump(exclude_unset=True, exclude_defaults=True),
+                    }
+                    if self.schema else {}
+                )
+            },
+            "systemInstruction": {
+                "parts": [
+                    {
+                        "text": self.system,
+                    }
+                ]
+            },
+            "contents": [
+                {
+                    "parts": [
+                        {
+                            **({"text": part.text} if part.text else {}),
+                            **(
+                                {
+                                    "inline_data": {
+                                        "mime_type": v.mime_type,
+                                        "data": base64.b64encode(v.data).decode()
+                                    }
+                                } if (v := part.inline_data) else {}
+                            ),
+                        }
+                        for part in (content.parts or [])
+                    ]
+                }
+                for content in self.to_gemini_prompt()
+            ]
+        }
 
 
 @dataclasses.dataclass
@@ -262,37 +305,38 @@ class AiService:
             case AiServiceType.GEMINI:
                 self.client_gemini = genai.Client(api_key=config.GEMINI_API_KEY)
             case _:
-                raise NotImplementedError("Unknown AiServiceType")
+                raise NotImplementedError(f"Unknown AiServiceType: {config.AI_SERVICE_TYPE}")
 
     def _chat_completions(
             self,
             model: AiModel,
             prompt: AiPrompt,
-            n: int | NotGiven = NOT_GIVEN,
     ) -> AiResponse:
         if model.ai_service_type in (AiServiceType.OPENAI, AiServiceType.AZURE_OPENAI):
             return self._chat_completions_openai(
                 model,
                 prompt,
-                n,
             )
         elif model.ai_service_type == AiServiceType.GEMINI:
             return self._chat_completions_gemini(
                 model,
                 prompt,
-                n,
             )
         else:
-            raise NotImplementedError("Unknown AiServiceType.")
+            raise NotImplementedError(f"Unknown AiServiceType: {model.ai_service_type}")
 
     def _chat_completions_gemini(
             self,
             model: AiModel,
             prompt: AiPrompt,
-            n: int | NotGiven = NOT_GIVEN,
     ) -> AiResponse:
         messages: Iterable = prompt.to_gemini_prompt()
-        logger.debug(f"_chat_completions model={model.name}, system=" + str(prompt.to_gemini_system_prompt()) + ", messages=" + str(messages))
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(f"_chat_completions model={model.name}, prompt={json.dumps(prompt.to_gemini_dict(), ensure_ascii=False)}")
+        else:
+            logger.info(
+                f"_chat_completions model={model.name}, prompt(shrink)={json.dumps(shrink_message(prompt.to_gemini_dict()), ensure_ascii=False)}"
+            )
         start_time = time.time()
         last_exception: Optional[Exception] = None
         response: types.GenerateContentResponse = None
@@ -302,7 +346,7 @@ class AiService:
                     model=model.name,
                     config=types.GenerateContentConfig(
                         system_instruction=prompt.to_gemini_system_prompt(),
-                        candidate_count=n if n != NOT_GIVEN else 1,
+                        candidate_count=prompt.choices,
                         response_mime_type="application/json",
                         response_schema=prompt.schema
                     ),
@@ -311,8 +355,8 @@ class AiService:
                 break
             except Exception as e:
                 # しばらく待ってからリトライする
-                # n>=2 の場合にエラーが発生するケースがあるのでリトライは n=1 とする
-                n = 1
+                # choices>=2 の場合にエラーが発生するケースがあるのでリトライは choices=1 とする
+                prompt.choices = 1
                 logger.error(e)
                 last_exception = e
                 time.sleep(30)
@@ -336,13 +380,12 @@ class AiService:
             self,
             model: AiModel,
             prompt: AiPrompt,
-            n: int | NotGiven = NOT_GIVEN,
     ) -> AiResponse:
         messages: Iterable = prompt.to_openai_prompt()
         if logger.isEnabledFor(logging.DEBUG):
-            logger.debug(f"_chat_completions model={model.name}, messages=" + json.dumps(messages, ensure_ascii=False))
+            logger.debug(f"_chat_completions model={model.name}, messages={json.dumps(messages, ensure_ascii=False)}")
         else:
-            logger.info(f"_chat_completions model={model.name}, messages(shrink)=" + json.dumps(shrink_message(messages), ensure_ascii=False))
+            logger.info(f"_chat_completions model={model.name}, messages(shrink)={json.dumps(shrink_message(messages), ensure_ascii=False)}")
         start_time = time.time()
         last_exception: Optional[Exception] = None
         response = None
@@ -352,7 +395,7 @@ class AiService:
                     model=model.name,
                     response_format={"type": "json_object"},
                     messages=messages,
-                    n=n,
+                    n=prompt.choices,
                     timeout=300,
                 )
                 break
@@ -389,27 +432,29 @@ class AiService:
             raise last_exception or RuntimeError()
         return AiResponse.from_openai_response(response)
 
-    def request_classification(self, model: AiModel, prompt: AiPrompt) -> tuple[str, str]:
-        response = self._chat_completions(model, prompt, n=5)
-        message_type: dict[str, int] = {}
-        slack_emoji_name: dict[str, int] = {}
+    def request_classification(self, model: AiModel, prompt: AiPrompt) -> dict[str, str | list[str]]:
+        prompt.choices = 5
+        response = self._chat_completions(model, prompt)
+        summary: defaultdict[str, defaultdict[str, int]] = defaultdict(lambda: defaultdict(lambda: 0))
         for message in response.choices:
-            if (
-                'message_type' in message.content
-                and isinstance(message.content['message_type'], str)
-            ):
-                message_type[message.content['message_type']] = message_type.get(message.content['message_type'], 0) + 1
-                if "slack_emoji_name" in message.content and len(message.content["slack_emoji_name"]) > 0:
-                    slack_emoji_name[message.content["slack_emoji_name"]] = slack_emoji_name.get(message.content["slack_emoji_name"], 0) + 1
-        sorted_message_type: list[tuple[str, int]] = sorted(message_type.items(), key=lambda v: (v[1], v[0]), reverse=True)
-        sorted_slack_emoji_name: list[tuple[str, int]] = sorted(slack_emoji_name.items(), key=lambda v: (v[1], v[0]), reverse=True)
-        decided_message_type = "other"
-        decided_slack_emoji_name = ""
-        if len(sorted_message_type) > 0 and sorted_message_type[0][1] >= 2:
-            decided_message_type = sorted_message_type[0][0]
-        if len(sorted_slack_emoji_name) > 0:
-            decided_slack_emoji_name = sorted_slack_emoji_name[0][0]
-        return (decided_message_type, decided_slack_emoji_name)
+            for name in ("user_intentions_type", "who_to_talk_to", "user_emotions", "slack_emoji_names",):
+                if isinstance((v := message.content.get(name)), str):
+                    summary[name][v] = summary[name][v] + 1
+                if isinstance((v := message.content.get(name)), list):
+                    for w in v:
+                        summary[name][w] = summary[name][w] + 1
+        summary_sorted: defaultdict[str, list[tuple[str, int]]] = defaultdict(list)
+        for name in ("user_intentions_type", "who_to_talk_to", "user_emotions", "slack_emoji_names",):
+            summary_sorted[name] = sorted(summary[name].items(), key=lambda v: (v[1], v[0]), reverse=True)
+        logger.info(f"classify: {summary_sorted}")
+        return {
+            name: (
+                list(map(itemgetter(0), v)) if len(v := summary_sorted[name]) > 0 else []
+            ) if name == "slack_emoji_names" else (
+                v[0][0] if len(v := summary_sorted[name]) > 0 else ""
+            )
+            for name in ("user_intentions_type", "who_to_talk_to", "user_emotions", "slack_emoji_names",)
+        }
 
     def request_image_description(self, model: AiModel, prompt: AiPrompt) -> dict[str, list[dict[str, str]]]:
         response = self._chat_completions(model, prompt)
@@ -432,8 +477,8 @@ class AiService:
 
     def request_slack_search_words(self, model: AiModel, prompt: AiPrompt) -> list[str]:
         # Gemini は n=2 で十分なバリエーションを生成してくれる
-        n = 2 if model.ai_service_type == AiServiceType.GEMINI else 5
-        response = self._chat_completions(model, prompt, n=n)
+        prompt.choices = 2 if model.ai_service_type == AiServiceType.GEMINI else 5
+        response = self._chat_completions(model, prompt)
         slack_search_words: list[str] = list(set(
             itertools.chain.from_iterable(
                 [
@@ -470,8 +515,8 @@ class AiService:
 
     def request_refine_slack_searches(self, model: AiModel, prompt: AiPrompt) -> list[RefineResponse]:
         # Gemini は n=2 で十分な網羅性がある
-        n = 2 if model.ai_service_type == AiServiceType.GEMINI else 5
-        response = self._chat_completions(model, prompt, n=n)
+        prompt.choices = 2 if model.ai_service_type == AiServiceType.GEMINI else 5
+        response = self._chat_completions(model, prompt)
         return AiService._analyze_refine_slack_searches_response(response)
 
     @staticmethod
@@ -495,10 +540,10 @@ class AiService:
         ]
 
     def request_lastshot(self, model: AiModel, prompt: AiPrompt, n: int = 1) -> list[LastshotResponse]:
-        n = 1 if model.ai_service_type == AiServiceType.GEMINI else n
+        # Gemini は大きいプロンプトのパターンで choice>=2 が原因となるエラーケースがある、よって choice=1 とする
+        prompt.choices = 1 if model.ai_service_type == AiServiceType.GEMINI else n
         for _ in range(2):
-            # Gemini は大きいプロンプトのパターンで n>=2 が原因となるエラーケースがある、よって n=1 とする
-            response = self._chat_completions(model, prompt, n=1 if model.ai_service_type == AiServiceType.GEMINI else n)
+            response = self._chat_completions(model, prompt)
             if len(result := AiService._analyze_lastshot_response(response)) > 0:
                 return result
         logger.error("Error empty choices, response=" + str(response))

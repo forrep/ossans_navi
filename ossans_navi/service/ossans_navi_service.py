@@ -298,7 +298,7 @@ class OssansNaviService:
     def is_next_message_from_ossans_navi(self, thread_messages: list[SlackMessageLite]) -> bool:
         return len(thread_messages) >= 2 and thread_messages[-2].user.user_id in self.slack_service.my_bot_user_id
 
-    def classify(self, thread_messages: list[SlackMessageLite]) -> tuple[str, str]:
+    def classify(self, thread_messages: list[SlackMessageLite]) -> dict[str, str | list[str]]:
         return self.ai_service.request_classification(
             self.models.low_cost,
             self.get_ai_messages(

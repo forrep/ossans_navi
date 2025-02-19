@@ -39,7 +39,7 @@ def get_image_description_system_prompt(channel: SlackChannel, settings: str):
         {get_now()}
 
         # Precondition
-        - You are an excellent assistant named {" or ".join([f'"{name}"' for name in config.ASSISTANT_NAMES])} that works as a bot on slack used by the "{config.WORKSPACE_NAME}"!
+        - You are an excellent assistant bot named {" or ".join([f'"{name}"' for name in config.ASSISTANT_NAMES])} that works as a bot on slack used by the "{config.WORKSPACE_NAME}"!
         - This message is exchanged on the "Slack channel" described below.
         {settings + ("\n" if settings else "")}
         # Slack channel
@@ -88,12 +88,51 @@ def get_image_description_system_prompt(channel: SlackChannel, settings: str):
 ClassificationSchema = Schema(
     type=Type.OBJECT,
     properties={
+        "user_intent": Schema(type=Type.STRING, nullable=True),
         "response_text": Schema(type=Type.STRING),
-        "message_type": Schema(type=Type.STRING),
-        "slack_emoji_name": Schema(type=Type.STRING),
+        "user_intentions_type": Schema(
+            type=Type.STRING,
+            enum=[
+                "need_answers_to_questions",
+                "ask_someone_to_do_something",
+                "report_to_someone",
+                "advice_to_someone",
+                "agree_with_someone",
+                "sympathize_with_someone",
+                "comfirm_with_someone",
+                "praise_someone_or_something",
+                "disappointed_in_someone_or_something",
+                "sharing_information",
+                "note_for_self",
+                "other",
+            ]
+        ),
+        "who_to_talk_to": Schema(
+            type=Type.STRING,
+            enum=[
+                "to_assistant_bot",
+                "to_someone_well_informed",
+                "to_specific_persons",
+                "to_all_of_us",
+                "to_noone",
+                "cannot_determine",
+            ]
+        ),
+        "user_emotions": Schema(
+            type=Type.STRING,
+            enum=[
+                "be_pleased",
+                "be_angular",
+                "be_troubled",
+                "be_sympathize",
+                "be_suspicious",
+                "no_emotions",
+            ]
+        ),
+        "slack_emoji_names": Schema(type=Type.ARRAY, items=Schema(type=Type.STRING)),
     },
-    required=["response_text", "message_type", "slack_emoji_name"],
-    property_ordering=["response_text", "message_type", "slack_emoji_name"],
+    required=["user_intent", "response_text", "user_intentions_type", "who_to_talk_to", "user_emotions", "slack_emoji_names"],
+    property_ordering=["user_intent", "response_text", "user_intentions_type", "who_to_talk_to", "user_emotions", "slack_emoji_names"],
 )
 
 
@@ -104,7 +143,7 @@ def get_classification_system_prompt(channel: SlackChannel, settings: str):
         {get_now()}
 
         # Precondition
-        - You are an excellent assistant named {" or ".join([f'"{name}"' for name in config.ASSISTANT_NAMES])} that works as a bot on slack used by the "{config.WORKSPACE_NAME}"!
+        - You are an excellent assistant bot named {" or ".join([f'"{name}"' for name in config.ASSISTANT_NAMES])} that works as a bot on slack used by the "{config.WORKSPACE_NAME}"!
         - This message is exchanged on the "Slack channel" described below.
         {settings + ("\n" if settings else "")}
         # Slack channel
@@ -117,30 +156,36 @@ def get_classification_system_prompt(channel: SlackChannel, settings: str):
 
         # Output format
         {{
+        "user_intent": contents,
         "response_text": contents,
-        "message_type": contents,
-        "slack_emoji_name": emoji_name
+        "user_intentions_type": enum,
+        "who_to_talk_to": enum,
+        "user_emotions": enum,
+        "slack_emoji_names": [emoji_name, ...]
         }}
+
+        # Rules for "user_intent"
+        - Organize and output the questions and intentions contained in the last message.
+        - If the last message does not contain a question or intent, null is output.
 
         # Rules for "response_text"
         - Output response to user.
 
-        # Rules for "message_type"
-        - Consider the intent of the last message sent by the user. Then output the message intent by selecting from the options below. Be sure to select from only the following options.
-            - question
-            - request
-            - report
-            - advice
-            - agreement
-            - empathy
-            - confirmation
-            - admiration
-            - disappointment
-            - task_list
-            - other
+        # Rules for "user_intentions_type"
+        - Consider the intent of the last message sent by the user. Then, select the message intent from the options below. Be sure to select from only the following options.
+            {", ".join([v for v in (ClassificationSchema.properties["user_intentions_type"].enum or [])])}
 
-        # Rules for "slack_emoji_name"
-        - Output the name of the appropriate slack emoji to react to.
+        # Rules for "who_to_talk_to"
+        - Consider the intent of the last message sent by the user. Then, select from the options below to output who the user is talking to. Be sure to select from only the following options.
+            {", ".join([v for v in (ClassificationSchema.properties["who_to_talk_to"].enum or [])])}
+
+        # Rules for "user_emotions"
+        - Consider the intent of the last message sent by the user. Then, select the user's emotion from the following options. Be sure to select from only the following options.
+            {", ".join([v for v in (ClassificationSchema.properties["user_emotions"].enum or [])])}
+
+        # Rules for "slack_emoji_names"
+        - Output the names of the appropriate slack emoji to react to.
+        - Specify a emoji name that exists in slack.
         - Anything other than :+1: or :thumbsup: would be great!
         """
     ).strip()
@@ -149,7 +194,7 @@ def get_classification_system_prompt(channel: SlackChannel, settings: str):
 SlackSearchWordSchema = Schema(
     type=Type.OBJECT,
     properties={
-        "user_intent": Schema(type=Type.STRING),
+        "user_intent": Schema(type=Type.STRING, nullable=True),
         "date_range": Schema(type=Type.STRING),
         "how_to_find_out": Schema(type=Type.STRING),
         "slack_search_words": Schema(type=Type.ARRAY, items=Schema(type=Type.STRING)),
@@ -166,7 +211,7 @@ def get_slack_search_word_system_prompt(channel: SlackChannel, settings: str):
         {get_now()}
 
         # Precondition
-        - You are an excellent assistant named {" or ".join([f'"{name}"' for name in config.ASSISTANT_NAMES])} that works as a bot on slack used by the "{config.WORKSPACE_NAME}"!
+        - You are an excellent assistant bot named {" or ".join([f'"{name}"' for name in config.ASSISTANT_NAMES])} that works as a bot on slack used by the "{config.WORKSPACE_NAME}"!
         - This message is exchanged on the "Slack channel" described below.
         {settings + ("\n" if settings else "")}
         # Slack channel
@@ -240,7 +285,7 @@ def get_information_obtained_by_rag_prompt(info: list[dict[str, Any]], words: li
 RefineSlackSearchesSchema = Schema(
     type=Type.OBJECT,
     properties={
-        "user_intent": Schema(type=Type.STRING),
+        "user_intent": Schema(type=Type.STRING, nullable=True),
         "permalinks": Schema(type=Type.ARRAY, items=Schema(type=Type.STRING)),
         "get_next_messages": Schema(type=Type.ARRAY, items=Schema(type=Type.STRING)),
         "get_messages": Schema(type=Type.ARRAY, items=Schema(type=Type.STRING)),
@@ -258,7 +303,7 @@ def get_refine_slack_searches_system_prompt(channel: SlackChannel, settings: str
         {get_now()}
 
         # Precondition
-        - You are an excellent assistant named {" or ".join([f'"{name}"' for name in config.ASSISTANT_NAMES])} that works as a bot on slack used by the "{config.WORKSPACE_NAME}"!
+        - You are an excellent assistant bot named {" or ".join([f'"{name}"' for name in config.ASSISTANT_NAMES])} that works as a bot on slack used by the "{config.WORKSPACE_NAME}"!
         - "Information obtained at RAG" is the messages and threads exchanged in Slack in JSON format. "attachments" and "files" are not posted by the submitter themselves, but are quoted from other information. If the thread's parent message exists, it will be populated in "root_message"
         - User's message is exchanged on the "Slack channel" described below.
         {settings + ("\n" if settings else "")}
@@ -325,7 +370,7 @@ def get_lastshot_system_prompt(channel: SlackChannel, settings: str):
         {get_now()}
 
         # Precondition
-        - You are an excellent assistant named {" or ".join([f'"{name}"' for name in config.ASSISTANT_NAMES])} that works as a bot on slack used by the "{config.WORKSPACE_NAME}"!
+        - You are an excellent assistant bot named {" or ".join([f'"{name}"' for name in config.ASSISTANT_NAMES])} that works as a bot on slack used by the "{config.WORKSPACE_NAME}"!
         - "Information obtained at RAG" is the messages and threads exchanged in Slack in JSON format. "attachments" and "files" are not posted by the submitter themselves, but are quoted from other information. If the thread's parent message exists, it will be populated in "root_message"
         - This message is exchanged on the "Slack channel" described below.
         {settings + ("\n" if settings else "")}

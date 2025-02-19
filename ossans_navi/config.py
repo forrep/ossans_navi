@@ -87,18 +87,3 @@ SAFE_MODE = True
 
 # 静かモード、メンションしていないと反応しないなど
 SILENT_MODE = False
-
-# メッセージに返信する必要がない場合のリアクション対応表
-SLACK_REACTIONS = {
-    "question": None,                           # 質問
-    "request": None,                            # 依頼
-    "report": "spiral_note_pad",                # 報告
-    "advice": "teacher",                        # アドバイス
-    "agreement": "smile",                       # 同意
-    "empathy": "relaxed",                       # 共感
-    "confirmation": "wink",                     # 確認
-    "admiration": "thumbsup",                   # 感嘆
-    "disappointment": "disappointed_relieved",  # 失望
-    "task_list": "pencil",                      # タスク
-    "other": None,
-}
