@@ -83,7 +83,10 @@ def do_ossans_navi_response_safe(say, event: SlackMessageEvent):
     try:
         # event の構築作業
         event.canceled_events.extend(EVENT_GUARD.get_canceled_events(event))
-        event.user = slack_service.get_user(event.user_id)
+        if event.is_user:
+            event.user = slack_service.get_user(event.user_id)
+        else:
+            event.user = slack_service.get_bot(event.bot_id)
         event.channel = slack_service.get_channel(event.channel_id)
         mentions = [slack_service.get_user(user_id) for user_id in event.mentions]
         if event.is_dm() or len([user for user in mentions if user.user_id in slack_service.my_bot_user_id]) > 0:
@@ -138,9 +141,19 @@ def do_ossans_navi_response(say, event: SlackMessageEvent, models: AiModels) -> 
         return
 
     if event.user.is_bot or event.user.is_guest:
-        # OssansNavi はパブリックチャネルを無制限に検索して情報源にするため、パブリックチャネルに対する読み取り制限があるユーザーは利用できない
-        logger.info("sending_user is bot or guest, finished.")
-        return
+        # ボットやゲストには基本的には応答しないが、特別な条件にヒットしたら応答可能、その判定を行う
+        if (
+            event.user.user_id in ossans_navi_service.config.allow_responds
+            or (event.user.bot_id is not None and event.user.bot_id in ossans_navi_service.config.allow_responds)
+        ):
+            # 特別に許可されたユーザーに一致、この場合は応答が許可される
+            logger.info(
+                f"user: {event.user.user_id}{"(" + event.user.bot_id + ")" if event.user.bot_id is not None else ""} is in allow_responds list."
+            )
+        else:
+            # OssansNavi はパブリックチャネルを無制限に検索して情報源にするため、パブリックチャネルに対する読み取り制限があるユーザーは利用できない
+            logger.info("sending_user is bot or guest, finished.")
+            return
 
     # production で起動している場合は開発用チャネルには応答しない
     if not config.DEVELOPMENT_MODE and event.channel_id in (config.DEVELOPMENT_CHANNELS):
@@ -160,7 +173,8 @@ def do_ossans_navi_response(say, event: SlackMessageEvent, models: AiModels) -> 
                 return
 
     # DM の topic から設定を取得する
-    event.settings = slack_service.get_dm_info_with_ossans_navi(event.user.user_id)
+    if event.is_user:
+        event.settings = slack_service.get_dm_info_with_ossans_navi(event.user.user_id)
 
     # スレッドでやりとりされた履歴メッセージを取得
     thread_messages = ossans_navi_service.get_thread_messages()

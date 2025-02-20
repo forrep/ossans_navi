@@ -317,11 +317,17 @@ class OssansNaviService:
 
     def special_command(self) -> bool:
         """
-        special_command を実行して、管理者の追加や ossans_navi の設定を行う
-        special_command を実行した場合は True を返す、special command ではなければ False を返す
+        管理者が ossans_navi との DM に `config trusted_bots show` などのメッセージを送信することで利用できる special_command の実行判定及び実行を行う
+        special_command では OssansNavi の設定を行うことができる
+        special_command を実行した場合は True を返す、special_command に該当しなければ False を返すので、呼び出し元は通常のメッセージとして扱う
         呼び出し元は False が返った場合は元の処理を継続する、True の場合は special_command を実行しているので処理を打ち切る
         """
-        if (match := re.match(r'config\s+(trusted_bots|admin_users|viewable_private_channels)\s+(show|add|remove)(?:\s+(.+))?', self.event.text)):
+        if (
+            match := re.match(
+                r'config\s+(trusted_bots|allow_responds|admin_users|viewable_private_channels)\s+(show|add|remove)(?:\s+(.+))?',
+                self.event.text
+            )
+        ):
             if (
                 not (
                     # 管理者権限を持つユーザーのみ special_command を実行可能、管理者権限のルールは以下のいずれかを満たすこと
@@ -341,19 +347,38 @@ class OssansNaviService:
             value: Optional[str] = match.group(3)
             value = (value.strip() if isinstance(value, str) else None)
             text = f"{category} {action}{f" {value}" if value else ""}"
+            target_user = None
             if (
-                category in ("trusted_bots", "admin_users")
+                category in ("trusted_bots", "allow_responds", "admin_users")
                 and action in ("add", "remove")
                 and value
             ):
                 value = re.sub(r'<@([A-Z0-9]+)(\|[^>]+?)?>', "\\1", value)
+                if (v := self.slack_service.get_bot(value)).is_valid:
+                    target_user = v
+                elif (v := self.slack_service.get_user(value)).is_valid:
+                    target_user = v
 
             if category == "trusted_bots":
                 # 現在有効な trusted_bots を取得
-                now_users = {bot.user_id: bot for bot in [self.slack_service.get_bot(bot_id) for bot_id in self.config.trusted_bots] if bot.is_valid}
+                now_users = {
+                    **(
+                        {
+                            user.user_id: user
+                            for user in [self.slack_service.get_user(user_id) for user_id in self.config.trusted_bots]
+                            if user.is_valid
+                        }
+                    ),
+                    **(
+                        {
+                            bot.user_id: bot
+                            for bot in [self.slack_service.get_bot(bot_id) for bot_id in self.config.trusted_bots]
+                            if bot.is_valid
+                        }
+                    ),
+                }
                 if action in ("add", "remove") and value:
-                    target_user = self.slack_service.get_bot(value)
-                    if target_user.is_valid and target_user.is_bot:
+                    if target_user is not None and target_user.is_bot:
                         if action == "add":
                             now_users[target_user.user_id] = target_user
                             text += f"\nadded: <@{target_user.user_id}>"
@@ -367,14 +392,48 @@ class OssansNaviService:
                 text += ("\n• " if len(now_users) > 0 else "\nempty")
                 text += "\n• ".join([f"<@{bot.user_id}>" for bot in now_users.values()])
                 self.slack_service.chat_post_message(channel=self.event.channel_id, thread_ts=self.event.thread_ts, text=text)
+            if category == "allow_responds":
+                # 現在有効な allow_responds を取得
+                now_users = {
+                    **(
+                        {
+                            user.user_id: user
+                            for user in [self.slack_service.get_user(user_id) for user_id in self.config.allow_responds]
+                            if user.is_valid
+                        }
+                    ),
+                    **(
+                        {
+                            bot.user_id: bot
+                            for bot in [self.slack_service.get_bot(bot_id) for bot_id in self.config.allow_responds]
+                            if bot.is_valid
+                        }
+                    ),
+                }
+                if action in ("add", "remove") and value:
+                    if target_user is not None:
+                        if action == "add":
+                            now_users[target_user.user_id] = target_user
+                            text += f"\nadded: <@{target_user.user_id}>"
+                            logger.info(f"{category} added: {target_user.name}({target_user.user_id})")
+                        if action == "remove" and target_user.user_id in now_users:
+                            del now_users[target_user.user_id]
+                            text += f"\nremoved: <@{target_user.user_id}>"
+                            logger.info(f"{category} removed: {target_user.name}({target_user.user_id})")
+                        self.config.allow_responds = list(now_users.keys())
+                        self.slack_service.store_config_dict(self.config.to_dict())
+                text += ("\n• " if len(now_users) > 0 else "\nempty")
+                text += "\n• ".join([f"<@{bot.user_id}>" for bot in now_users.values()])
+                self.slack_service.chat_post_message(channel=self.event.channel_id, thread_ts=self.event.thread_ts, text=text)
             if category == "admin_users":
                 # 現在有効な admin_users を取得
                 now_users = {
-                    user.user_id: user for user in [self.slack_service.get_user(user_id) for user_id in self.config.admin_users] if user.is_valid
+                    user.user_id: user
+                    for user in [self.slack_service.get_user(user_id) for user_id in self.config.admin_users]
+                    if user.is_valid
                 }
                 if action in ("add", "remove") and value:
-                    target_user = self.slack_service.get_user(value)
-                    if target_user.is_valid and not target_user.is_bot and not target_user.is_guest:
+                    if target_user is not None and not target_user.is_bot and not target_user.is_guest:
                         if action == "add":
                             now_users[target_user.user_id] = target_user
                             text += f"\nadded: <@{target_user.user_id}>"
@@ -528,6 +587,7 @@ class OssansNaviService:
                 self.event.channel_id,
                 self.event.thread_ts,
                 self.config.viewable_private_channels,
+                self.config.trusted_bots,
                 is_additional,
                 is_get_messages,
             )

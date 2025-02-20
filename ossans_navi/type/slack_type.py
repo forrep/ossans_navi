@@ -18,6 +18,7 @@ class SlackUser:
     is_guest: bool
     is_admin: bool
     is_valid: bool = dataclasses.field(default=True)
+    bot_id: Optional[str] = dataclasses.field(default=None)
 
 
 @dataclasses.dataclass
@@ -502,6 +503,27 @@ class SlackMessageEvent:
         return self.source["user"]
 
     @property
+    def is_user(self) -> bool:
+        if self.is_message_changed():
+            # メッセージが変更された場合、変更後のユーザー ID を返す
+            return "user" in self.source["message"]
+        if self.is_message_deleted():
+            # メッセージが削除された場合、変更前のユーザー ID を返す（そもそも変更後のメッセージというデータが存在しないため）
+            return "user" in self.source["previous_message"]
+        return "user" in self.source
+
+    @property
+    def bot_id(self) -> str:
+        if self.is_message_changed() or self.is_message_deleted():
+            # ボットによる更新・削除イベントは対応していない
+            raise ValueError("Cannot get bot_id with message_changed or message_deleted")
+        return self.source["bot_id"]
+
+    @property
+    def is_bot(self) -> bool:
+        return not self.is_user
+
+    @property
     def ts(self) -> str:
         if self.is_message_changed():
             # メッセージが変更された場合でも、元メッセージの送信日時（ts）を返す
@@ -595,7 +617,8 @@ class SlackMessageEvent:
         """
         return (
             self.source.get("type") == "message"
-            and all(v in self.source for v in ("text", "channel", "user", "ts", ))
+            and all(v in self.source for v in ("text", "channel", "ts", ))
+            and any(v in self.source for v in ("user", "bot_id", ))
             and (
                 "subtype" not in self.source
                 or self.source["subtype"] in ("file_share", "thread_broadcast")
@@ -614,6 +637,7 @@ class SlackMessageEvent:
             message: dict[str, dict | str] = self.source["message"]
             if (
                 message.get("type") == "message"
+                # 編集イベントは bot_id に対応しない、user のみ対応とする
                 and all(v in message for v in ("text", "user", "ts", ))
                 # 普通の更新イベント時は "hidden" パラメータが存在しない
                 # hidden: True は更新イベントに見せかけてスレッドのルートメッセージを削除した場合に発生するイベント
@@ -635,6 +659,7 @@ class SlackMessageEvent:
             message = self.source["message"]
             if (
                 message.get("type") == "message"
+                # 削除イベントは bot_id に対応しない、user のみ対応とする
                 and all(v in message for v in ("text", "user", "ts", ))
                 # 普通の更新イベント時は "hidden" パラメータが存在しない
                 # hidden: True は更新イベントに見せかけてスレッドのルートメッセージを削除した場合に発生するイベント

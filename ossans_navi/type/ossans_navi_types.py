@@ -4,6 +4,7 @@ import dataclasses
 @dataclasses.dataclass
 class OssansNaviConfig:
     trusted_bots: list[str] = dataclasses.field(default_factory=list, init=False)
+    allow_responds: list[str] = dataclasses.field(default_factory=list, init=False)
     admin_users: list[str] = dataclasses.field(default_factory=list, init=False)
     viewable_private_channels: list[str] = dataclasses.field(default_factory=list, init=False)
 
@@ -13,6 +14,8 @@ class OssansNaviConfig:
         if settings_dict.get("type") == "config":
             if isinstance(settings_dict.get("trusted_bots"), list):
                 settings.trusted_bots.extend([v for v in settings_dict["trusted_bots"] if isinstance(v, str)])
+            if isinstance(settings_dict.get("allow_responds"), list):
+                settings.allow_responds.extend([v for v in settings_dict["allow_responds"] if isinstance(v, str)])
             if isinstance(settings_dict.get("admin_users"), list):
                 settings.admin_users.extend([v for v in settings_dict["admin_users"] if isinstance(v, str)])
             if isinstance(settings_dict.get("viewable_private_channels"), list):

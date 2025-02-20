@@ -308,6 +308,7 @@ def test_get_bot(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
         is_guest=False,
         is_admin=False,
         is_valid=True,
+        bot_id="BCL3TC9NW",
     )
 
     # bots_info で bot_not_found が返ってくるパターン
@@ -320,6 +321,7 @@ def test_get_bot(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
         is_guest=False,
         is_admin=False,
         is_valid=False,
+        bot_id="B1XXXXXXX",
     )
 
     # bots_info で request_timeout が返るパターン
@@ -335,6 +337,7 @@ def test_get_bot(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
         is_guest=False,
         is_admin=False,
         is_valid=False,
+        bot_id="B2XXXXXXX"
     )
 
     # bots_info で ValueError() が返るパターン
@@ -352,6 +355,7 @@ def test_get_bot(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
         is_guest=False,
         is_admin=False,
         is_valid=True,
+        bot_id="BCL3TC9NW",
     )
 
 

@@ -248,13 +248,14 @@ class SlackService:
             response = self.bot_client.bots_info(bot=bot_id)
             response_bot: dict[str, Any] = response['bot']
             bot_user = SlackUser(
-                user_id=bot_id,
+                user_id=response_bot.get("user_id", bot_id),
                 name=response_bot.get('name', 'Unknown Bot'),
                 username=response_bot.get('name', 'Unknown Bot'),
                 mention=f"<@{bot_id}>",
                 is_bot=True,
                 is_guest=False,
                 is_admin=False,
+                bot_id=bot_id,
             )
         except SlackApiError as e:
             error_response: SlackResponse = e.response
@@ -265,7 +266,17 @@ class SlackService:
                 logger.error(e, exc_info=True)
                 # raise e
             logger.info(f"{error_response.get("error")}, bot_id={bot_id}, exception={e}")
-            bot_user = SlackUser(bot_id, 'Unknown Bot', "unknown_bot", "", True, False, False, is_valid=False)
+            bot_user = SlackUser(
+                user_id=bot_id,
+                name='Unknown Bot',
+                username="unknown_bot",
+                mention="",
+                is_bot=True,
+                is_guest=False,
+                is_admin=False,
+                is_valid=False,
+                bot_id=bot_id,
+            )
         except Exception as e:
             logger.error(f"bots_info returns error bot_id={bot_id}")
             logger.error(e, exc_info=True)
@@ -504,6 +515,7 @@ class SlackService:
         recieved_message_channel_id: str,
         recieved_message_thread_ts: str,
         viewable_private_channels: list[str],
+        trusted_bots: list[str],
     ) -> Optional[SlackMessage]:
         """
         slcka api の検索結果 dict を SlackMessage に変換する
@@ -527,8 +539,12 @@ class SlackService:
         ):
             return None
         message_user = self.get_user(message["user"])
-        if message_user.user_id != self.my_bot_user_id and message_user.is_bot:
-            # OssansNavi 以外のボットのメッセージは情報源にしない
+        if (
+            message_user.is_bot
+            and message_user.user_id != self.my_bot_user_id
+            and message_user.user_id not in trusted_bots
+        ):
+            # ボットの場合、OssansNavi 以外、かつ trusted_bots に入っていないなら情報源にしない
             # ボットのメッセージは情報源にしない理由
             #   ログメッセージなど大量のメッセージが引っかかり応答速度の低下してトークン数も浪費する可能性があるため
             # OssansNavi のメッセージは情報源とする理由
@@ -590,6 +606,7 @@ class SlackService:
         recieved_message_channel_id: str,
         recieved_message_thread_ts: str,
         viewable_private_channels: list[str],
+        trusted_bots: list[str],
         is_additional: bool,
         is_get_messages: bool
     ) -> SlackSearch:
@@ -610,7 +627,8 @@ class SlackService:
                             recieved_message_user,
                             recieved_message_channel_id,
                             recieved_message_thread_ts,
-                            viewable_private_channels
+                            viewable_private_channels,
+                            trusted_bots,
                         )
                         for message in results['messages']['matches']
                     ] if message is not None
