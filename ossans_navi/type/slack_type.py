@@ -609,8 +609,9 @@ class SlackMessageEvent:
         """
         応答が必要なメッセージ（1, 2 の条件に当てはまる）に True を返却
         1. type: message である
-        2. text, channel, user, ts が存在する
-        3. 次のいずれかに当てはまる
+        2. text, channel, ts が存在する
+        3. user, bot_id どちらかが存在する
+        4. 次のいずれかに当てはまる
             - subtype が存在しない → 通常メッセージ
             - subtype が file_share → テキストスニペットの送信（ボットによるファイル送信も含む）
             - subtype が thread_broadcast → チャネルにも投稿するチェックを入れてスレッド返信

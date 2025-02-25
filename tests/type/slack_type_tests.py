@@ -257,3 +257,43 @@ def test_slack_message_event():
     assert not event_message2_deleted.is_open_channel()
     assert not event_message2_deleted.is_dm()
     assert not event_message2_deleted.is_mention_to_subteam()
+
+    # メッセージイベント（ボット）
+    event_bot_message = SlackMessageEvent(slack_messages_sample.bot_message)
+    assert event_bot_message.channel_id == "C056X111111"
+    assert event_bot_message.text == "ありがとうございます。"
+    assert not event_bot_message.is_user
+    assert event_bot_message.is_bot
+    assert event_bot_message.bot_id == "B08E00XXXX0"
+    assert event_bot_message.ts == "1740126435.330219"
+    assert event_bot_message.event_ts == "1740126435.330219"
+    assert event_bot_message.thread_ts == "1740126435.330219"
+    assert event_bot_message.mentions == []
+    assert not event_bot_message.is_broadcast()
+    assert not event_bot_message.is_thread()
+    assert event_bot_message.is_message_post()
+    assert not event_bot_message.is_message_changed()
+    assert not event_bot_message.is_message_deleted()
+    assert event_bot_message.is_open_channel()
+    assert not event_bot_message.is_dm()
+    assert not event_bot_message.is_mention_to_subteam()
+
+    # メッセージイベント（ファイル送信・ボット）
+    event_bot_message_file_share = SlackMessageEvent(slack_messages_sample.bot_message_file_share)
+    assert event_bot_message_file_share.channel_id == "C0000XXX0XX"
+    assert event_bot_message_file_share.text == "<@U0761XXXX6X> こんにちは"
+    assert not event_bot_message_file_share.is_user
+    assert event_bot_message_file_share.is_bot
+    assert event_bot_message_file_share.bot_id == "B08E00XXXX0"
+    assert event_bot_message_file_share.ts == "1740455797.032319"
+    assert event_bot_message_file_share.event_ts == "1740455797.032319"
+    assert event_bot_message_file_share.thread_ts == "1740455797.032319"
+    assert event_bot_message_file_share.mentions == ["U0761XXXX6X"]
+    assert not event_bot_message_file_share.is_broadcast()
+    assert not event_bot_message_file_share.is_thread()
+    assert event_bot_message_file_share.is_message_post()
+    assert not event_bot_message_file_share.is_message_changed()
+    assert not event_bot_message_file_share.is_message_deleted()
+    assert not event_bot_message_file_share.is_open_channel()
+    assert not event_bot_message_file_share.is_dm()
+    assert not event_bot_message_file_share.is_mention_to_subteam()

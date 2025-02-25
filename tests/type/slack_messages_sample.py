@@ -716,3 +716,107 @@ file_share_root_message_deleted = {
     "event_ts": "1738799648.000600",
     "channel_type": "group"
 }
+
+# メッセージイベント（ボット）
+bot_message = {
+    "subtype": "bot_message",
+    "text": "ありがとうございます。",
+    "username": "テスト用ボット",
+    "type": "message",
+    "ts": "1740126435.330219",
+    "bot_id": "B08E00XXXX0",
+    "app_id": "A08DXX0X0XX",
+    "trigger_id": "Ft08BM00FFF0",
+    "blocks": [
+        {
+            "type": "rich_text",
+            "block_id": "zIs49",
+            "elements": [
+                {
+                    "type": "rich_text_section",
+                    "elements": [
+                        {
+                            "type": "text",
+                            "text": "ありがとうございます。"
+                        }
+                    ]
+                }
+            ]
+        }
+    ],
+    "channel": "C056X111111",
+    "event_ts": "1740126435.330219",
+    "channel_type": "channel"
+}
+
+# メッセージイベント（ファイル送信・ボット）
+bot_message_file_share = {
+    "text": "<@U0761XXXX6X> こんにちは",
+    "files": [
+        {
+            "id": "F08XX111XXX",
+            "created": 1740455792,
+            "timestamp": 1740455792,
+            "name": "無題",
+            "title": "無題",
+            "mimetype": "text/plain",
+            "filetype": "text",
+            "pretty_type": "プレーンテキスト",
+            "user": "U7XXX00X0",
+            "user_team": "T02X3XXX1",
+            "editable": True,
+            "size": 13,
+            "mode": "snippet",
+            "is_external": False,
+            "external_type": "",
+            "is_public": False,
+            "public_url_shared": False,
+            "display_as_bot": False,
+            "username": "",
+            "url_private": "https://files.slack.com/files-pri/T02X3XXX1-F08XX111XXX/______",
+            "url_private_download": "https://files.slack.com/files-pri/T02X3XXX1-F08XX111XXX/download/______",
+            "permalink": "https://raccoon-co.slack.com/files/U7XXX00X0/F08XX111XXX/______",
+            "permalink_public": "https://slack-files.com/T02X3XXX1-F08XX111XXX-c4c6c099f0",
+            "edit_link": "https://raccoon-co.slack.com/files/U7XXX00X0/F08XX111XXX/______/edit",
+            "preview": "Hello, World!",
+            "preview_highlight": "<div class=\"CodeMirror cm-s-default CodeMirrorServer\">\n<div class=\"CodeMirror-code\">\n<div><pre>Hello, World!</pre></div>\n</div>\n</div>\n",
+            "lines": 1,
+            "lines_more": 0,
+            "preview_is_truncated": False,
+            "has_rich_preview": False,
+            "file_access": "visible"
+        }
+    ],
+    "upload": False,
+    "display_as_bot": False,
+    "blocks": [
+        {
+            "type": "rich_text",
+            "block_id": "Uhs0A",
+            "elements": [
+                {
+                    "type": "rich_text_section",
+                    "elements": [
+                        {
+                            "type": "user",
+                            "user_id": "U0761XXXX6X"
+                        },
+                        {
+                            "type": "text",
+                            "text": " こんにちは"
+                        }
+                    ]
+                }
+            ]
+        }
+    ],
+    "type": "message",
+    "ts": "1740455797.032319",
+    "bot_id": "B08E00XXXX0",
+    "app_id": "A08DXX0X0XX",
+    "trigger_id": "Ft08XX1X00XX",
+    "channel": "C0000XXX0XX",
+    "subtype": "file_share",
+    "event_ts": "1740455797.032319",
+    "channel_type": "group"
+}
