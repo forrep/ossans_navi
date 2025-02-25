@@ -405,7 +405,7 @@ def get_lastshot_system_prompt(channel: SlackChannel, settings: str):
         - If the last message does not contain an intention, null is output.
 
         # Rules for "response_message"
-        - You cannot do the actual action to the user, if you need action, ask someone else to do it!b
+        - If the user's request requires physical action, please ask someone else to do it.
         - Used to reply to users, please output in markdown format.
         - If "user_intent" is null, then appropriate response is given.
         - When answering a "user_intent" from a "Information obtained at RAG", include a link to the referring permalink.

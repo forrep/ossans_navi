@@ -612,8 +612,9 @@ class SlackMessageEvent:
         2. text, channel, user, ts が存在する
         3. 次のいずれかに当てはまる
             - subtype が存在しない → 通常メッセージ
-            - subtype が file_share → テキストスニペットの送信
-            - subtype が thread_broadcast のいずれか → チャネルにも投稿するチェックを入れてスレッド返信
+            - subtype が file_share → テキストスニペットの送信（ボットによるファイル送信も含む）
+            - subtype が thread_broadcast → チャネルにも投稿するチェックを入れてスレッド返信
+            - subtype が bot_message → ボットの通常メッセージ
         """
         return (
             self.source.get("type") == "message"
@@ -621,7 +622,7 @@ class SlackMessageEvent:
             and any(v in self.source for v in ("user", "bot_id", ))
             and (
                 "subtype" not in self.source
-                or self.source["subtype"] in ("file_share", "thread_broadcast")
+                or self.source["subtype"] in ("file_share", "thread_broadcast", "bot_message", )
             )
         )
 
