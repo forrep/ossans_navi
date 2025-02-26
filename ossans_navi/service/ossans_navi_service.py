@@ -14,8 +14,8 @@ from PIL import Image, ImageFile
 
 from ossans_navi import assets, config
 from ossans_navi.common.cache import LRUCache
-from ossans_navi.service.ai_service import (AiModels, AiPrompt, AiPromptContent, AiPromptImage, AiPromptMessage, AiPromptRole, AiService,
-                                            LastshotResponse)
+from ossans_navi.service.ai_prompt_service import AiPromptService
+from ossans_navi.service.ai_service import AiModels, AiPrompt, AiPromptContent, AiPromptImage, AiPromptMessage, AiPromptRole, AiService
 from ossans_navi.service.slack_service import SlackService
 from ossans_navi.type.ossans_navi_types import OssansNaviConfig
 from ossans_navi.type.slack_type import SlackFile, SlackMessage, SlackMessageEvent, SlackMessageLite, SlackSearches, SlackSearchTerm
@@ -29,6 +29,7 @@ class OssansNaviService:
     def __init__(self, ai_service: AiService, slack_service: SlackService, models: AiModels, event: SlackMessageEvent) -> None:
         self.ai_service = ai_service
         self.slack_service = slack_service
+        self.ai_prompt_service = AiPromptService(event, self.slack_service.get_assistant_names())
         self.models = models
         self.event = event
         self.config = self.get_config()
@@ -354,9 +355,7 @@ class OssansNaviService:
                 and value
             ):
                 value = re.sub(r'<@([A-Z0-9]+)(\|[^>]+?)?>', "\\1", value)
-                if (v := self.slack_service.get_bot(value)).is_valid:
-                    target_user = v
-                elif (v := self.slack_service.get_user(value)).is_valid:
+                if (v := self.slack_service.get_user(value)).is_valid:
                     target_user = v
 
             if category == "trusted_bots":
@@ -367,13 +366,6 @@ class OssansNaviService:
                             user.user_id: user
                             for user in [self.slack_service.get_user(user_id) for user_id in self.config.trusted_bots]
                             if user.is_valid
-                        }
-                    ),
-                    **(
-                        {
-                            bot.user_id: bot
-                            for bot in [self.slack_service.get_bot(bot_id) for bot_id in self.config.trusted_bots]
-                            if bot.is_valid
                         }
                     ),
                 }
@@ -400,13 +392,6 @@ class OssansNaviService:
                             user.user_id: user
                             for user in [self.slack_service.get_user(user_id) for user_id in self.config.allow_responds]
                             if user.is_valid
-                        }
-                    ),
-                    **(
-                        {
-                            bot.user_id: bot
-                            for bot in [self.slack_service.get_bot(bot_id) for bot_id in self.config.allow_responds]
-                            if bot.is_valid
                         }
                     ),
                 }
@@ -803,7 +788,7 @@ class OssansNaviService:
                         # 追加の取得メッセージが提供された場合は検索する
                         self.search(refine_slack_searches_response.get_messages, True, True)
 
-    def lastshot(self, thread_messages: list[SlackMessageLite]) -> list[LastshotResponse]:
+    def lastshot(self, thread_messages: list[SlackMessageLite]) -> list[str]:
         current_messages: list[SlackMessage] = []
         # 入力可能なトークン数を定義する、たくさん入れたら精度が上がるが費用も上がるのでほどほどのトークン数に制限する（話しかけられている時はトークン量を増やす）
         if self.event.is_mention or self.event.is_reply_to_ossans_navi():
@@ -814,7 +799,7 @@ class OssansNaviService:
             n = 1
         tokens_remain -= self.models.high_quality.tokenizer.messages_tokens(
             self.get_ai_messages(
-                assets.get_lastshot_system_prompt(self.event.channel, self.event.settings),
+                self.ai_prompt_service.get_lastshot_system_prompt(),
                 thread_messages,
                 limit=10000,
                 limit_last_message=30000,
@@ -845,14 +830,13 @@ class OssansNaviService:
         return self.ai_service.request_lastshot(
             self.models.high_quality,
             self.get_ai_messages(
-                assets.get_lastshot_system_prompt(self.event.channel, self.event.settings),
+                self.ai_prompt_service.get_lastshot_system_prompt(),
                 thread_messages,
                 assets.get_information_obtained_by_rag_prompt(
                     OssansNaviService.slack_message_to_ai_request(SlackMessage.sort(current_messages), limit=10000, check_dup_files=True)
                 ),
                 limit=10000,
                 limit_last_message=30000,
-                schema=assets.LastshotSchema,
             ),
             n
         )

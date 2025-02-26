@@ -191,6 +191,7 @@ class SlackService:
         self.cache_load_file = LRUCache[str, bytes](capacity=50, expire=1 * 60 * 60)   # 60分
         self.my_user_id: str = ""
         self.my_bot_user_id: str = ""
+        self.my_bot_user: Optional[SlackUser] = None
         self.workspace_url: str = "https://slack.com/"
 
     def start(self) -> None:
@@ -202,6 +203,7 @@ class SlackService:
             logger.error(f"auth_test() returns error: app={str(response_app.data)}, user={str(response_user.data)}, bot={str(response_bot.data)}")
         self.my_user_id = response_user["user_id"]
         self.my_bot_user_id = response_bot["user_id"]
+        self.my_bot_user = self.get_user(response_bot["user_id"])
         self.workspace_url = response_bot["url"]
         logger.info(f"App start with: {response_app["app_name"]}")
         self.socket_mode_hander.connect()
@@ -213,6 +215,9 @@ class SlackService:
     def get_user(self, user_id: str) -> SlackUser:
         if (cached := self.cache_get_user.get(user_id)).found:
             return cached.value
+        if re.search(r"^B", user_id):
+            # B から始まる user_id はボットのものなのでボット用のAPIで取得する
+            return self.get_bot(user_id)
         try:
             response = self.bot_client.users_info(user=user_id)
             response_user: dict[str, Any] = response['user']
@@ -713,3 +718,9 @@ class SlackService:
             raise RuntimeError(f"Response returns error: {response.status_code}")
         self.cache_load_file.put(url, response.content)
         return response.content
+
+    def get_assistant_names(self) -> list[str]:
+        return list({
+            *(config.ASSISTANT_NAMES),
+            *([self.my_bot_user.name] if self.my_bot_user else []),
+        })

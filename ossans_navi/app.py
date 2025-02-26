@@ -264,25 +264,13 @@ def do_ossans_navi_response(say, event: SlackMessageEvent, models: AiModels) -> 
 
     lastshot_response = sorted(
         lastshot_responses,
-        key=lambda v: (v.response_quality, len(v.response_message), len(v.confirm_message or "")),
+        key=lambda v: len(v),
         reverse=True
     )[0]
     do_response = False
-    if event.is_mention:
-        # メンションされている場合は応答する
+    if event.is_mention or event.is_need_response():
+        # メンションされている、または応答が必要とされるメッセージには応答する
         do_response = True
-    elif event.is_need_response():
-        # 質問・相談である場合は、以下の条件に合致する場合のみ応答する
-        if lastshot_response.user_intent is not None and lastshot_response.response_quality:
-            # 質問事項があり、かつ応答クオリティが高いと判断している場合は応答する
-            do_response = True
-        elif event.is_open_channel() and len([v for v in lastshot_responses if v.user_intent is not None and v.confirm_message is not None]) > 0:
-            # オープンチャネルであり、かつ質問事項があり、かつ詳しい人にパスするメッセージを生成できた場合は応答する
-            do_response = True
-            lastshot_response = [v for v in lastshot_responses if v.user_intent is not None and v.confirm_message is not None][0]
-        elif lastshot_response.user_intent is not None and event.is_reply_to_ossans_navi():
-            # 質問事項があり、かつ OssansNavi のメッセージの直後のメッセージの場合は応答する
-            do_response = True
 
     # 定期的にイベントがキャンセルされていないか確認して、キャンセルされていれば終了する
     yield
@@ -297,15 +285,7 @@ def do_ossans_navi_response(say, event: SlackMessageEvent, models: AiModels) -> 
             say(
                 text=(
                     slack_service.disable_mention_if_not_active(
-                        SlackService.convert_markdown_to_mrkdwn(lastshot_response.response_message) + "\n"
-                        + (
-                            # 詳しい人へパスするメッセージはオープンチャネルの場合のみ投稿する
-                            SlackService.convert_markdown_to_mrkdwn(lastshot_response.confirm_message) if (
-                                isinstance(lastshot_response.confirm_message, str)
-                                and len(lastshot_response.confirm_message) > 0
-                                and event.is_open_channel()
-                            ) else ""
-                        )
+                        SlackService.convert_markdown_to_mrkdwn(lastshot_response)
                     )
                 ),
                 thread_ts=event.thread_ts

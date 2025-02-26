@@ -3,4 +3,5 @@ max-line-length = 150
 ignore = E124, W503
 per-file-ignores =
     ./ossans_navi/assets.py:E501
+    ./ossans_navi/service/ai_prompt_assets.py:E501
     ./tests/*:E501

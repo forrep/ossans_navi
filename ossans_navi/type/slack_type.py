@@ -49,6 +49,9 @@ class SlackChannel:
     is_mpim: bool
     is_valid: bool = dataclasses.field(default=True)
 
+    def to_dict(self) -> dict[str, Any]:
+        return dataclasses.asdict(self)
+
 
 @dataclasses.dataclass
 class SlackFile:
