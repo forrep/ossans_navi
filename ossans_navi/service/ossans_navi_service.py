@@ -12,10 +12,11 @@ import html2text
 from google.genai.types import Schema, Type
 from PIL import Image, ImageFile
 
-from ossans_navi import assets, config
+from ossans_navi import config
 from ossans_navi.common.cache import LRUCache
 from ossans_navi.service.ai_prompt_service import AiPromptService
-from ossans_navi.service.ai_service import AiModels, AiPrompt, AiPromptContent, AiPromptImage, AiPromptMessage, AiPromptRole, AiService
+from ossans_navi.service.ai_service import (AiModels, AiPrompt, AiPromptContent, AiPromptImage, AiPromptMessage, AiPromptRole, AiService,
+                                            QualityCheckResponse)
 from ossans_navi.service.slack_service import SlackService
 from ossans_navi.type.ossans_navi_types import OssansNaviConfig
 from ossans_navi.type.slack_type import SlackFile, SlackMessage, SlackMessageEvent, SlackMessageLite, SlackSearches, SlackSearchTerm
@@ -192,11 +193,10 @@ class OssansNaviService:
                 ),
             }
 
-    def get_ai_messages(
+    def get_ai_prompt(
         self,
         system: str,
         messages: list[SlackMessageLite],
-        rag_info: Optional[str] = None,
         with_image_files: bool = False,
         with_permalink: bool = False,
         limit: int = 800,
@@ -207,7 +207,7 @@ class OssansNaviService:
             limit_last_message = limit
 
         return AiPrompt(
-            system=(system + ("\n\n" + rag_info if rag_info is not None else "")),
+            system=system,
             messages=[
                 AiPromptMessage(
                     role=AiPromptRole.ASSISTANT if message.user.user_id in self.slack_service.my_bot_user_id else AiPromptRole.USER,
@@ -271,7 +271,7 @@ class OssansNaviService:
             len(thread_messages) >= 3
             and (
                 self.models.low_cost.tokenizer.messages_tokens(
-                    self.get_ai_messages("", thread_messages).to_openai_prompt()
+                    self.get_ai_prompt("", thread_messages).to_openai_prompt()
                 ) > config.MAX_CONVERSATION_TOKENS
             )
         ):
@@ -300,12 +300,12 @@ class OssansNaviService:
         return len(thread_messages) >= 2 and thread_messages[-2].user.user_id in self.slack_service.my_bot_user_id
 
     def classify(self, thread_messages: list[SlackMessageLite]) -> dict[str, str | list[str]]:
-        return self.ai_service.request_classification(
+        return self.ai_service.request_classify(
             self.models.low_cost,
-            self.get_ai_messages(
-                assets.get_classification_system_prompt(self.event.channel, self.event.settings),
+            self.get_ai_prompt(
+                self.ai_prompt_service.classify_prompt(),
                 thread_messages,
-                schema=assets.ClassificationSchema
+                schema=self.ai_prompt_service.CLASSIFY_SCHEMA,
             )
         )
 
@@ -480,8 +480,8 @@ class OssansNaviService:
         # キャッシュから読み込めるやつは読み込んでおく、ここで読み込まれた分は生成AIに渡されないからトークンの節約になる
         OssansNaviService.load_image_description_from_cache(thread_messages)
         messages_token = self.models.high_quality.tokenizer.messages_tokens(
-            self.get_ai_messages(
-                assets.get_image_description_system_prompt(self.event.channel, self.event.settings),
+            self.get_ai_prompt(
+                self.ai_prompt_service.image_description_prompt(),
                 thread_messages,
                 with_permalink=True,
             ).to_openai_prompt()
@@ -520,15 +520,15 @@ class OssansNaviService:
         # 添付画像を AI で解析実行
         image_description = self.ai_service.request_image_description(
             self.models.high_quality,
-            self.get_ai_messages(
-                assets.get_image_description_system_prompt(self.event.channel, self.event.settings),
+            self.get_ai_prompt(
+                self.ai_prompt_service.image_description_prompt(),
                 thread_messages,
                 with_image_files=True,
                 with_permalink=True,
                 schema=Schema(
                     type=Type.OBJECT,
                     properties={
-                        message.permalink: assets.ImageDescriptionItemSchema for message in thread_messages
+                        message.permalink: self.ai_prompt_service.IMAGE_DESCRIPTION_SCHEMA for message in thread_messages
                     },
                     required=[message.permalink for message in thread_messages]
                 )
@@ -591,10 +591,10 @@ class OssansNaviService:
         # function calling を利用しない理由は、適切にキーワードを生成してくれないケースがあったり、実行回数などコントロールしづらいため
         # 具体的には \n や空白文字が連続したり、「あああああ」みたいな意味不明なキーワードが生成されたり、指示しても1つのキーワードしか生成してくれないケースなど
         # 普通にレスポンスとしてキーワードを生成してもらった方が高い精度で生成される
-        request_slack_search_words_prompt = self.get_ai_messages(
-            assets.get_slack_search_word_system_prompt(self.event.channel, self.event.settings),
+        request_slack_search_words_prompt = self.get_ai_prompt(
+            self.ai_prompt_service.slack_search_word_prompt(),
             thread_messages,
-            schema=assets.SlackSearchWordSchema,
+            schema=self.ai_prompt_service.SLACK_SEARCH_WORD_SCHEMA,
         )
 
         for i in range(3):
@@ -646,10 +646,9 @@ class OssansNaviService:
         RAG で入力する情報以外のトークン数を求めておく（システムプロンプトなど）、RAG で入力可能な情報を計算する為に使う
         """
         base_messages_token = self.models.low_cost.tokenizer.messages_tokens(
-            self.get_ai_messages(
-                assets.get_refine_slack_searches_system_prompt(self.event.channel, self.event.settings),
+            self.get_ai_prompt(
+                self.ai_prompt_service.refine_slack_searches_prompt([], [v.words for v in self.slack_searches]),
                 thread_messages,
-                assets.get_information_obtained_by_rag_prompt([], [v.words for v in self.slack_searches])
             ).to_openai_prompt()
         )
         logger.info(f"{base_messages_token=}")
@@ -749,14 +748,13 @@ class OssansNaviService:
                 # ヒット件数がゼロ件などの理由で入力可能な検索結果が存在しなかったら refine_slack_searches フェーズを終了する
                 logger.info("current_messages is empty, finished.")
                 return
-            refine_slack_searches_prompt = self.get_ai_messages(
-                assets.get_refine_slack_searches_system_prompt(self.event.channel, self.event.settings),
-                thread_messages,
-                assets.get_information_obtained_by_rag_prompt(
+            refine_slack_searches_prompt = self.get_ai_prompt(
+                self.ai_prompt_service.refine_slack_searches_prompt(
                     [OssansNaviService.slack_message_to_ai_request(message) for message in SlackMessage.sort(current_messages)],
                     [v.words for v in self.slack_searches if not v.is_get_messages]
                 ),
-                schema=assets.RefineSlackSearchesSchema
+                thread_messages,
+                schema=self.ai_prompt_service.REFINE_SLACK_SEARCHES_SCHEMA,
             )
 
         # AI への問い合わせ部分だけ並列で処理する
@@ -798,8 +796,8 @@ class OssansNaviService:
             tokens_remain = config.REQUEST_LASTSHOT_TOKEN_NO_MENTION
             n = 1
         tokens_remain -= self.models.high_quality.tokenizer.messages_tokens(
-            self.get_ai_messages(
-                self.ai_prompt_service.get_lastshot_system_prompt(),
+            self.get_ai_prompt(
+                self.ai_prompt_service.lastshot_prompt(),
                 thread_messages,
                 limit=10000,
                 limit_last_message=30000,
@@ -829,16 +827,27 @@ class OssansNaviService:
 
         return self.ai_service.request_lastshot(
             self.models.high_quality,
-            self.get_ai_messages(
-                self.ai_prompt_service.get_lastshot_system_prompt(),
-                thread_messages,
-                assets.get_information_obtained_by_rag_prompt(
+            self.get_ai_prompt(
+                self.ai_prompt_service.lastshot_prompt(
                     OssansNaviService.slack_message_to_ai_request(SlackMessage.sort(current_messages), limit=10000, check_dup_files=True)
                 ),
+                thread_messages,
                 limit=10000,
                 limit_last_message=30000,
             ),
             n
+        )
+
+    def quality_check(self, thread_messages: list[SlackMessageLite], response_message: str) -> QualityCheckResponse:
+        return self.ai_service.request_quality_check(
+            self.models.low_cost,
+            self.get_ai_prompt(
+                self.ai_prompt_service.quality_check_prompt(response_message),
+                thread_messages,
+                limit=2000,
+                limit_last_message=10000,
+                schema=self.ai_prompt_service.QUALITY_CHECK_SCHEMA,
+            ),
         )
 
     def load_slack_file(self, file: SlackFile, user_client: bool = False) -> None:

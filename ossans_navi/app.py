@@ -212,6 +212,10 @@ def do_ossans_navi_response(say, event: SlackMessageEvent, models: AiModels) -> 
 
     # メッセージの仕分けを行う、質問かどうか判別する
     event.classification = ossans_navi_service.classify(thread_messages)
+    logger.info(
+        f"{event.user_intent=}, {event.user_intentions_type=}, {event.who_to_talk_to=}, "
+        + f"{event.user_emotions=}, {event.required_knowledge_types=}, {event.slack_emoji_names=}"
+    )
 
     if not event.is_need_response() and not event.is_mention:
         # 質問・相談ではなく、メンションされていない場合はここで終了
@@ -238,19 +242,20 @@ def do_ossans_navi_response(say, event: SlackMessageEvent, models: AiModels) -> 
     # 添付画像がある場合は画像の説明を取得する
     ossans_navi_service.analyze_image_description(thread_messages)
 
-    # Slack ワークスペースを検索するワードを生成してもらう
-    # get_slack_searches() は Generator で処理単位ごとに yield している
-    # なぜならば、呼び出し側で EVENT_GUARD.is_canceled() をチェックするタイミングを用意するためで、ループごとに確認してキャンセルされていれば終了する
-    for _ in ossans_navi_service.do_slack_searches(thread_messages=thread_messages):
-        # 定期的にイベントがキャンセルされていないか確認して、キャンセルされていれば終了する
-        yield
+    if event.is_need_additional_information:
+        # Slack ワークスペースを検索するワードを生成してもらう
+        # get_slack_searches() は Generator で処理単位ごとに yield している
+        # なぜならば、呼び出し側で EVENT_GUARD.is_canceled() をチェックするタイミングを用意するためで、ループごとに確認してキャンセルされていれば終了する
+        for _ in ossans_navi_service.do_slack_searches(thread_messages=thread_messages):
+            # 定期的にイベントがキャンセルされていないか確認して、キャンセルされていれば終了する
+            yield
 
-    # slack_searches の結果から有用な情報を抽出するフェーズ（refine_slack_searches）
-    # トークン数の上限があるので複数回に分けて実行して、大量の検索結果の中から必要な情報を絞り込む
-    # RAG で入力する情報以外のトークン数を求めておく（システムプロンプトなど）、RAG で入力可能な情報を計算する為に使う
-    for _ in ossans_navi_service.refine_slack_searches(thread_messages=thread_messages):
-        # 定期的にイベントがキャンセルされていないか確認して、キャンセルされていれば終了する
-        yield
+        # slack_searches の結果から有用な情報を抽出するフェーズ（refine_slack_searches）
+        # トークン数の上限があるので複数回に分けて実行して、大量の検索結果の中から必要な情報を絞り込む
+        # RAG で入力する情報以外のトークン数を求めておく（システムプロンプトなど）、RAG で入力可能な情報を計算する為に使う
+        for _ in ossans_navi_service.refine_slack_searches(thread_messages=thread_messages):
+            # 定期的にイベントがキャンセルされていないか確認して、キャンセルされていれば終了する
+            yield
 
     # 集まった情報を元に返答を生成するフェーズ（lastshot）
     # GPT-4o で最終的な答えを生成する（GPT-4o mini で精査した情報を利用）
@@ -267,10 +272,21 @@ def do_ossans_navi_response(say, event: SlackMessageEvent, models: AiModels) -> 
         key=lambda v: len(v),
         reverse=True
     )[0]
+
     do_response = False
-    if event.is_mention or event.is_need_response():
-        # メンションされている、または応答が必要とされるメッセージには応答する
+    if event.is_mention:
+        # メンションされている場合は応答する
         do_response = True
+    elif event.is_need_response():
+        # 応答が必要とされるメッセージには、以下の条件に合致する場合のみ応答する
+        # まず応答品質の判定をして、その結果に応じて応答するか決定する
+        quality_check_response = ossans_navi_service.quality_check(thread_messages, lastshot_response)
+        if quality_check_response.user_intent is not None and quality_check_response.response_quality:
+            # ユーザーに意図があり、かつ応答クオリティが高いと判断している場合は応答する
+            do_response = True
+        elif quality_check_response.user_intent is not None and event.is_reply_to_ossans_navi():
+            # ユーザーに意図があり、かつ OssansNavi のメッセージの直後のメッセージの場合は応答する
+            do_response = True
 
     # 定期的にイベントがキャンセルされていないか確認して、キャンセルされていれば終了する
     yield

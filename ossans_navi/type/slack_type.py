@@ -691,21 +691,33 @@ class SlackMessageEvent:
         return self.source.get("channel_type") == "im"
 
     def is_need_response(self) -> bool:
-        if self.user_intentions_type in ("need_answers_to_questions",):
-            return True
-        if self.user_intentions_type in ("ask_someone_to_do_something",):
-            if self.who_to_talk_to in ("to_someone_well_informed",):
+        if self.user_intent is not None:
+            if self.user_intentions_type in ("need_answers_to_questions",):
                 return True
-        if self.who_to_talk_to in ("to_assistant_bot",):
-            return True
-        if self.user_emotions in ("be_troubled",):
-            if self.who_to_talk_to in ("to_someone_well_informed",):
+            if self.user_intentions_type in ("ask_someone_to_do_something",):
+                if self.who_to_talk_to in ("to_someone_well_informed",):
+                    return True
+            if self.who_to_talk_to in ("to_assistant_bot",):
                 return True
+            if self.user_emotions in ("be_troubled",):
+                if self.who_to_talk_to in ("to_someone_well_informed",):
+                    return True
         return False
 
     @property
+    def is_need_additional_information(self) -> bool:
+        return (
+            len(self.required_knowledge_types) > 0
+            and self.required_knowledge_types[0] != "no_information_required"
+        )
+
+    @property
+    def user_intent(self) -> Optional[str]:
+        return v if isinstance((v := (self.classification or {}).get("user_intent")), str) else None
+
+    @property
     def user_intentions_type(self) -> str:
-        return v if isinstance((v := (self.classification or {}).get("user_intentions_type")), str) else "other"
+        return v if isinstance((v := (self.classification or {}).get("user_intentions_type")), str) else "no_intent"
 
     @property
     def who_to_talk_to(self) -> str:
@@ -714,6 +726,11 @@ class SlackMessageEvent:
     @property
     def user_emotions(self) -> str:
         return v if isinstance((v := (self.classification or {}).get("user_emotions")), str) else "no_emotions"
+
+    @property
+    def required_knowledge_types(self) -> list[str]:
+        w = v if isinstance((v := (self.classification or {}).get("required_knowledge_types")), list) else []
+        return [z for z in w if isinstance(z, str)]
 
     @property
     def slack_emoji_names(self) -> list[str]:

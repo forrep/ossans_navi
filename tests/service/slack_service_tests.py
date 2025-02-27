@@ -1,14 +1,18 @@
 import os
+import re
 
 import pytest
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 from slack_sdk.errors import SlackApiError
 
-from ossans_navi.assets import dedent
 from ossans_navi.service.slack_service import SlackService
 from ossans_navi.service.slack_wrapper import SlackWrapper
 from ossans_navi.type.slack_type import SlackChannel, SlackUser
+
+
+def dedent(text, indent: int = 8) -> str:
+    return re.sub(f"^ {{{indent}}}", '', text, 0, re.MULTILINE)
 
 
 @pytest.fixture(scope="session", autouse=True)

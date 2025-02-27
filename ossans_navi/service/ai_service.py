@@ -285,6 +285,12 @@ class RefineResponse:
     additional_search_words: list[str]
 
 
+@dataclasses.dataclass
+class QualityCheckResponse:
+    user_intent: Optional[str]
+    response_quality: bool
+
+
 class AiService:
     def __init__(self) -> None:
         match config.AI_SERVICE_TYPE:
@@ -431,29 +437,38 @@ class AiService:
             raise last_exception or RuntimeError()
         return AiResponse.from_openai_response(response, is_json)
 
-    def request_classification(self, model: AiModel, prompt: AiPrompt) -> dict[str, str | list[str]]:
+    def request_classify(self, model: AiModel, prompt: AiPrompt) -> dict[str, str | list[str]]:
+        str_columns = ("user_intent", "user_intentions_type", "who_to_talk_to", "user_emotions",)
+        list_columns = ("required_knowledge_types", "slack_emoji_names",)
         prompt.choices = 5
         response = self._chat_completions(model, prompt)
         summary: defaultdict[str, defaultdict[str, int]] = defaultdict(lambda: defaultdict(lambda: 0))
         for message in response.choices:
             if isinstance(message.content, dict):
-                for name in ("user_intentions_type", "who_to_talk_to", "user_emotions", "slack_emoji_names",):
+                for name in (*str_columns, *list_columns):
                     if isinstance((v := message.content.get(name)), str):
                         summary[name][v] = summary[name][v] + 1
+                for name in list_columns:
                     if isinstance((v := message.content.get(name)), list):
                         for w in v:
                             summary[name][w] = summary[name][w] + 1
         summary_sorted: defaultdict[str, list[tuple[str, int]]] = defaultdict(list)
-        for name in ("user_intentions_type", "who_to_talk_to", "user_emotions", "slack_emoji_names",):
-            summary_sorted[name] = sorted(summary[name].items(), key=lambda v: (v[1], v[0]), reverse=True)
+        for name in (*str_columns, *list_columns):
+            summary_sorted[name] = sorted(summary[name].items(), key=lambda v: (v[1], len(v[0]), v[0]), reverse=True)
         logger.info(f"classify: {summary_sorted}")
         return {
-            name: (
-                list(map(itemgetter(0), v)) if len(v := summary_sorted[name]) > 0 else []
-            ) if name == "slack_emoji_names" else (
-                v[0][0] if len(v := summary_sorted[name]) > 0 else ""
+            **(
+                {
+                    name: v[0][0] if len(v := summary_sorted[name]) > 0 else ""
+                    for name in str_columns
+                }
+            ),
+            **(
+                {
+                    name: list(map(itemgetter(0), v)) if len(v := summary_sorted[name]) > 0 else []
+                    for name in list_columns
+                }
             )
-            for name in ("user_intentions_type", "who_to_talk_to", "user_emotions", "slack_emoji_names",)
         }
 
     def request_image_description(self, model: AiModel, prompt: AiPrompt) -> dict[str, list[dict[str, str]]]:
@@ -532,6 +547,32 @@ class AiService:
         for _ in range(2):
             response = self._chat_completions(model, prompt, False)
             if len(result := AiService._analyze_lastshot_response(response)) > 0:
+                return result
+        logger.error("Error empty choices, response=" + str(response))
+        raise ValueError("Error empty choices, response=" + str(response))
+
+    @staticmethod
+    def _analyze_quality_check_response(response: AiResponse) -> Optional[QualityCheckResponse]:
+        result = [
+            QualityCheckResponse(
+                message.content['user_intent'],
+                message.content['response_quality'],
+            )
+            for message in response.choices if (
+                isinstance(message.content, dict)
+                and 'user_intent' in message.content
+                and 'response_quality' in message.content
+                and isinstance(message.content['response_quality'], bool)
+            )
+        ]
+        if len(result) == 0:
+            return None
+        return result[0]
+
+    def request_quality_check(self, model: AiModel, prompt: AiPrompt) -> QualityCheckResponse:
+        for _ in range(2):
+            response = self._chat_completions(model, prompt)
+            if (result := AiService._analyze_quality_check_response(response)):
                 return result
         logger.error("Error empty choices, response=" + str(response))
         raise ValueError("Error empty choices, response=" + str(response))
