@@ -8,6 +8,7 @@ CLASSIFY_SCHEMA = Schema(
         "user_intentions_type": Schema(
             type=Type.STRING,
             enum=[
+                "monologue",
                 "need_answers_to_questions",
                 "ask_someone_to_do_something",
                 "report_to_someone",
@@ -19,6 +20,7 @@ CLASSIFY_SCHEMA = Schema(
                 "disappointed_in_someone_or_something",
                 "sharing_information",
                 "note_for_self",
+                "impressions",
                 "no_intent",
                 "other",
             ]
@@ -136,7 +138,7 @@ purpose: {{ event.channel.purpose }}
 - Output the names of the appropriate slack emoji to react to.
 - Specify a emoji name that exists in slack.
 - Anything other than :+1: or :thumbsup: would be great!
-""".strip()
+"""
 
 IMAGE_DESCRIPTION_SCHEMA = Schema(
     type=Type.ARRAY,
@@ -199,7 +201,7 @@ purpose: {{ event.channel.purpose }}
     ],
     ...
 }
-""".strip()
+"""
 
 SLACK_SEARCH_WORD_SCHEMA = Schema(
     type=Type.OBJECT,
@@ -264,7 +266,7 @@ purpose: {{ event.channel.purpose }}
 - We would like to search for words with similar meanings, as information may be recorded with different wording. Please provide as many search terms as you can.
 - If "user_intent" is time-related, please use the date filter, do not include relative dates and times in the string, such as "去年", "今年", or "最近".
 - To obtain a wide range of search results, please include search terms with only one word, not just words that use AND search.
-""".strip()
+"""
 
 REFINE_SLACK_SEARCHES_SCHEMA = Schema(
     type=Type.OBJECT,
@@ -330,7 +332,7 @@ purpose: {{ event.channel.purpose }}
 - If you need to retrieve additional information, output an array of new search words.
 
 {{ rag_info }}
-""".strip()
+"""
 
 LASTSHOT_PROMPT = """
 # Now
@@ -360,13 +362,13 @@ purpose: {{ event.channel.purpose }}
 
 # Rules for output message
 - If the user's request requires physical action, please ask someone else to do it.
-- Output in markdown format.
+- Output in plain text markdown format, not in json.
 - When answering from a "Related information found in this slack group", include a link to the referring permalink.
 {% if event.is_open_channel %}- If you know someone who is familiar with the matter, please output a message at the end of the message asking that person to confirm the information.
 {% endif %}
 
 {{ rag_info }}
-""".strip()
+"""
 
 QUALITY_CHECK_SCHEMA = Schema(
     type=Type.OBJECT,
@@ -413,4 +415,4 @@ purpose: {{ event.channel.purpose }}
 
 # The message you intend to send
 {{ response_message }}
-""".strip()
+"""

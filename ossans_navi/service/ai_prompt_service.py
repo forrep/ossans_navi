@@ -78,7 +78,7 @@ class AiPromptService:
                 },
                 **(extra or {}),
             }
-        )
+        ).strip()
 
     @staticmethod
     def _rag_info(info: list[dict[str, Any]], words: list[str] | None = None) -> str:

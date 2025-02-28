@@ -706,9 +706,9 @@ class SlackMessageEvent:
 
     @property
     def is_need_additional_information(self) -> bool:
-        return (
+        return not (
             len(self.required_knowledge_types) > 0
-            and self.required_knowledge_types[0] != "no_information_required"
+            and self.required_knowledge_types[0] == "no_information_required"
         )
 
     @property

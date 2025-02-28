@@ -5,12 +5,34 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "起動（development）",
+            "name": "起動（dev）",
             "type": "debugpy",
             "request": "launch",
             "program": "ossans_navi/app.py",
             "console": "integratedTerminal",
             "args": []
+        },
+        {
+            "name": "起動（dev-gemini）",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "ossans_navi/app.py",
+            "console": "integratedTerminal",
+            "args": [],
+            "env": {
+                "OSN_AI_SERVICE_TYPE": "gemini"
+            }
+        },
+        {
+            "name": "起動（dev-azure_openai）",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "ossans_navi/app.py",
+            "console": "integratedTerminal",
+            "args": [],
+            "env": {
+                "OSN_AI_SERVICE_TYPE": "azure_openai"
+            }
         },
         {
             "name": "起動（production）",
