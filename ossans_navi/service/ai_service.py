@@ -267,10 +267,21 @@ class AiResponse:
         ])
 
     @staticmethod
+    def str_or_json_content(json_string: str) -> str:
+        try:
+            if isinstance((v := json.loads(json_string)), dict) and isinstance((w := v.get("content")), str):
+                return w
+            else:
+                return json_string
+        except json.JSONDecodeError:
+            return json_string
+
+    @staticmethod
     def from_gemini_response(response: types.GenerateContentResponse, is_json: bool) -> 'AiResponse':
         return AiResponse([
             AiResponseMessage(
-                content=json.loads(v) if is_json else v,
+                # Gemini は間違えて JSON を返すことがあるので、その場合はパースして content キーを取り出す
+                content=json.loads(v) if is_json else AiResponse.str_or_json_content(v),
                 role=AiPromptRole.ASSISTANT,
             )
             for candidate in response.candidates if isinstance(v := candidate.content.parts[0].text, str)
