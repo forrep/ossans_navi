@@ -362,7 +362,7 @@ purpose: {{ event.channel.purpose }}
 
 # Rules for output message
 - If the user's request requires physical action, please ask someone else to do it.
-- Output in plain text markdown format, not in json.
+- Output in plain text markdown format.
 - When answering from a "Related information found in this slack group", include a link to the referring permalink.
 {% if event.is_open_channel %}- If you know someone who is familiar with the matter, please output a message at the end of the message asking that person to confirm the information.
 {% endif %}

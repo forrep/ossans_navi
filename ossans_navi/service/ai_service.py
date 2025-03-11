@@ -126,14 +126,14 @@ class AiPromptImage:
 
 @dataclasses.dataclass
 class AiPromptContent:
-    text: str
+    data: str | dict[str, Any]
     images: list[AiPromptImage] = dataclasses.field(default_factory=list)
 
     def to_openai_prompt(self) -> list[dict[str, Any]]:
         return [
             {
                 "type": "text",
-                "text": self.text,
+                "text": json.dumps(v, ensure_ascii=False, separators=(',', ':')) if isinstance(v := self.data, dict) else v,
             },
             *[
                 {
@@ -146,25 +146,11 @@ class AiPromptContent:
             ]
         ]
 
-    def to_gemini_prompt(self) -> list[types.Part]:
-        return [
-            types.Part.from_text(text=self.text),
-            *[types.Part.from_bytes(data=image.data, mime_type="image/png") for image in self.images]
-        ]
-
-    def to_gemini_dict(self) -> list[dict[str, Any]]:
-        return [
-            {"text": self.text},
-            *[
-                {
-                    "inline_data": {
-                        "mime_type": "image/png",
-                        "data": base64.b64encode(image.data).decode(),
-                    }
-                }
-                for image in self.images
-            ]
-        ]
+    @property
+    def permalink(self) -> str:
+        if isinstance(self.data, dict):
+            return self.data["permalink"]
+        raise RuntimeError()
 
 
 @dataclasses.dataclass
@@ -180,18 +166,65 @@ class AiPromptMessage:
             **({"name": self.name} if self.name else {})
         }
 
-    def to_gemini_prompt(self) -> types.Content:
-        return types.Content(
-            # Gemini は user, model の2種類
-            role="model" if self.role == AiPromptRole.ASSISTANT else self.role.value,
-            parts=self.content.to_gemini_prompt()
-        )
-
-    def to_gemini_dict(self) -> dict[str, Any]:
-        return {
-            "role": "model" if self.role == AiPromptRole.ASSISTANT else self.role.value,
-            "parts": self.content.to_gemini_dict(),
-        }
+    def to_gemini_content(self) -> list[dict[str, Any]]:
+        if isinstance(self.content.data, dict):
+            return [
+                {
+                    "role": "model" if self.role == AiPromptRole.ASSISTANT else self.role.value,
+                    "parts": [
+                        {"text": self.content.permalink},
+                        *[
+                            {
+                                "inline_data": {
+                                    "mime_type": "image/png",
+                                    "data": base64.b64encode(image.data).decode(),
+                                }
+                            }
+                            for image in self.content.images
+                        ]
+                    ],
+                },
+                {
+                    "role": "model",
+                    "parts": [
+                        {
+                            "functionCall": {
+                                "name": "get_message_detail",
+                                "args": {"permalink": self.content.permalink}
+                            }
+                        }
+                    ],
+                },
+                {
+                    "role": "user",
+                    "parts": [
+                        {
+                            "functionResponse": {
+                                "name": "get_message_detail",
+                                "response": self.content.data,
+                            }
+                        },
+                    ],
+                },
+            ]
+        else:
+            return [
+                {
+                    "role": "model" if self.role == AiPromptRole.ASSISTANT else self.role.value,
+                    "parts": [
+                        {"text": self.content.data},
+                        *[
+                            {
+                                "inline_data": {
+                                    "mime_type": "image/png",
+                                    "data": base64.b64encode(image.data).decode(),
+                                }
+                            }
+                            for image in self.content.images
+                        ]
+                    ],
+                },
+            ]
 
 
 @dataclasses.dataclass
@@ -212,15 +245,33 @@ class AiPrompt:
             ],
         ]
 
-    def to_gemini_prompt(self) -> list[types.Content]:
-        return [
-            message.to_gemini_prompt() for message in self.messages
-        ]
+    def to_gemini_system(self) -> dict[str, Any]:
+        return {"parts": [{"text": self.system}]}
 
-    def to_gemini_system_prompt(self) -> types.Content:
-        return types.Content(parts=[types.Part.from_text(text=self.system)])
+    def to_gemini_config(self, is_json: bool) -> dict[str, Any]:
+        return {
+            "system_instruction": self.to_gemini_system(),
+            "candidate_count": self.choices,
+            "response_mime_type": "application/json" if is_json else None,
+            "response_schema": self.schema if is_json else None,
+            "tool_config": {
+                "function_calling_config": {"mode": "NONE"}
+            },
+            "tools": [
+                {
+                    "function_declarations": [{
+                        "name": "get_message_detail",
+                        "description": "Get detailed information about the message.",
+                        "parameters": {"type": "OBJECT", "properties": {"permalink": {"type": "STRING"}}}
+                    }]
+                }
+            ],
+        }
 
-    def to_gemini_dict(self) -> dict[str, Any]:
+    def to_gemini_contents(self) -> list[dict[str, Any]]:
+        return list(itertools.chain.from_iterable([message.to_gemini_content() for message in self.messages]))
+
+    def to_gemini_prompt(self) -> dict[str, Any]:
         return {
             "generationConfig": {
                 "candidateCount": self.choices,
@@ -232,14 +283,8 @@ class AiPrompt:
                     if self.schema else {}
                 )
             },
-            "systemInstruction": {
-                "parts": [
-                    {
-                        "text": self.system,
-                    }
-                ]
-            },
-            "contents": [message.to_gemini_dict() for message in self.messages]
+            "systemInstruction": self.to_gemini_system(),
+            "contents": self.to_gemini_contents(),
         }
 
 
@@ -267,21 +312,10 @@ class AiResponse:
         ])
 
     @staticmethod
-    def str_or_json_content(json_string: str) -> str:
-        try:
-            if isinstance((v := json.loads(json_string)), dict) and isinstance((w := v.get("content")), str):
-                return w
-            else:
-                return json_string
-        except json.JSONDecodeError:
-            return json_string
-
-    @staticmethod
     def from_gemini_response(response: types.GenerateContentResponse, is_json: bool) -> 'AiResponse':
         return AiResponse([
             AiResponseMessage(
-                # Gemini は間違えて JSON を返すことがあるので、その場合はパースして content キーを取り出す
-                content=json.loads(v) if is_json else AiResponse.str_or_json_content(v),
+                content=json.loads(v) if is_json else v,
                 role=AiPromptRole.ASSISTANT,
             )
             for candidate in response.candidates if isinstance(v := candidate.content.parts[0].text, str)
@@ -316,7 +350,7 @@ class AiService:
             case AiServiceType.GEMINI:
                 self.client_gemini = genai.Client(api_key=config.GEMINI_API_KEY)
             case _:
-                raise NotImplementedError(f"Unknown AiServiceType: {config.AI_SERVICE_TYPE}")
+                raise NotImplementedError("Unknown AiServiceType")
 
     def _chat_completions(
             self,
@@ -345,12 +379,11 @@ class AiService:
             prompt: AiPrompt,
             is_json: bool,
     ) -> AiResponse:
-        messages: Iterable = prompt.to_gemini_prompt()
         if logger.isEnabledFor(logging.DEBUG):
-            logger.debug(f"_chat_completions model={model.name}, prompt={json.dumps(prompt.to_gemini_dict(), ensure_ascii=False)}")
+            logger.debug(f"_chat_completions model={model.name}, prompt={json.dumps(prompt.to_gemini_prompt(), ensure_ascii=False)}")
         else:
             logger.info(
-                f"_chat_completions model={model.name}, prompt(shrink)={json.dumps(shrink_message(prompt.to_gemini_dict()), ensure_ascii=False)}"
+                f"_chat_completions model={model.name}, prompt(shrink)={json.dumps(shrink_message(prompt.to_gemini_prompt()), ensure_ascii=False)}"
             )
         start_time = time.time()
         last_exception: Optional[Exception] = None
@@ -359,13 +392,8 @@ class AiService:
             try:
                 response = self.client_gemini.models.generate_content(
                     model=model.name,
-                    config=types.GenerateContentConfig(
-                        system_instruction=prompt.to_gemini_system_prompt(),
-                        candidate_count=prompt.choices,
-                        response_mime_type="application/json" if is_json else None,
-                        response_schema=prompt.schema if is_json else None,
-                    ),
-                    contents=messages,
+                    config=prompt.to_gemini_config(is_json),
+                    contents=prompt.to_gemini_contents(),
                 )
                 break
             except Exception as e:
@@ -519,7 +547,9 @@ class AiService:
         prompt.messages.append(
             AiPromptMessage(
                 role=AiPromptRole.ASSISTANT,
-                content=AiPromptContent(text=json.dumps(v if (v := response.choices[0].content) else "{}", ensure_ascii=False))
+                content=AiPromptContent(
+                    data=(json.dumps(v, ensure_ascii=False, separators=(',', ':')) if isinstance(v := response.choices[0].content, dict) else "")
+                )
             )
         )
         return slack_search_words
