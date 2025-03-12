@@ -697,8 +697,6 @@ class SlackMessageEvent:
             if self.user_intentions_type in ("ask_someone_to_do_something",):
                 if self.who_to_talk_to in ("to_someone_well_informed",):
                     return True
-            if self.who_to_talk_to in ("to_assistant_bot",):
-                return True
             if self.user_emotions in ("be_troubled",):
                 if self.who_to_talk_to in ("to_someone_well_informed",):
                     return True

@@ -190,6 +190,7 @@ class OssansNaviService:
         limit: int = 800,
         limit_last_message: int = -1,
         schema: Optional[Schema] = None,
+        is_json: bool = True,
     ) -> AiPrompt:
         if limit_last_message < 0:
             limit_last_message = limit
@@ -218,7 +219,8 @@ class OssansNaviService:
                 )
                 for (i, message) in enumerate(messages)
             ],
-            schema=schema
+            schema=schema,
+            is_json=is_json,
         )
 
     @overload
@@ -815,6 +817,7 @@ class OssansNaviService:
                 thread_messages,
                 limit=10000,
                 limit_last_message=30000,
+                is_json=False,
             ),
             n
         )

@@ -231,6 +231,7 @@ class AiPromptMessage:
 class AiPrompt:
     system: str
     messages: list[AiPromptMessage]
+    is_json: bool
     schema: Optional[types.Schema] = dataclasses.field(default=None)
     choices: int = dataclasses.field(default=1)
 
@@ -248,12 +249,12 @@ class AiPrompt:
     def to_gemini_system(self) -> dict[str, Any]:
         return {"parts": [{"text": self.system}]}
 
-    def to_gemini_config(self, is_json: bool) -> dict[str, Any]:
+    def to_gemini_config(self) -> dict[str, Any]:
         return {
             "system_instruction": self.to_gemini_system(),
             "candidate_count": self.choices,
-            "response_mime_type": "application/json" if is_json else None,
-            "response_schema": self.schema if is_json else None,
+            "response_mime_type": "application/json" if self.is_json else None,
+            "response_schema": self.schema if self.is_json else None,
             "tool_config": {
                 "function_calling_config": {"mode": "NONE"}
             },
@@ -356,20 +357,11 @@ class AiService:
             self,
             model: AiModel,
             prompt: AiPrompt,
-            is_json: bool = True,
     ) -> AiResponse:
         if model.ai_service_type in (AiServiceType.OPENAI, AiServiceType.AZURE_OPENAI):
-            return self._chat_completions_openai(
-                model,
-                prompt,
-                is_json,
-            )
+            return self._chat_completions_openai(model, prompt)
         elif model.ai_service_type == AiServiceType.GEMINI:
-            return self._chat_completions_gemini(
-                model,
-                prompt,
-                is_json,
-            )
+            return self._chat_completions_gemini(model, prompt)
         else:
             raise NotImplementedError(f"Unknown AiServiceType: {model.ai_service_type}")
 
@@ -377,7 +369,6 @@ class AiService:
             self,
             model: AiModel,
             prompt: AiPrompt,
-            is_json: bool,
     ) -> AiResponse:
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(f"_chat_completions model={model.name}, prompt={json.dumps(prompt.to_gemini_prompt(), ensure_ascii=False)}")
@@ -392,7 +383,7 @@ class AiService:
             try:
                 response = self.client_gemini.models.generate_content(
                     model=model.name,
-                    config=prompt.to_gemini_config(is_json),
+                    config=prompt.to_gemini_config(),
                     contents=prompt.to_gemini_contents(),
                 )
                 break
@@ -417,13 +408,12 @@ class AiService:
             # 応答がない場合は例外を送出
             logger.error("Error empty choices, response=" + str(response))
             raise last_exception or RuntimeError()
-        return AiResponse.from_gemini_response(response, is_json)
+        return AiResponse.from_gemini_response(response, prompt.is_json)
 
     def _chat_completions_openai(
             self,
             model: AiModel,
             prompt: AiPrompt,
-            is_json: bool,
     ) -> AiResponse:
         messages: Iterable = prompt.to_openai_prompt()
         if logger.isEnabledFor(logging.DEBUG):
@@ -437,7 +427,7 @@ class AiService:
             try:
                 response = self.client_openai.chat.completions.create(
                     model=model.name,
-                    response_format=({"type": "json_object"} if is_json else NOT_GIVEN),
+                    response_format=({"type": "json_object"} if prompt.is_json else NOT_GIVEN),
                     messages=messages,
                     n=prompt.choices,
                     timeout=300,
@@ -474,7 +464,7 @@ class AiService:
             # 応答がない場合は例外を送出
             logger.error("Error empty choices, response=" + str(response))
             raise last_exception or RuntimeError()
-        return AiResponse.from_openai_response(response, is_json)
+        return AiResponse.from_openai_response(response, prompt.is_json)
 
     def request_classify(self, model: AiModel, prompt: AiPrompt) -> dict[str, str | list[str]]:
         str_columns = ("user_intent", "user_intentions_type", "who_to_talk_to", "user_emotions",)
@@ -586,7 +576,7 @@ class AiService:
         # Gemini は大きいプロンプトのパターンで choice>=2 が原因となるエラーケースがある、よって choice=1 とする
         prompt.choices = 1 if model.ai_service_type == AiServiceType.GEMINI else n
         for _ in range(2):
-            response = self._chat_completions(model, prompt, False)
+            response = self._chat_completions(model, prompt)
             if len(result := AiService._analyze_lastshot_response(response)) > 0:
                 return result
         logger.error("Error empty choices, response=" + str(response))
