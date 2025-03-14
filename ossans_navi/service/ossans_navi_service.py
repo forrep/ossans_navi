@@ -14,6 +14,7 @@ from PIL import Image, ImageFile
 
 from ossans_navi import config
 from ossans_navi.common.cache import LRUCache
+from ossans_navi.config import AiServiceType
 from ossans_navi.service.ai_prompt_service import AiPromptService
 from ossans_navi.service.ai_service import (AiModels, AiPrompt, AiPromptContent, AiPromptImage, AiPromptMessage, AiPromptRole, AiService,
                                             QualityCheckResponse)
@@ -187,6 +188,7 @@ class OssansNaviService:
         system: str,
         messages: list[SlackMessageLite],
         with_image_files: bool = False,
+        input_image_files: int = 0,
         limit: int = 800,
         limit_last_message: int = -1,
         schema: Optional[Schema] = None,
@@ -203,7 +205,7 @@ class OssansNaviService:
                     content=AiPromptContent(
                         data=OssansNaviService.slack_message_to_ai_prompt(
                             message,
-                            limit=(limit_last_message if i + 1 == len(messages) else limit),
+                            limit=(limit_last_message if i == 0 else limit),
                             allow_private_files=True,
                         ),
                         images=(
@@ -211,14 +213,29 @@ class OssansNaviService:
                                 AiPromptImage(data=file.content)
                                 for file in message.files if file.is_image and not file.is_analyzed and file.is_valid
                             ]
-                            if with_image_files and message.has_not_analyzed_files() else []
+                            if with_image_files and message.has_not_analyzed_files() else (
+                                [
+                                    # input_image_files に指定した枚数だけは画像ファイルを再度入力する
+                                    # Gemini API は安価なので精度 lastshot のタイミングで画像そのものが入力された方が精度が上がるため
+                                    # また今後画像出力に対応した場合に、元画像をレタッチする用途なら analyze して文字列化したものでは精度が上がらない
+                                    # レタッチ用途では画像そのものを入力する必要がある
+                                    AiPromptImage(data=file.content)
+                                    for file in message.files if file.is_image and file.is_valid and (input_image_files := input_image_files - 1) >= 0 # noqa: errors
+                                ]
+                                # input_image_files > 0 なら画像を入力する、そして AiPromptRole.USER の場合だけ入力する
+                                if input_image_files > 0 and message.user.user_id not in self.slack_service.my_bot_user_id
+                                else []
+                            )
                         )
 
                     ),
                     name=message.user.user_id,
                 )
-                for (i, message) in enumerate(messages)
-            ],
+                # 最後のメッセージから逆順に処理する（[::-1]）
+                # なぜなら枚数限定で画像入力する際に最新メッセージを優先するため
+                # 生成後に再度逆順にすることで元の順番に戻す
+                for (i, message) in enumerate(messages[::-1])
+            ][::-1],
             schema=schema,
             is_json=is_json,
         )
@@ -815,6 +832,7 @@ class OssansNaviService:
                     OssansNaviService.slack_message_to_ai_prompt(SlackMessage.sort(current_messages), limit=10000, check_dup_files=True)
                 ),
                 thread_messages,
+                input_image_files=(2 if self.models.high_quality.ai_service_type == AiServiceType.GEMINI else 0),
                 limit=10000,
                 limit_last_message=30000,
                 is_json=False,
