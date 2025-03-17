@@ -129,21 +129,26 @@ class AiPromptContent:
     data: str | dict[str, Any]
     images: list[AiPromptImage] = dataclasses.field(default_factory=list)
 
-    def to_openai_prompt(self) -> list[dict[str, Any]]:
+    def to_openai_prompt(self, is_assistant: bool) -> list[dict[str, Any]]:
         return [
             {
                 "type": "text",
                 "text": json.dumps(v, ensure_ascii=False, separators=(',', ':')) if isinstance(v := self.data, dict) else v,
             },
-            *[
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": image.image_uri
+            *(
+                [
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": image.image_uri
+                        }
                     }
-                }
-                for image in self.images
-            ]
+                    for image in self.images
+                ]
+                # ASSISTANTロールで画像を入力すると OpenAI では API エラーになるため入力しない
+                # 実際には ASSISTANT が応答文中に画像へのリンクを含めると Slack が画像を展開するため ASSISTANTロールでも画像付きメッセージが存在する
+                if not is_assistant else []
+            )
         ]
 
     @property
@@ -162,7 +167,7 @@ class AiPromptMessage:
     def to_openai_prompt(self) -> dict[str, str | list[dict[str, Any]]]:
         return {
             "role": self.role.value,
-            "content": self.content.to_openai_prompt(),
+            "content": self.content.to_openai_prompt(self.role == AiPromptRole.ASSISTANT),
             **({"name": self.name} if self.name else {})
         }
 
@@ -173,15 +178,20 @@ class AiPromptMessage:
                     "role": "model" if self.role == AiPromptRole.ASSISTANT else self.role.value,
                     "parts": [
                         {"text": self.content.permalink},
-                        *[
-                            {
-                                "inline_data": {
-                                    "mime_type": "image/png",
-                                    "data": base64.b64encode(image.data).decode(),
+                        *(
+                            [
+                                {
+                                    "inline_data": {
+                                        "mime_type": "image/png",
+                                        "data": base64.b64encode(image.data).decode(),
+                                    }
                                 }
-                            }
-                            for image in self.content.images
-                        ]
+                                for image in self.content.images
+                            ]
+                            # AiPromptRole.ASSISTANT ではない場合のみ画像を読み込む
+                            # モデルが画像生成機能を持たない現時点では、AiPromptRole.ASSISTANT で送信する画像データは処理対象にならないため
+                            if self.role != AiPromptRole.ASSISTANT else []
+                        )
                     ],
                 },
                 {
@@ -213,15 +223,20 @@ class AiPromptMessage:
                     "role": "model" if self.role == AiPromptRole.ASSISTANT else self.role.value,
                     "parts": [
                         {"text": self.content.data},
-                        *[
-                            {
-                                "inline_data": {
-                                    "mime_type": "image/png",
-                                    "data": base64.b64encode(image.data).decode(),
+                        *(
+                            [
+                                {
+                                    "inline_data": {
+                                        "mime_type": "image/png",
+                                        "data": base64.b64encode(image.data).decode(),
+                                    }
                                 }
-                            }
-                            for image in self.content.images
-                        ]
+                                for image in self.content.images
+                            ]
+                            # AiPromptRole.ASSISTANT ではない場合のみ画像を読み込む
+                            # モデルが画像生成機能を持たない現時点では、AiPromptRole.ASSISTANT で送信する画像データは処理対象にならないため
+                            if self.role != AiPromptRole.ASSISTANT else []
+                        )
                     ],
                 },
             ]

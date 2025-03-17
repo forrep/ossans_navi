@@ -14,7 +14,6 @@ from PIL import Image, ImageFile
 
 from ossans_navi import config
 from ossans_navi.common.cache import LRUCache
-from ossans_navi.config import AiServiceType
 from ossans_navi.service.ai_prompt_service import AiPromptService
 from ossans_navi.service.ai_service import (AiModels, AiPrompt, AiPromptContent, AiPromptImage, AiPromptMessage, AiPromptRole, AiService,
                                             QualityCheckResponse)
@@ -215,14 +214,22 @@ class OssansNaviService:
                             ]
                             if with_image_files and message.has_not_analyzed_files() else (
                                 [
-                                    # input_image_files に指定した枚数だけは画像ファイルを再度入力する
-                                    # Gemini API は安価なので精度 lastshot のタイミングで画像そのものが入力された方が精度が上がるため
-                                    # また今後画像出力に対応した場合に、元画像をレタッチする用途なら analyze して文字列化したものでは精度が上がらない
-                                    # レタッチ用途では画像そのものを入力する必要がある
+                                    # input_image_files に指定した枚数だけ画像ファイルを再度入力する
+                                    # lastshot で画像そのものを入力した方が精度が上がるため、安価な Gemini 限定で入力する
+                                    # また今後画像出力に対応する場合に、元画像を編集する用途には元画像そのものを入力する必要がある
                                     AiPromptImage(data=file.content)
-                                    for file in message.files if file.is_image and file.is_valid and (input_image_files := input_image_files - 1) >= 0 # noqa: errors
+                                    for file in message.files
+                                    if (
+                                        file.is_image
+                                        and file.is_valid
+                                        and (input_image_files := input_image_files - 1) >= 0
+                                        and input_image_files >= 0  # 本来この条件は必要ないが Flake8 が input_image_files を利用していないと誤判定する対策
+                                    )
                                 ]
-                                # input_image_files > 0 なら画像を入力する、そして AiPromptRole.USER の場合だけ入力する
+                                # input_image_files > 0 、かつ AiPromptRole.USER の場合だけ画像を入力する
+                                # 現時点では AiPromptRole.ASSISTANT で画像を入力すると以下の動作になる
+                                #   OpenAI → 画像を入力するとAPIエラーが発生する
+                                #   Gemini → 画像を入力しても参照されない（APIエラーは発生しない）
                                 if input_image_files > 0 and message.user.user_id not in self.slack_service.my_bot_user_id
                                 else []
                             )
@@ -274,7 +281,7 @@ class OssansNaviService:
             and (
                 self.models.low_cost.tokenizer.messages_tokens(
                     self.get_ai_prompt("", thread_messages).to_openai_prompt()
-                ) > config.MAX_CONVERSATION_TOKENS
+                ) > config.MAX_THREAD_TOKENS
             )
         ):
             if len((replies := [message for message in thread_messages[1:] if len(message.files) + len(message.attachments) > 0])) > 0:
@@ -654,13 +661,13 @@ class OssansNaviService:
         logger.info(f"{base_messages_token=}")
         # メンションされた場合か、OssansNavi のメッセージの次のメッセージの場合はちゃんと調べる、それ以外は手を抜いて調べる
         if self.event.is_mention or self.event.is_reply_to_ossans_navi():
-            refine_slack_searches_count = config.REQUEST_REFINE_SLACK_SEARCHES_COUNT_WITH_MENTION = 4
-            refine_slack_searches_depth = config.REQUEST_REFINE_SLACK_SEARCHES_DEPTH_WITH_MENTION
+            refine_slack_searches_count = config.REFINE_SLACK_SEARCHES_COUNT_WITH_MENTION = 4
+            refine_slack_searches_depth = config.REFINE_SLACK_SEARCHES_DEPTH_WITH_MENTION
         else:
-            refine_slack_searches_count = config.REQUEST_REFINE_SLACK_SEARCHES_COUNT_NO_MENTION
-            refine_slack_searches_depth = config.REQUEST_REFINE_SLACK_SEARCHES_DEPTH_NO_MENTION
+            refine_slack_searches_count = config.REFINE_SLACK_SEARCHES_COUNT_NO_MENTION
+            refine_slack_searches_depth = config.REFINE_SLACK_SEARCHES_DEPTH_NO_MENTION
         for i in range(refine_slack_searches_depth):
-            with ThreadPoolExecutor(max_workers=config.REQUEST_REFINE_SLACK_SEARCHES_THREADS, thread_name_prefix="RefineWorker") as executor:
+            with ThreadPoolExecutor(max_workers=config.REFINE_SLACK_SEARCHES_THREADS, thread_name_prefix="RefineWorker") as executor:
                 # 最後の refine かどうか？最後以外は新たな検索ワードを追加する処理などがある
                 is_last_refine = i + 1 == 2
                 for _ in range(refine_slack_searches_count):
@@ -690,7 +697,7 @@ class OssansNaviService:
         # slack_searches から入力候補を抽出する処理は同期的に行う（slack_searches でロックを取得）
         with self.slack_searches:
             # 入力可能な残りトークン数を保持する、0未満にならないように管理する
-            tokens_remain = config.REQUEST_REFINE_SLACK_SEARCHES_TOKEN - base_messages_token
+            tokens_remain = config.REFINE_SLACK_SEARCHES_TOKEN - base_messages_token
             tokens_full: bool = False
             current_messages: list[SlackMessage] = []
             for slack_search in self.slack_searches:
@@ -790,10 +797,10 @@ class OssansNaviService:
         current_messages: list[SlackMessage] = []
         # 入力可能なトークン数を定義する、たくさん入れたら精度が上がるが費用も上がるのでほどほどのトークン数に制限する（話しかけられている時はトークン量を増やす）
         if self.event.is_mention or self.event.is_reply_to_ossans_navi():
-            tokens_remain = config.REQUEST_LASTSHOT_TOKEN_WITH_MENTION
+            tokens_remain = config.LASTSHOT_TOKEN_WITH_MENTION
             n = 2
         else:
-            tokens_remain = config.REQUEST_LASTSHOT_TOKEN_NO_MENTION
+            tokens_remain = config.LASTSHOT_TOKEN_NO_MENTION
             n = 1
         tokens_remain -= self.models.high_quality.tokenizer.messages_tokens(
             self.get_ai_prompt(
@@ -832,7 +839,7 @@ class OssansNaviService:
                     OssansNaviService.slack_message_to_ai_prompt(SlackMessage.sort(current_messages), limit=10000, check_dup_files=True)
                 ),
                 thread_messages,
-                input_image_files=(2 if self.models.high_quality.ai_service_type == AiServiceType.GEMINI else 0),
+                input_image_files=config.LASTSHOT_INPUT_IMAGE_FILES,
                 limit=10000,
                 limit_last_message=30000,
                 is_json=False,
