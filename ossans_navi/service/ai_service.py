@@ -152,10 +152,22 @@ class AiPromptContent:
         ]
 
     @property
-    def permalink(self) -> str:
+    def is_dict(self) -> bool:
+        return isinstance(self.data, dict)
+
+    @property
+    def text(self) -> str:
         if isinstance(self.data, dict):
-            return self.data["permalink"]
-        raise RuntimeError()
+            return self.data["content"]
+        else:
+            return self.data
+
+    @property
+    def detail(self) -> dict[str, Any]:
+        if isinstance(self.data, dict):
+            return {k: v for (k, v) in self.data.items() if k != "content"}
+        else:
+            return {}
 
 
 @dataclasses.dataclass
@@ -172,74 +184,53 @@ class AiPromptMessage:
         }
 
     def to_gemini_content(self) -> list[dict[str, Any]]:
-        if isinstance(self.content.data, dict):
-            return [
-                {
-                    "role": "model" if self.role == AiPromptRole.ASSISTANT else self.role.value,
-                    "parts": [
-                        {"text": self.content.permalink},
-                        *(
-                            [
-                                {
-                                    "inline_data": {
-                                        "mime_type": "image/png",
-                                        "data": base64.b64encode(image.data).decode(),
-                                    }
+        return [
+            {
+                "role": "model" if self.role == AiPromptRole.ASSISTANT else self.role.value,
+                "parts": [
+                    {"text": self.content.text},
+                    *(
+                        [
+                            {
+                                "inline_data": {
+                                    "mime_type": "image/png",
+                                    "data": base64.b64encode(image.data).decode(),
                                 }
-                                for image in self.content.images
-                            ]
-                            # AiPromptRole.ASSISTANT ではない場合のみ画像を読み込む
-                            # モデルが画像生成機能を持たない現時点では、AiPromptRole.ASSISTANT で送信する画像データは処理対象にならないため
-                            if self.role != AiPromptRole.ASSISTANT else []
-                        )
-                    ],
-                },
-                {
-                    "role": "model",
-                    "parts": [
-                        {
-                            "functionCall": {
-                                "name": "get_message_detail",
-                                "args": {"permalink": self.content.permalink}
                             }
-                        }
-                    ],
-                },
-                {
-                    "role": "user",
-                    "parts": [
-                        {
-                            "functionResponse": {
-                                "name": "get_message_detail",
-                                "response": self.content.data,
-                            }
-                        },
-                    ],
-                },
-            ]
-        else:
-            return [
-                {
-                    "role": "model" if self.role == AiPromptRole.ASSISTANT else self.role.value,
-                    "parts": [
-                        {"text": self.content.data},
-                        *(
-                            [
-                                {
-                                    "inline_data": {
-                                        "mime_type": "image/png",
-                                        "data": base64.b64encode(image.data).decode(),
-                                    }
+                            for image in self.content.images
+                        ]
+                        # AiPromptRole.ASSISTANT ではない場合のみ画像を読み込む
+                        # モデルが画像生成機能を持たない現時点では、AiPromptRole.ASSISTANT で送信する画像データは処理対象にならないため
+                        if self.role != AiPromptRole.ASSISTANT else []
+                    )
+                ],
+            },
+            *(
+                [
+                    {
+                        "role": "model",
+                        "parts": [
+                            {
+                                "function_call": {
+                                    "name": "get_last_message_detail",
                                 }
-                                for image in self.content.images
-                            ]
-                            # AiPromptRole.ASSISTANT ではない場合のみ画像を読み込む
-                            # モデルが画像生成機能を持たない現時点では、AiPromptRole.ASSISTANT で送信する画像データは処理対象にならないため
-                            if self.role != AiPromptRole.ASSISTANT else []
-                        )
-                    ],
-                },
-            ]
+                            }
+                        ],
+                    },
+                    {
+                        "role": "user",
+                        "parts": [
+                            {
+                                "function_response": {
+                                    "name": "get_last_message_detail",
+                                    "response": self.content.detail,
+                                }
+                            },
+                        ],
+                    }
+                ] if self.content.is_dict else []
+            ),
+        ]
 
 
 @dataclasses.dataclass
@@ -276,9 +267,8 @@ class AiPrompt:
             "tools": [
                 {
                     "function_declarations": [{
-                        "name": "get_message_detail",
+                        "name": "get_last_message_detail",
                         "description": "Get detailed information about the message.",
-                        "parameters": {"type": "OBJECT", "properties": {"permalink": {"type": "STRING"}}}
                     }]
                 }
             ],
@@ -287,19 +277,30 @@ class AiPrompt:
     def to_gemini_contents(self) -> list[dict[str, Any]]:
         return list(itertools.chain.from_iterable([message.to_gemini_content() for message in self.messages]))
 
-    def to_gemini_prompt(self) -> dict[str, Any]:
+    def to_gemini_rest(self) -> dict[str, Any]:
         return {
-            "generationConfig": {
+            "generation_config": {
                 "candidateCount": self.choices,
                 **(
                     {
-                        "responseMimeType": "application/json",
-                        "responseSchema": self.schema.model_dump(exclude_unset=True, exclude_defaults=True),
+                        "response_mime_type": "application/json",
+                        "response_schema": self.schema.model_dump(exclude_unset=True, exclude_defaults=True),
                     }
                     if self.schema else {}
                 )
             },
-            "systemInstruction": self.to_gemini_system(),
+            "system_instruction": self.to_gemini_system(),
+            "tool_config": {
+                "function_calling_config": {"mode": "NONE"}
+            },
+            "tools": [
+                {
+                    "function_declarations": [{
+                        "name": "get_last_message_detail",
+                        "description": "Get detailed information about the message.",
+                    }]
+                }
+            ],
             "contents": self.to_gemini_contents(),
         }
 
@@ -386,10 +387,10 @@ class AiService:
             prompt: AiPrompt,
     ) -> AiResponse:
         if logger.isEnabledFor(logging.DEBUG):
-            logger.debug(f"_chat_completions model={model.name}, prompt={json.dumps(prompt.to_gemini_prompt(), ensure_ascii=False)}")
+            logger.debug(f"_chat_completions model={model.name}, prompt={json.dumps(prompt.to_gemini_rest(), ensure_ascii=False)}")
         else:
             logger.info(
-                f"_chat_completions model={model.name}, prompt(shrink)={json.dumps(shrink_message(prompt.to_gemini_prompt()), ensure_ascii=False)}"
+                f"_chat_completions model={model.name}, prompt(shrink)={json.dumps(shrink_message(prompt.to_gemini_rest()), ensure_ascii=False)}"
             )
         start_time = time.time()
         last_exception: Optional[Exception] = None
