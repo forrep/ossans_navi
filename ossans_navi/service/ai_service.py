@@ -116,6 +116,12 @@ class AiPromptRole(Enum):
 
 
 @dataclasses.dataclass
+class AiPromptRagInfo:
+    contents: list | dict
+    words: list[str]
+
+
+@dataclasses.dataclass
 class AiPromptImage:
     data: bytes
 
@@ -128,28 +134,6 @@ class AiPromptImage:
 class AiPromptContent:
     data: str | dict[str, Any]
     images: list[AiPromptImage] = dataclasses.field(default_factory=list)
-
-    def to_openai_prompt(self, is_assistant: bool) -> list[dict[str, Any]]:
-        return [
-            {
-                "type": "text",
-                "text": json.dumps(v, ensure_ascii=False, separators=(',', ':')) if isinstance(v := self.data, dict) else v,
-            },
-            *(
-                [
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": image.image_uri
-                        }
-                    }
-                    for image in self.images
-                ]
-                # ASSISTANTロールで画像を入力すると OpenAI では API エラーになるため入力しない
-                # 実際には ASSISTANT が応答文中に画像へのリンクを含めると Slack が画像を展開するため ASSISTANTロールでも画像付きメッセージが存在する
-                if not is_assistant else []
-            )
-        ]
 
     @property
     def is_dict(self) -> bool:
@@ -171,19 +155,110 @@ class AiPromptContent:
 
 
 @dataclasses.dataclass
+class AiPromptFunctionId:
+    call: int = dataclasses.field(default=0, init=False)
+    response: int = dataclasses.field(default=0, init=False)
+
+    @property
+    def call_id(self) -> int:
+        self.call = self.call + 1
+        return self.call
+
+    @property
+    def response_id(self) -> int:
+        self.response = self.response + 1
+        return self.response
+
+
+@dataclasses.dataclass
 class AiPromptMessage:
     role: AiPromptRole
     content: AiPromptContent
     name: Optional[str] = dataclasses.field(default=None)
 
-    def to_openai_prompt(self) -> dict[str, str | list[dict[str, Any]]]:
-        return {
-            "role": self.role.value,
-            "content": self.content.to_openai_prompt(self.role == AiPromptRole.ASSISTANT),
-            **({"name": self.name} if self.name else {})
-        }
+    def to_openai_prompt(self, function_id: AiPromptFunctionId, rag_info: Optional[AiPromptRagInfo] = None) -> list[dict[str, Any]]:
+        return [
+            {
+                "role": self.role.value,
+                "content": [
+                    {
+                        "type": "text",
+                        "text": self.content.text,
+                    },
+                    *(
+                        [
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": image.image_uri
+                                }
+                            }
+                            for image in self.content.images
+                        ]
+                        # ASSISTANTロールで画像を入力すると OpenAI では API エラーになるため入力しない
+                        # 実際には ASSISTANT が応答文中に画像へのリンクを含めると Slack が画像を展開するため ASSISTANTロールでも画像付きメッセージが存在する
+                        if not self.role == AiPromptRole.ASSISTANT else []
+                    )
+                ],
+                **({"name": self.name} if self.name else {})
+            },
+            *(
+                [
+                    {
+                        "role": AiPromptRole.ASSISTANT.value,
+                        "content": None,
+                        "tool_calls": [
+                            *(
+                                [
+                                    {
+                                        "id": f"call_{function_id.call_id}",
+                                        "type": "function",
+                                        "function": {
+                                            "name": "get_last_message_detail",
+                                            "arguments": "",
+                                        },
+                                    }
+                                ] if self.content.is_dict else []
+                            ),
+                            *(
+                                [
+                                    {
+                                        "id": f"call_{function_id.call_id}",
+                                        "type": "function",
+                                        "function": {
+                                            "name": "get_related_information",
+                                            "arguments": json.dumps(rag_info.words, ensure_ascii=False),
+                                        },
+                                    }
+                                ] if rag_info else []
+                            ),
+                        ],
+                    },
+                ] if self.content.is_dict or rag_info else []
+            ),
+            *(
+                [
+                    {
+                        "tool_call_id": f"call_{function_id.response_id}",
+                        "role": "tool",
+                        "name": "get_last_message_detail",
+                        "content": json.dumps(self.content.detail, ensure_ascii=False, separators=(',', ':')),
+                    },
+                ] if self.content.is_dict else []
+            ),
+            *(
+                [
+                    {
+                        "tool_call_id": f"call_{function_id.response_id}",
+                        "role": "tool",
+                        "name": "get_related_information",
+                        "content": json.dumps(rag_info.contents, ensure_ascii=False, separators=(',', ':')),
+                    },
+                ] if rag_info else []
+            ),
+        ]
 
-    def to_gemini_content(self) -> list[dict[str, Any]]:
+    def to_gemini_content(self, rag_info: Optional[AiPromptRagInfo] = None) -> list[dict[str, Any]]:
         return [
             {
                 "role": "model" if self.role == AiPromptRole.ASSISTANT else self.role.value,
@@ -210,25 +285,58 @@ class AiPromptMessage:
                     {
                         "role": "model",
                         "parts": [
-                            {
-                                "function_call": {
-                                    "name": "get_last_message_detail",
-                                }
-                            }
+                            *(
+                                [
+                                    {
+                                        "function_call": {
+                                            "name": "get_last_message_detail",
+                                            "args": {},
+                                        }
+                                    }
+                                ] if self.content.is_dict else []
+                            ),
+                            *(
+                                [
+                                    {
+                                        "function_call": {
+                                            "name": "get_related_information",
+                                            "args": {
+                                                "terms": rag_info.words
+                                            },
+                                        }
+                                    }
+                                ] if rag_info else []
+                            ),
                         ],
                     },
                     {
                         "role": "user",
                         "parts": [
-                            {
-                                "function_response": {
-                                    "name": "get_last_message_detail",
-                                    "response": self.content.detail,
-                                }
-                            },
+                            *(
+                                [
+                                    {
+                                        "function_response": {
+                                            "name": "get_last_message_detail",
+                                            "response": self.content.detail,
+                                        }
+                                    }
+                                ] if self.content.is_dict else []
+                            ),
+                            *(
+                                [
+                                    {
+                                        "function_response": {
+                                            "name": "get_related_information",
+                                            "response": {
+                                                "contents": rag_info.contents,
+                                            },
+                                        }
+                                    }
+                                ] if rag_info else []
+                            ),
                         ],
                     }
-                ] if self.content.is_dict else []
+                ] if self.content.is_dict or rag_info else []
             ),
         ]
 
@@ -237,70 +345,84 @@ class AiPromptMessage:
 class AiPrompt:
     system: str
     messages: list[AiPromptMessage]
-    is_json: bool
     schema: Optional[types.Schema] = dataclasses.field(default=None)
     choices: int = dataclasses.field(default=1)
+    rag_info: Optional[AiPromptRagInfo] = dataclasses.field(default=None)
+
+    @property
+    def is_json(self) -> bool:
+        return self.schema is not None
 
     def to_openai_prompt(self) -> list[dict[str, str | list[dict[str, Any]]]]:
+        function_id = AiPromptFunctionId()
         return [
             {
                 "role": "system",
                 "content": self.system,
             },
-            *[
-                message.to_openai_prompt() for message in self.messages
-            ],
+            *(
+                list(itertools.chain.from_iterable([message.to_openai_prompt(function_id) for message in self.messages[:-1]]))
+            ),
+            *(
+                list(itertools.chain.from_iterable([message.to_openai_prompt(function_id, self.rag_info) for message in self.messages[-1:]]))
+            ),
         ]
-
-    def to_gemini_system(self) -> dict[str, Any]:
-        return {"parts": [{"text": self.system}]}
 
     def to_gemini_config(self) -> dict[str, Any]:
         return {
-            "system_instruction": self.to_gemini_system(),
+            "system_instruction": {"parts": [{"text": self.system}]},
             "candidate_count": self.choices,
             "response_mime_type": "application/json" if self.is_json else None,
-            "response_schema": self.schema if self.is_json else None,
+            "response_schema": self.schema.model_dump(exclude_unset=True, exclude_defaults=True) if self.is_json and self.schema else None,
             "tool_config": {
                 "function_calling_config": {"mode": "NONE"}
             },
             "tools": [
                 {
-                    "function_declarations": [{
-                        "name": "get_last_message_detail",
-                        "description": "Get detailed information about the message.",
-                    }]
+                    "function_declarations": [
+                        {
+                            "name": "get_last_message_detail",
+                            "description": "Get detailed information about the message.",
+                        },
+                        {
+                            "name": "get_related_information",
+                            "description": "Get Related information found in this slack group.",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "terms": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                    }
+                                }
+                            }
+                        }
+                    ]
                 }
             ],
         }
 
     def to_gemini_contents(self) -> list[dict[str, Any]]:
-        return list(itertools.chain.from_iterable([message.to_gemini_content() for message in self.messages]))
+        return [
+            *(
+                list(itertools.chain.from_iterable([message.to_gemini_content() for message in self.messages[:-1]]))
+            ),
+            *(
+                list(itertools.chain.from_iterable([message.to_gemini_content(self.rag_info) for message in self.messages[-1:]]))
+            ),
+        ]
 
     def to_gemini_rest(self) -> dict[str, Any]:
+        gemini_config = self.to_gemini_config()
         return {
             "generation_config": {
-                "candidateCount": self.choices,
-                **(
-                    {
-                        "response_mime_type": "application/json",
-                        "response_schema": self.schema.model_dump(exclude_unset=True, exclude_defaults=True),
-                    }
-                    if self.schema else {}
-                )
+                k: v for (k, v) in gemini_config.items() if k in ("candidate_count", "response_mime_type", "response_schema")
             },
-            "system_instruction": self.to_gemini_system(),
-            "tool_config": {
-                "function_calling_config": {"mode": "NONE"}
-            },
-            "tools": [
+            **(
                 {
-                    "function_declarations": [{
-                        "name": "get_last_message_detail",
-                        "description": "Get detailed information about the message.",
-                    }]
+                    k: v for (k, v) in gemini_config.items() if k in ("system_instruction", "tool_config", "tools")
                 }
-            ],
+            ),
             "contents": self.to_gemini_contents(),
         }
 
@@ -447,6 +569,32 @@ class AiService:
                     messages=messages,
                     n=prompt.choices,
                     timeout=300,
+                    tools=[
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": "get_last_message_detail",
+                                "description": "Get detailed information about the message.",
+                            },
+                        },
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": "get_related_information",
+                                "description": "Get Related information found in this slack group.",
+                                "parameters": {
+                                    "type": "object",
+                                    "properties": {
+                                        "terms": {
+                                            "type": "array",
+                                            "items": {"type": "string"},
+                                        }
+                                    }
+                                }
+                            },
+                        },
+                    ],
+                    tool_choice="none"
                 )
                 break
             except RateLimitError as e:

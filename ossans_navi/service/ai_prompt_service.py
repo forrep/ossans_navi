@@ -1,5 +1,4 @@
 import datetime
-import json
 import time
 from typing import Any, Optional
 
@@ -49,17 +48,11 @@ class AiPromptService:
     def slack_search_word_prompt(self) -> str:
         return self._prompt(ai_prompt_assets.SLACK_SEARCH_WORD_PROMPT)
 
-    def refine_slack_searches_prompt(self, info: list[dict[str, Any]], words: list[str]) -> str:
-        return self._prompt(
-            ai_prompt_assets.REFINE_SLACK_SEARCHES_PROMPT,
-            {"rag_info": self._rag_info(info, words)},
-        )
+    def refine_slack_searches_prompt(self) -> str:
+        return self._prompt(ai_prompt_assets.REFINE_SLACK_SEARCHES_PROMPT)
 
-    def lastshot_prompt(self, info: list[dict[str, Any]] = []) -> str:
-        return self._prompt(
-            ai_prompt_assets.LASTSHOT_PROMPT,
-            {"rag_info": self._rag_info(info)},
-        )
+    def lastshot_prompt(self) -> str:
+        return self._prompt(ai_prompt_assets.LASTSHOT_PROMPT)
 
     def quality_check_prompt(self, response_message: str) -> str:
         return self._prompt(
@@ -68,7 +61,8 @@ class AiPromptService:
         )
 
     def _prompt(self, template: str, extra: Optional[dict[str, Any]] = None) -> str:
-        return Template(template).render(
+        t: Template = Template(template)
+        return t.render(
             {
                 **self.context,
                 "event": {
@@ -79,25 +73,3 @@ class AiPromptService:
                 **(extra or {}),
             }
         ).strip()
-
-    @staticmethod
-    def _rag_info(info: list[dict[str, Any]], words: list[str] | None = None) -> str:
-        return (
-            "# Related information found in this slack group (JSON format)\n"
-            + (
-                (
-                    "```\n"
-                    + json.dumps(info, ensure_ascii=False, separators=(',', ':')) + "\n"
-                    + "```\n"
-                ) if len(info) > 0 else (
-                    "No relevant information was found. Please respond appropriately.\n"
-                )
-            )
-            + (
-                (
-                    "\n"
-                    + "## Search words\n"
-                    + "- " + "\n- ".join(words)
-                ) if isinstance(words, list) and len(words) > 0 else ""
-            )
-        )

@@ -16,7 +16,7 @@ from ossans_navi import config
 from ossans_navi.common.cache import LRUCache
 from ossans_navi.service.ai_prompt_service import AiPromptService
 from ossans_navi.service.ai_service import (AiModels, AiPrompt, AiPromptContent, AiPromptImage, AiPromptMessage, AiPromptRole, AiService,
-                                            QualityCheckResponse)
+                                            QualityCheckResponse, AiPromptRagInfo)
 from ossans_navi.service.slack_service import SlackService
 from ossans_navi.type.ossans_navi_types import OssansNaviConfig
 from ossans_navi.type.slack_type import SlackFile, SlackMessage, SlackMessageEvent, SlackMessageLite, SlackSearches, SlackSearchTerm
@@ -191,7 +191,7 @@ class OssansNaviService:
         limit: int = 800,
         limit_last_message: int = -1,
         schema: Optional[Schema] = None,
-        is_json: bool = True,
+        rag_info: Optional[AiPromptRagInfo] = None,
     ) -> AiPrompt:
         if limit_last_message < 0:
             limit_last_message = limit
@@ -244,7 +244,7 @@ class OssansNaviService:
                 for (i, message) in enumerate(messages[::-1])
             ][::-1],
             schema=schema,
-            is_json=is_json,
+            rag_info=rag_info,
         )
 
     @overload
@@ -634,12 +634,12 @@ class OssansNaviService:
                     role=AiPromptRole.USER,
                     content=AiPromptContent(
                         data=(
-                            f"以下の検索ワードで検索してみましたが、{"結果がヒットしませんでした" if self.slack_searches.total_count == 0 else "ヒット件数が少なかったです"}。"
-                            + "出力フォーマットに従って別のSlack検索キーワードを提供してください。\n"
-                            + "検索キーワードを別の表現にしたり、AND検索による絞り込みをやめて1単語だけするなど工夫してください\n"
+                            f"I tried searching for the following search terms, {"but no results were found" if self.slack_searches.total_count == 0 else "but there were only a few hits"}."
+                            + "Please provide different Slack search keywords according to the output format.\n"
+                            + "Please try to use different expressions for search keywords, or stop narrowing down the search by AND search and use only one word.\n"
                             + "\n"
-                            + "## 検索キーワードとヒット件数\n"
-                            + "\n".join([f"検索ワード: {v.words}, ヒット件数: {len(v.messages)}件" for v in self.slack_searches])
+                            + "## Search keywords and number of hits\n"
+                            + "\n".join([f"Search keywords: {v.words}, Number of hits: {len(v.messages)} hits" for v in self.slack_searches])
                         )
                     ),
                 )
@@ -654,8 +654,9 @@ class OssansNaviService:
         """
         base_messages_token = self.models.low_cost.tokenizer.messages_tokens(
             self.get_ai_prompt(
-                self.ai_prompt_service.refine_slack_searches_prompt([], [v.words for v in self.slack_searches]),
+                self.ai_prompt_service.refine_slack_searches_prompt(),
                 thread_messages,
+                rag_info=AiPromptRagInfo([], [v.words for v in self.slack_searches]),
             ).to_openai_prompt()
         )
         logger.info(f"{base_messages_token=}")
@@ -756,12 +757,13 @@ class OssansNaviService:
                 logger.info("current_messages is empty, finished.")
                 return
             refine_slack_searches_prompt = self.get_ai_prompt(
-                self.ai_prompt_service.refine_slack_searches_prompt(
-                    [OssansNaviService.slack_message_to_ai_prompt(message) for message in SlackMessage.sort(current_messages)],
-                    [v.words for v in self.slack_searches if not v.is_get_messages]
-                ),
+                self.ai_prompt_service.refine_slack_searches_prompt(),
                 thread_messages,
                 schema=self.ai_prompt_service.REFINE_SLACK_SEARCHES_SCHEMA,
+                rag_info=AiPromptRagInfo(
+                    [OssansNaviService.slack_message_to_ai_prompt(message) for message in SlackMessage.sort(current_messages)],
+                    [v.words for v in self.slack_searches if not v.is_get_messages]
+                )
             )
 
         # AI への問い合わせ部分だけ並列で処理する
@@ -835,14 +837,17 @@ class OssansNaviService:
         return self.ai_service.request_lastshot(
             self.models.high_quality,
             self.get_ai_prompt(
-                self.ai_prompt_service.lastshot_prompt(
-                    OssansNaviService.slack_message_to_ai_prompt(SlackMessage.sort(current_messages), limit=10000, check_dup_files=True)
-                ),
+                self.ai_prompt_service.lastshot_prompt(),
                 thread_messages,
                 input_image_files=config.LASTSHOT_INPUT_IMAGE_FILES,
                 limit=10000,
                 limit_last_message=30000,
-                is_json=False,
+                rag_info=AiPromptRagInfo(
+                    OssansNaviService.slack_message_to_ai_prompt(
+                        SlackMessage.sort(current_messages), limit=10000, check_dup_files=True
+                    ),
+                    self.slack_searches.lastshot_terms
+                )
             ),
             n
         )

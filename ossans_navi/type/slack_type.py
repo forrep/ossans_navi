@@ -357,6 +357,7 @@ class SlackSearches:
     total_count: int = dataclasses.field(default=0, init=False)
     _used: set[str] = dataclasses.field(default_factory=set, init=False)
     _lastshot: dict[str, SlackMessage] = dataclasses.field(default_factory=dict, init=False)
+    _lastshot_terms: set[str] = dataclasses.field(default_factory=set, init=False)
     _lock: RLock = dataclasses.field(default_factory=RLock, init=False)
     _lastshot_permalinks: set[str] = dataclasses.field(default_factory=set, init=False)
 
@@ -404,6 +405,7 @@ class SlackSearches:
                 if permalink == message.permalink:
                     # lastshot に追加したい message が見つかった
                     self._lastshot[message.permalink] = message
+                    self._lastshot_terms.add(result.term.to_term())
                     self._lastshot_permalinks.add(message.permalink)
                     if message.is_full:
                         # そのメッセージにスレッド内の全メッセージが含まれている場合はそのスレッド内の全メッセージの permalink を 追加済みとしてマークする
@@ -425,6 +427,7 @@ class SlackSearches:
                 ):
                     # root_message またはスレッド内のメッセージの permalink と一致
                     self._lastshot[message.permalink] = message
+                    self._lastshot_terms.add(result.term.to_term())
                     self._lastshot_permalinks.add(message.permalink)
                     if message.is_full:
                         # そのメッセージにスレッド内の全メッセージが含まれている場合はそのスレッド内の全メッセージの permalink を 追加済みとしてマークする
@@ -437,6 +440,10 @@ class SlackSearches:
     @property
     def lastshot_messages(self) -> Iterable[SlackMessage]:
         return self._lastshot.values()
+
+    @property
+    def lastshot_terms(self) -> list[str]:
+        return list(self._lastshot_terms)
 
     def __enter__(self):
         return self._lock.__enter__()
