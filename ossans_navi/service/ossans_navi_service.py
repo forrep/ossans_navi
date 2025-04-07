@@ -634,9 +634,11 @@ class OssansNaviService:
                     role=AiPromptRole.USER,
                     content=AiPromptContent(
                         data=(
-                            f"I tried searching for the following search terms, {"but no results were found" if self.slack_searches.total_count == 0 else "but there were only a few hits"}."
+                            "I tried searching for the following search terms, "
+                            + f"{"but no results were found" if self.slack_searches.total_count == 0 else "but there were only a few hits"}."
                             + "Please provide different Slack search keywords according to the output format.\n"
-                            + "Please try to use different expressions for search keywords, or stop narrowing down the search by AND search and use only one word.\n"
+                            + "Please try to use different expressions for search keywords, "
+                            + "or stop narrowing down the search by AND search and use only one word.\n"
                             + "\n"
                             + "## Search keywords and number of hits\n"
                             + "\n".join([f"Search keywords: {v.words}, Number of hits: {len(v.messages)} hits" for v in self.slack_searches])

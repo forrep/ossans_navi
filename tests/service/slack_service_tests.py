@@ -329,20 +329,8 @@ def test_get_bot(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
     )
 
     # bots_info で request_timeout が返るパターン
-    # ・・・互換性の検証のため、今は例外を送出せずに既存の動作である空データを返す仕様なので代わりのテストを実施
-    # with pytest.raises(SlackApiError):
-    #     slack_service.get_bot("B2XXXXXXX")
-    assert slack_service.get_bot("B2XXXXXXX") == SlackUser(
-        user_id='B2XXXXXXX',
-        name='Unknown Bot',
-        username='unknown_bot',
-        mention='',
-        is_bot=True,
-        is_guest=False,
-        is_admin=False,
-        is_valid=False,
-        bot_id="B2XXXXXXX"
-    )
+    with pytest.raises(SlackApiError):
+        slack_service.get_bot("B2XXXXXXX")
 
     # bots_info で ValueError() が返るパターン
     with pytest.raises(ValueError):

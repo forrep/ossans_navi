@@ -266,10 +266,9 @@ class SlackService:
             error_response: SlackResponse = e.response
             if error_response.get("error") != "bot_not_found":
                 # error: bot_not_found ではない場合は例外を送出
-                # ・・・、する予定だけど、まずはエラーロギングだけして様子見
                 logger.error(f"{error_response.get("error")}, bot_id={bot_id}, exception={e}")
                 logger.error(e, exc_info=True)
-                # raise e
+                raise e
             logger.info(f"{error_response.get("error")}, bot_id={bot_id}, exception={e}")
             bot_user = SlackUser(
                 user_id=bot_id,
@@ -502,11 +501,11 @@ class SlackService:
                     is_codeblock = True
                     line = "```" + ("\n" + matcher.group(1) if matcher.group(1) else "")
                 else:
-                    line = re.sub(r'^([ 　]*)[*-] ', lambda v: f"{v.group(1)}• ", line)
-                    line = re.sub(r'^#{1,4} .+$', lambda v: f"*{v.group(0)}*", line)
-                    line = re.sub(r' ?\*\*([^*]+)\*\* ?', lambda v: f" *{v.group(1)}* ", line)
-                    line = re.sub(r' ?(?<!``)`([^`]+)`(?!``) ?', lambda v: f" `{v.group(1)}` ", line)
-                    line = re.sub(r'\[([^]]+)\]\((https?://[^)]+)\)', lambda x: f"<{x.group(2)}|{x.group(1)}>", line)
+                    line = re.sub(r'^([ 　]*)[*-] ', lambda v: f"{v.group(1)!s}• ", line)
+                    line = re.sub(r'^#{1,4} .+$', lambda v: f"*{v.group(0)!s}*", line)
+                    line = re.sub(r' ?\*\*([^*]+)\*\* ?', lambda v: f" *{v.group(1)!s}* ", line)
+                    line = re.sub(r' ?(?<!``)`([^`]+)`(?!``) ?', lambda v: f" `{v.group(1)!s}` ", line)
+                    line = re.sub(r'\[([^]]+)\]\((https?://[^)]+)\)', lambda x: f"<{x.group(2)!s}|{x.group(1)!s}>", line)
             else:
                 if re.search(r'^```|```$', line):
                     is_codeblock = False

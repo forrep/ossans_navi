@@ -252,7 +252,13 @@ class AiPromptMessage:
                         "tool_call_id": f"call_{function_id.response_id}",
                         "role": "tool",
                         "name": "get_related_information",
-                        "content": json.dumps(rag_info.contents, ensure_ascii=False, separators=(',', ':')),
+                        "content": json.dumps(
+                            rag_info.contents if len(rag_info.contents) > 0 else {
+                                "status": "No valid information was found in the get_related_information results, please respond in general terms."
+                            },
+                            ensure_ascii=False,
+                            separators=(',', ':')
+                        ),
                     },
                 ] if rag_info else []
             ),
@@ -328,8 +334,20 @@ class AiPromptMessage:
                                         "function_response": {
                                             "name": "get_related_information",
                                             "response": {
-                                                "contents": rag_info.contents,
-                                            },
+                                                **(
+                                                    {
+                                                        "status": (
+                                                            "No valid information was found in the get_related_information results, "
+                                                            + "please respond in general terms."
+                                                        )
+                                                    } if len(rag_info.contents) == 0 else {}
+                                                ),
+                                                **(
+                                                    {
+                                                        "contents": rag_info.contents,
+                                                    } if len(rag_info.contents) > 0 else {}
+                                                ),
+                                            }
                                         }
                                     }
                                 ] if rag_info else []
