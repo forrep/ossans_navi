@@ -808,7 +808,7 @@ class OssansNaviService:
             n = 1
         tokens_remain -= self.models.high_quality.tokenizer.messages_tokens(
             self.get_ai_prompt(
-                self.ai_prompt_service.lastshot_prompt(),
+                self.ai_prompt_service.lastshot_prompt(False),
                 thread_messages,
                 limit=10000,
                 limit_last_message=30000,
@@ -839,7 +839,7 @@ class OssansNaviService:
         return self.ai_service.request_lastshot(
             self.models.high_quality,
             self.get_ai_prompt(
-                self.ai_prompt_service.lastshot_prompt(),
+                self.ai_prompt_service.lastshot_prompt(len(current_messages) > 0),
                 thread_messages,
                 input_image_files=config.LASTSHOT_INPUT_IMAGE_FILES,
                 limit=10000,

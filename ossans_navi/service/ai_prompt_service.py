@@ -51,8 +51,8 @@ class AiPromptService:
     def refine_slack_searches_prompt(self) -> str:
         return self._prompt(ai_prompt_assets.REFINE_SLACK_SEARCHES_PROMPT)
 
-    def lastshot_prompt(self) -> str:
-        return self._prompt(ai_prompt_assets.LASTSHOT_PROMPT)
+    def lastshot_prompt(self, has_rag_info: bool) -> str:
+        return self._prompt(ai_prompt_assets.LASTSHOT_PROMPT, {"has_rag_info": has_rag_info})
 
     def quality_check_prompt(self, response_message: str) -> str:
         return self._prompt(
