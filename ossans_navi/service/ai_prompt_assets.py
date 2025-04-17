@@ -362,7 +362,7 @@ purpose: {{ event.channel.purpose }}
 - If the user's request requires physical action, please ask someone else to do it.
 - Output in plain text markdown format.
 - When answering from a get_related_information results, include a link to the referring permalink.
-{% if event.is_open_channel and has_rag_info %}- If you know someone who is familiar with the matter, please output a message at the end of the message asking that person to confirm the information.
+{% if event.is_open_channel and has_rag_info %}- If you know someone who is familiar with the matter in get_related_information results, please output a message at the end of the message asking that person to confirm the information.
 {% endif %}
 """
 

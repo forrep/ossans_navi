@@ -12,9 +12,9 @@ RUN rm /etc/localtime \
     && update-locale LANG=ja_JP.UTF-8
 ENV LANG="ja_JP.UTF-8"
 
-ARG uid=20000
-ARG gid=20000
-ENV DOCKER_BUILD_UID=$uid DOCKER_BUILD_GID=$gid
+ARG UID=20000
+ARG GID=20000
+ENV DOCKER_BUILD_UID=$UID DOCKER_BUILD_GID=$GID
 RUN groupadd -g ${DOCKER_BUILD_GID} ossans_navi \
     && useradd -m -u ${DOCKER_BUILD_UID} -g ${DOCKER_BUILD_GID} -s /bin/bash -d /home/ossans_navi ossans_navi
 

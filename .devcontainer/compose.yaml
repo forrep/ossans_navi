@@ -5,8 +5,8 @@ services:
       dockerfile: Dockerfile
       target: development
       args:
-        uid: ${UID:-20000}
-        gid: ${GID:-20000}
+        UID: ${UID:-20000}
+        GID: ${GID:-20000}
     command: sleep infinity
     env_file: devcontainer.env
     volumes:
