@@ -264,99 +264,99 @@ class AiPromptMessage:
             ),
         ]
 
-    def to_gemini_content(self, rag_info: Optional[AiPromptRagInfo] = None) -> list[dict[str, Any]]:
-        return [
-            {
-                "role": "model" if self.role == AiPromptRole.ASSISTANT else self.role.value,
-                "parts": [
-                    {"text": self.content.text},
-                    *(
-                        [
-                            {
-                                "inline_data": {
-                                    "mime_type": "image/png",
-                                    "data": base64.b64encode(image.data).decode(),
-                                }
-                            }
-                            for image in self.content.images
-                        ]
-                        # AiPromptRole.ASSISTANT ではない場合のみ画像を読み込む
-                        # モデルが画像生成機能を持たない現時点では、AiPromptRole.ASSISTANT で送信する画像データは処理対象にならないため
-                        if self.role != AiPromptRole.ASSISTANT else []
-                    )
-                ],
-            },
-            *(
+    def to_gemini_content(self, rag_info: Optional[AiPromptRagInfo] = None) -> list[types.ContentDict]:
+        contents: list[types.ContentDict] = []
+        parts: list[types.PartDict] = []
+        parts.append({"text": self.content.text})
+        if self.role != AiPromptRole.ASSISTANT:
+            # AiPromptRole.ASSISTANT ではない場合のみ画像を読み込む
+            # モデルが画像生成機能を持たない現時点では、AiPromptRole.ASSISTANT に画像データが付随するケースは電文を偽造しない限りない
+            # そのため現時点では画像を送信しても処理対象にならない、そのため送らない
+            parts.extend(
                 [
                     {
-                        "role": "model",
-                        "parts": [
-                            *(
-                                [
-                                    {
-                                        "function_call": {
-                                            "name": "get_last_message_detail",
-                                            "args": {},
-                                        }
-                                    }
-                                ] if self.content.is_dict else []
-                            ),
-                            *(
-                                [
-                                    {
-                                        "function_call": {
-                                            "name": "get_related_information",
-                                            "args": {
-                                                "terms": rag_info.words
-                                            },
-                                        }
-                                    }
-                                ] if rag_info else []
-                            ),
-                        ],
-                    },
-                    {
-                        "role": "user",
-                        "parts": [
-                            *(
-                                [
-                                    {
-                                        "function_response": {
-                                            "name": "get_last_message_detail",
-                                            "response": self.content.detail,
-                                        }
-                                    }
-                                ] if self.content.is_dict else []
-                            ),
-                            *(
-                                [
-                                    {
-                                        "function_response": {
-                                            "name": "get_related_information",
-                                            "response": {
-                                                **(
-                                                    {
-                                                        "status": (
-                                                            "No valid information was found in the get_related_information results, "
-                                                            + "please respond in general terms."
-                                                        )
-                                                    } if len(rag_info.contents) == 0 else {}
-                                                ),
-                                                **(
-                                                    {
-                                                        "contents": rag_info.contents,
-                                                    } if len(rag_info.contents) > 0 else {}
-                                                ),
-                                            }
-                                        }
-                                    }
-                                ] if rag_info else []
-                            ),
-                        ],
+                        "inline_data": {
+                            "mime_type": "image/png",
+                            "data": image.data,
+                        }
                     }
-                ] if self.content.is_dict or rag_info else []
-            ),
-        ]
+                    for image in self.content.images
+                ]
+            )
+        contents.append({
+            "role": "model" if self.role == AiPromptRole.ASSISTANT else self.role.value,
+            "parts": parts,
+        })
+
+        if self.content.is_dict or rag_info:
+            parts = []
+            if self.content.is_dict:
+                parts.append(
+                    {
+                        "function_call": {
+                            "name": "get_last_message_detail",
+                            "args": {},
+                        }
+                    }
+                )
+            if rag_info:
+                parts.append(
+                    {
+                        "function_call": {
+                            "name": "get_related_information",
+                            "args": {
+                                "terms": rag_info.words
+                            },
+                        }
+                    }
+                )
+            contents.append(
+                {
+                    "role": "model",
+                    "parts": parts,
+                }
+            )
+            parts = []
+            if self.content.is_dict:
+                parts.append(
+                    {
+                        "function_response": {
+                            "name": "get_last_message_detail",
+                            "response": self.content.detail,
+                        }
+                    }
+                )
+            if rag_info:
+                parts.append(
+                    {
+                        "function_response": {
+                            "name": "get_related_information",
+                            "response": {
+                                **(
+                                    {
+                                        "status": (
+                                            "No valid information was found in the get_related_information results, "
+                                            + "please respond in general terms."
+                                        )
+                                    } if len(rag_info.contents) == 0 else {}
+                                ),
+                                **(
+                                    {
+                                        "contents": rag_info.contents,
+                                    } if len(rag_info.contents) > 0 else {}
+                                ),
+                            }
+                        }
+                    }
+                )
+            contents.append(
+                {
+                    "role": "user",
+                    "parts": parts,
+                }
+            )
+
+        return contents
 
 
 @dataclasses.dataclass
@@ -386,14 +386,14 @@ class AiPrompt:
             ),
         ]
 
-    def to_gemini_config(self) -> dict[str, Any]:
+    def to_gemini_config(self) -> types.GenerateContentConfigDict:
         return {
             "system_instruction": {"parts": [{"text": self.system}]},
             "candidate_count": self.choices,
             "response_mime_type": "application/json" if self.is_json else None,
             "response_schema": self.schema.model_dump(exclude_unset=True, exclude_defaults=True) if self.is_json and self.schema else None,
             "tool_config": {
-                "function_calling_config": {"mode": "NONE"}
+                "function_calling_config": {"mode": types.FunctionCallingConfigMode.NONE},
             },
             "tools": [
                 {
@@ -406,11 +406,11 @@ class AiPrompt:
                             "name": "get_related_information",
                             "description": "Get Related information found in this slack group.",
                             "parameters": {
-                                "type": "object",
+                                "type": types.Type.OBJECT,
                                 "properties": {
                                     "terms": {
-                                        "type": "array",
-                                        "items": {"type": "string"},
+                                        "type": types.Type.ARRAY,
+                                        "items": {"type": types.Type.STRING},
                                     }
                                 }
                             }
@@ -420,15 +420,16 @@ class AiPrompt:
             ],
         }
 
-    def to_gemini_contents(self) -> list[dict[str, Any]]:
-        return [
-            *(
-                list(itertools.chain.from_iterable([message.to_gemini_content() for message in self.messages[:-1]]))
-            ),
-            *(
-                list(itertools.chain.from_iterable([message.to_gemini_content(self.rag_info) for message in self.messages[-1:]]))
-            ),
-        ]
+    def to_gemini_contents(self) -> types.ContentListUnionDict:
+        contents: list[types.ContentUnionDict] = []
+        for (i, message) in enumerate(self.messages):
+            if i + 1 != len(self.messages):
+                # ループの最後以外のメッセージには RAG 情報を付与しない
+                contents.extend(message.to_gemini_content())
+            else:
+                # ループの最後のメッセージだけ RAG 情報を付与する
+                contents.extend(message.to_gemini_content(self.rag_info))
+        return contents
 
     def to_gemini_rest(self) -> dict[str, Any]:
         gemini_config = self.to_gemini_config()
@@ -441,8 +442,18 @@ class AiPrompt:
                     k: v for (k, v) in gemini_config.items() if k in ("system_instruction", "tool_config", "tools")
                 }
             ),
-            "contents": self.to_gemini_contents(),
+            "contents": AiPrompt.convert_bytes_to_base64(self.to_gemini_contents()),
         }
+
+    @staticmethod
+    def convert_bytes_to_base64(value: dict[str, Any] | list[Any] | Any) -> dict[str, Any] | list[Any] | Any:
+        if isinstance(value, dict):
+            return {k: AiPrompt.convert_bytes_to_base64(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [AiPrompt.convert_bytes_to_base64(v) for v in value]
+        if isinstance(value, bytes):
+            return base64.b64encode(value).decode()
+        return value
 
 
 @dataclasses.dataclass
@@ -475,7 +486,12 @@ class AiResponse:
                 content=json.loads(v) if is_json else v,
                 role=AiPromptRole.ASSISTANT,
             )
-            for candidate in response.candidates if isinstance(v := candidate.content.parts[0].text, str)
+            for candidate in (response.candidates if response.candidates else [])
+            if (
+                candidate.content
+                and candidate.content.parts
+                and isinstance((v := candidate.content.parts[0].text), str)
+            )
         ])
 
 
@@ -534,7 +550,7 @@ class AiService:
             )
         start_time = time.time()
         last_exception: Optional[Exception] = None
-        response: types.GenerateContentResponse = None
+        response: Optional[types.GenerateContentResponse] = None
         for _ in range(10):
             try:
                 response = self.client_gemini.models.generate_content(
@@ -558,8 +574,10 @@ class AiService:
         logger.info("response=" + str(response))
         # 利用したトークン数を加算する
         if response.usage_metadata:
-            model.tokens_in += response.usage_metadata.prompt_token_count
-            model.tokens_out += response.usage_metadata.candidates_token_count
+            if isinstance(response.usage_metadata.prompt_token_count, int):
+                model.tokens_in += response.usage_metadata.prompt_token_count
+            if isinstance(response.usage_metadata.candidates_token_count, int):
+                model.tokens_out += response.usage_metadata.candidates_token_count
         if not response.candidates:
             # 応答がない場合は例外を送出
             logger.error("Error empty choices, response=" + str(response))
