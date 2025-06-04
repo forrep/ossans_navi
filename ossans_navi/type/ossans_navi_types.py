@@ -2,6 +2,23 @@ import dataclasses
 
 
 @dataclasses.dataclass
+class Image:
+    data: bytes
+    mime_type: str
+
+    @property
+    def extension(self) -> str:
+        if self.mime_type == "image/png":
+            return ".png"
+        elif self.mime_type == "image/jpeg":
+            return ".jpg"
+        elif self.mime_type == "image/gif":
+            return ".gif"
+        else:
+            return ""
+
+
+@dataclasses.dataclass
 class OssansNaviConfig:
     trusted_bots: list[str] = dataclasses.field(default_factory=list, init=False)
     allow_responds: list[str] = dataclasses.field(default_factory=list, init=False)
@@ -24,3 +41,9 @@ class OssansNaviConfig:
 
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)
+
+
+@dataclasses.dataclass
+class LastshotResponse:
+    text: str
+    images: list[Image]

@@ -18,7 +18,7 @@ from ossans_navi.service.ai_prompt_service import AiPromptService
 from ossans_navi.service.ai_service import (AiModels, AiPrompt, AiPromptContent, AiPromptImage, AiPromptMessage, AiPromptRole, AiService,
                                             QualityCheckResponse, AiPromptRagInfo)
 from ossans_navi.service.slack_service import SlackService
-from ossans_navi.type.ossans_navi_types import OssansNaviConfig
+from ossans_navi.type import ossans_navi_types
 from ossans_navi.type.slack_type import SlackFile, SlackMessage, SlackMessageEvent, SlackMessageLite, SlackSearches, SlackSearchTerm
 
 logger = logging.getLogger(__name__)
@@ -318,12 +318,12 @@ class OssansNaviService:
             )
         )
 
-    def store_config(self, config: OssansNaviConfig) -> None:
+    def store_config(self, config: ossans_navi_types.OssansNaviConfig) -> None:
         self.slack_service.store_config_dict(config.to_dict())
 
-    def get_config(self) -> OssansNaviConfig:
+    def get_config(self) -> ossans_navi_types.OssansNaviConfig:
         config_dict = self.slack_service.get_config_dict()
-        return OssansNaviConfig.from_dict(config_dict)
+        return ossans_navi_types.OssansNaviConfig.from_dict(config_dict)
 
     def special_command(self) -> bool:
         """
@@ -797,7 +797,7 @@ class OssansNaviService:
                         # 追加の取得メッセージが提供された場合は検索する
                         self.search(refine_slack_searches_response.get_messages, True, True)
 
-    def lastshot(self, thread_messages: list[SlackMessageLite]) -> list[str]:
+    def lastshot(self, thread_messages: list[SlackMessageLite]) -> list[ossans_navi_types.LastshotResponse]:
         current_messages: list[SlackMessage] = []
         # 入力可能なトークン数を定義する、たくさん入れたら精度が上がるが費用も上がるのでほどほどのトークン数に制限する（話しかけられている時はトークン量を増やす）
         if self.event.is_mention or self.event.is_reply_to_ossans_navi():
@@ -814,7 +814,7 @@ class OssansNaviService:
                 limit_last_message=30000,
             ).to_openai_prompt()
         )
-        # GPT-4o mini が精査してくれた結果を元にトークン数が収まる範囲で入力データとする
+        # 低価格LLM が精査してくれた結果を元にトークン数が収まる範囲で入力データとする
         check_dup_files_dict: dict[str, int] = {}
         for content in self.slack_searches.lastshot_messages:
             tokens = self.models.high_quality.tokenizer.content_tokens(

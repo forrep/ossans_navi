@@ -19,6 +19,7 @@ from ossans_navi import config
 from ossans_navi.common.logger import shrink_message
 from ossans_navi.config import AiServiceType
 from ossans_navi.service.ai_tokenize_service import AiTokenize, AiTokenizeGpt4o
+from ossans_navi.type import ossans_navi_types
 
 logger = logging.getLogger(__name__)
 
@@ -460,6 +461,7 @@ class AiPrompt:
 class AiResponseMessage:
     content: str | dict[str, Any]
     role: AiPromptRole
+    images: list[ossans_navi_types.Image] = dataclasses.field(default_factory=list)
 
 
 @dataclasses.dataclass
@@ -481,18 +483,44 @@ class AiResponse:
 
     @staticmethod
     def from_gemini_response(response: types.GenerateContentResponse, is_json: bool) -> 'AiResponse':
-        return AiResponse([
-            AiResponseMessage(
-                content=json.loads(v) if is_json else v,
-                role=AiPromptRole.ASSISTANT,
-            )
-            for candidate in (response.candidates if response.candidates else [])
+        ai_response_messages: list[AiResponseMessage] = []
+        for candidate in (response.candidates if response.candidates else []):
             if (
                 candidate.content
                 and candidate.content.parts
-                and isinstance((v := candidate.content.parts[0].text), str)
-            )
-        ])
+            ):
+                texts: list[str] = []
+                images: list[ossans_navi_types.Image] = []
+                for part in candidate.content.parts:
+                    if isinstance(part.text, str):
+                        if is_json:
+                            ai_response_messages.append(
+                                AiResponseMessage(
+                                    content=json.loads(part.text),
+                                    role=AiPromptRole.ASSISTANT,
+                                )
+                            )
+                            # JSON の場合は複数の part が返ってくることを想定しない
+                            # そういう場合も仕様上あるのかもしれないが不明
+                            break
+                        else:
+                            texts.append(part.text)
+                    elif (
+                        isinstance(part.inline_data, dict)
+                        and part.inline_data.mime_type
+                        and part.inline_data.mime_type.startswith("image/")
+                        and part.inline_data.data
+                    ):
+                        images.append(ossans_navi_types.Image(part.inline_data.data, part.inline_data.mime_type))
+                if len(texts) > 0:
+                    ai_response_messages.append(
+                        AiResponseMessage(
+                            content="\n".join(texts),
+                            role=AiPromptRole.ASSISTANT,
+                            images=images,
+                        )
+                    )
+        return AiResponse(ai_response_messages)
 
 
 @dataclasses.dataclass
@@ -769,10 +797,13 @@ class AiService:
         return AiService._analyze_refine_slack_searches_response(response)
 
     @staticmethod
-    def _analyze_lastshot_response(response: AiResponse) -> list[str]:
-        return [message.content for message in response.choices if isinstance(message.content, str)]
+    def _analyze_lastshot_response(response: AiResponse) -> list[ossans_navi_types.LastshotResponse]:
+        return [
+            ossans_navi_types.LastshotResponse(message.content, message.images)
+            for message in response.choices if isinstance(message.content, str)
+        ]
 
-    def request_lastshot(self, model: AiModel, prompt: AiPrompt, n: int = 1) -> list[str]:
+    def request_lastshot(self, model: AiModel, prompt: AiPrompt, n: int = 1) -> list[ossans_navi_types.LastshotResponse]:
         # Gemini は大きいプロンプトのパターンで choice>=2 が原因となるエラーケースがある、よって choice=1 とする
         prompt.choices = 1 if model.ai_service_type == AiServiceType.GEMINI else n
         for _ in range(2):

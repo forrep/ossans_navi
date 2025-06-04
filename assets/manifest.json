@@ -30,7 +30,8 @@
                 "mpim:read",
                 "reactions:write",
                 "users:read",
-                "files:read"
+                "files:read",
+                "files:write"
             ]
         }
     },

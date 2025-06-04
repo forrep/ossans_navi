@@ -269,7 +269,7 @@ def do_ossans_navi_response(say, event: SlackMessageEvent, models: AiModels) -> 
 
     lastshot_response = sorted(
         lastshot_responses,
-        key=lambda v: len(v),
+        key=lambda v: len(v.text),
         reverse=True
     )[0]
 
@@ -280,7 +280,7 @@ def do_ossans_navi_response(say, event: SlackMessageEvent, models: AiModels) -> 
     elif event.is_need_response():
         # 応答が必要とされるメッセージには、以下の条件に合致する場合のみ応答する
         # まず応答品質の判定をして、その結果に応じて応答するか決定する
-        quality_check_response = ossans_navi_service.quality_check(thread_messages, lastshot_response)
+        quality_check_response = ossans_navi_service.quality_check(thread_messages, lastshot_response.text)
         if quality_check_response.user_intent is not None and quality_check_response.response_quality:
             # ユーザーに意図があり、かつ応答クオリティが高いと判断している場合は応答する
             do_response = True
@@ -298,13 +298,15 @@ def do_ossans_navi_response(say, event: SlackMessageEvent, models: AiModels) -> 
                 logger.info(f"Event canceled: {event.id()}({event.channel_id},{event.thread_ts},{event.ts})")
                 logger.info("Finished.")
                 return
-            say(
+            slack_service.chat_post_message(
+                channel=event.channel_id,
+                thread_ts=event.thread_ts,
                 text=(
                     slack_service.disable_mention_if_not_active(
-                        SlackService.convert_markdown_to_mrkdwn(lastshot_response)
+                        SlackService.convert_markdown_to_mrkdwn(lastshot_response.text)
                     )
                 ),
-                thread_ts=event.thread_ts
+                images=lastshot_response.images,
             )
             if config.RESPONSE_LOGGING_CHANNEL:
                 slack_service.chat_post_message(

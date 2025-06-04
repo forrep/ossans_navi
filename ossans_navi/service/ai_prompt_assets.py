@@ -1,71 +1,77 @@
 from google.genai.types import Schema, Type
 
+USER_INTENTIONS_TYPES = [
+    "monologue",
+    "need_answers_to_questions",
+    "ask_someone_to_do_something",
+    "report_to_someone",
+    "advice_to_someone",
+    "agree_with_someone",
+    "sympathize_with_someone",
+    "comfirm_with_someone",
+    "praise_someone_or_something",
+    "disappointed_in_someone_or_something",
+    "sharing_information",
+    "note_for_self",
+    "impressions",
+    "no_intent",
+    "other",
+]
+
+USER_EMOTIONS = [
+    "be_pleased",
+    "be_angular",
+    "be_troubled",
+    "be_sympathize",
+    "be_suspicious",
+    "no_emotions",
+]
+
+WHO_TO_TALK_TO_TYPES = [
+    "to_assistant_bot",
+    "to_someone_well_informed",
+    "to_specific_persons",
+    "to_all_of_us",
+    "to_noone",
+    "cannot_determine",
+]
+
+REQUIRED_KNOWLEDGE_TYPES = [
+    "common_sense",
+    "public_information",
+    "technical_knowledge",
+    "other_knowledge",
+    "information_within_this_slack_group",
+    "no_information_required",
+]
+
 CLASSIFY_SCHEMA = Schema(
     type=Type.OBJECT,
     properties={
         "user_intent": Schema(type=Type.STRING, nullable=True),
-        "response_text": Schema(type=Type.STRING),
         "user_intentions_type": Schema(
             type=Type.STRING,
-            enum=[
-                "monologue",
-                "need_answers_to_questions",
-                "ask_someone_to_do_something",
-                "report_to_someone",
-                "advice_to_someone",
-                "agree_with_someone",
-                "sympathize_with_someone",
-                "comfirm_with_someone",
-                "praise_someone_or_something",
-                "disappointed_in_someone_or_something",
-                "sharing_information",
-                "note_for_self",
-                "impressions",
-                "no_intent",
-                "other",
-            ]
+            enum=USER_INTENTIONS_TYPES
         ),
         "who_to_talk_to": Schema(
             type=Type.STRING,
-            enum=[
-                "to_assistant_bot",
-                "to_someone_well_informed",
-                "to_specific_persons",
-                "to_all_of_us",
-                "to_noone",
-                "cannot_determine",
-            ]
+            enum=WHO_TO_TALK_TO_TYPES
         ),
         "user_emotions": Schema(
             type=Type.STRING,
-            enum=[
-                "be_pleased",
-                "be_angular",
-                "be_troubled",
-                "be_sympathize",
-                "be_suspicious",
-                "no_emotions",
-            ]
+            enum=USER_EMOTIONS
         ),
         "required_knowledge_types": Schema(
             type=Type.ARRAY,
             items=Schema(
                 type=Type.STRING,
-                enum=[
-                    "common_sense",
-                    "public_information",
-                    "technical_knowledge",
-                    "other_knowledge",
-                    "information_within_this_slack_group",
-                    "no_information_required",
-                ]
+                enum=REQUIRED_KNOWLEDGE_TYPES
             ),
         ),
         "slack_emoji_names": Schema(type=Type.ARRAY, items=Schema(type=Type.STRING)),
     },
     required=[
         "user_intent",
-        "response_text",
         "user_intentions_type",
         "who_to_talk_to",
         "user_emotions",
@@ -74,7 +80,6 @@ CLASSIFY_SCHEMA = Schema(
     ],
     property_ordering=[
         "user_intent",
-        "response_text",
         "user_intentions_type",
         "who_to_talk_to",
         "user_emotions",
@@ -103,7 +108,6 @@ purpose: {{ event.channel.purpose }}
 # Output format
 {
 "user_intent": contents,
-"response_text": contents,
 "user_intentions_type": enum,
 "who_to_talk_to": enum,
 "user_emotions": enum,
@@ -114,9 +118,6 @@ purpose: {{ event.channel.purpose }}
 # Rules for "user_intent"
 - Organize and output the questions and intentions contained in the last message.
 - If the last message does not contain a question or intent, null is output.
-
-# Rules for "response_text"
-- Output response to user.
 
 # Rules for "user_intentions_type"
 - Consider the intent of the last message sent by the user. Then, select the message intent from the options below. Be sure to select from only the following options.

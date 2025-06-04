@@ -1,8 +1,10 @@
 import functools
 import logging
+import os
 import time
+from io import IOBase
 from threading import RLock
-from typing import Callable, Dict, Optional, Sequence, TypeVar, Union
+from typing import Callable, Dict, Optional, Sequence, TypeVar, Union, Any, List
 
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
@@ -286,4 +288,38 @@ class SlackWrapper:
             channel=channel,
             return_im=return_im,
             users=users,
+        )
+
+    @api_wrapper()
+    def files_upload_v2(
+        self,
+        *,
+        # for sending a single file
+        filename: Optional[str] = None,  # you can skip this only when sending along with content parameter
+        file: Optional[Union[str, bytes, IOBase, os.PathLike]] = None,
+        content: Optional[Union[str, bytes]] = None,
+        title: Optional[str] = None,
+        alt_txt: Optional[str] = None,
+        snippet_type: Optional[str] = None,
+        # To upload multiple files at a time
+        file_uploads: Optional[List[Dict[str, Any]]] = None,
+        channel: Optional[str] = None,
+        channels: Optional[List[str]] = None,
+        initial_comment: Optional[str] = None,
+        thread_ts: Optional[str] = None,
+        request_file_info: bool = True,  # since v3.23, this flag is no longer necessary
+    ) -> SlackResponse:
+        return self.client.files_upload_v2(
+            filename=filename,
+            file=file,
+            content=content,
+            title=title,
+            alt_txt=alt_txt,
+            snippet_type=snippet_type,
+            file_uploads=file_uploads,
+            channel=channel,
+            channels=channels,
+            initial_comment=initial_comment,
+            thread_ts=thread_ts,
+            request_file_info=request_file_info,
         )

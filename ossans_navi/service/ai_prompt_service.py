@@ -34,10 +34,10 @@ class AiPromptService:
             ai_prompt_assets.CLASSIFY_PROMPT,
             {
                 "schema": {
-                    "user_intentions_type": self.CLASSIFY_SCHEMA.properties["user_intentions_type"].enum or [],
-                    "who_to_talk_to": self.CLASSIFY_SCHEMA.properties["who_to_talk_to"].enum or [],
-                    "user_emotions": self.CLASSIFY_SCHEMA.properties["user_emotions"].enum or [],
-                    "required_knowledge_types": self.CLASSIFY_SCHEMA.properties["required_knowledge_types"].enum or [],
+                    "user_intentions_type": ai_prompt_assets.USER_INTENTIONS_TYPES,
+                    "who_to_talk_to": ai_prompt_assets.WHO_TO_TALK_TO_TYPES,
+                    "user_emotions": ai_prompt_assets.USER_EMOTIONS,
+                    "required_knowledge_types": ai_prompt_assets.REQUIRED_KNOWLEDGE_TYPES,
                 },
             },
         )

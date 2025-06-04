@@ -20,6 +20,7 @@ from ossans_navi.common.cache import LRUCache
 from ossans_navi.service.slack_wrapper import SlackWrapper
 from ossans_navi.type.slack_type import (SlackAttachment, SlackChannel, SlackFile, SlackMessage, SlackMessageEvent, SlackMessageLite, SlackSearch,
                                          SlackSearchTerm, SlackUser)
+from ossans_navi.type import ossans_navi_types
 
 logger = logging.getLogger(__name__)
 
@@ -172,10 +173,15 @@ class EventGuard:
 
 
 class SlackService:
-    def __init__(self) -> None:
-        self.app_token = config.SLACK_APP_TOKEN
-        self.user_token = config.SLACK_USER_TOKEN
-        self.bot_token = config.SLACK_BOT_TOKEN
+    def __init__(
+        self,
+        app_token: Optional[str] = None,
+        user_token: Optional[str] = None,
+        bot_token: Optional[str] = None
+    ) -> None:
+        self.app_token = app_token or config.SLACK_APP_TOKEN
+        self.user_token = user_token or config.SLACK_USER_TOKEN
+        self.bot_token = bot_token or config.SLACK_BOT_TOKEN
         self.app = App(token=self.bot_token, logger=logging.getLogger("slack_bolt"))
         self.socket_mode_hander = SocketModeHandler(self.app, self.app_token)
         self.app_client = SlackWrapper(token=self.app_token)
@@ -471,8 +477,33 @@ class SlackService:
             ))
         return results
 
-    def chat_post_message(self, channel: str, text: str, thread_ts: Optional[str] = None) -> None:
-        self.bot_client.chat_postMessage(channel=channel, text=text, thread_ts=thread_ts)
+    def chat_post_message(
+        self,
+        channel: str,
+        text: str,
+        thread_ts: Optional[str] = None,
+        images: list[ossans_navi_types.Image] = [],
+    ) -> None:
+        files: list[dict[str, Any]] = [
+            {
+                "filename": f"image{image.extension}",
+                "content": image.data,
+            }
+            for image in images
+        ]
+        if files:
+            self.bot_client.files_upload_v2(
+                channel=channel,
+                thread_ts=thread_ts,
+                initial_comment=text,
+                file_uploads=files,
+            )
+        else:
+            self.bot_client.chat_postMessage(
+                channel=channel,
+                thread_ts=thread_ts,
+                text=text,
+            )
 
     def add_reaction(self, channel: str, ts: str, names: list[str]) -> None:
         if not isinstance(names, list) or len(names) == 0:
