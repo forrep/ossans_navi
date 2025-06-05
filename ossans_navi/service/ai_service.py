@@ -8,12 +8,13 @@ import time
 from collections import defaultdict
 from enum import Enum
 from operator import itemgetter
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, Optional, overload
 
 from google import genai
 from google.genai import types
-from openai import NOT_GIVEN, AzureOpenAI, InternalServerError, OpenAI, RateLimitError
-from openai.types.chat import ChatCompletion
+from openai import AzureOpenAI, InternalServerError, OpenAI, RateLimitError
+from openai.types.chat import (ChatCompletion, ChatCompletionContentPartParam, ChatCompletionMessageParam, ChatCompletionMessageToolCallParam,
+                               ChatCompletionToolParam, completion_create_params)
 
 from ossans_navi import config
 from ossans_navi.common.logger import shrink_message
@@ -177,93 +178,98 @@ class AiPromptMessage:
     content: AiPromptContent
     name: Optional[str] = dataclasses.field(default=None)
 
-    def to_openai_prompt(self, function_id: AiPromptFunctionId, rag_info: Optional[AiPromptRagInfo] = None) -> list[dict[str, Any]]:
-        return [
-            {
-                "role": self.role.value,
-                "content": [
+    def to_openai_prompt(self, function_id: AiPromptFunctionId, rag_info: Optional[AiPromptRagInfo] = None) -> list[ChatCompletionMessageParam]:
+        messages: list[ChatCompletionMessageParam] = []
+        message: Optional[ChatCompletionMessageParam] = None
+        if self.role == AiPromptRole.ASSISTANT:
+            message = {
+                "role": AiPromptRole.ASSISTANT.value,
+                "content": self.content.text,
+            }
+        elif self.role == AiPromptRole.USER:
+            # USERロールの場合のみ画像を入力する
+            # OpenAI は ASSISTANTロールでの画像を入力に未対応、誤って入力するとエラーとなる
+            # ASSISTANT の応答文に画像リンクが含まれると Slack 上ではメッセージに画像が添付される、よって ASSISTANTロールのメッセージにも画像が付くケースはある
+            message_contents: list[ChatCompletionContentPartParam] = []
+            message_contents.append(
+                {
+                    "type": "text",
+                    "text": self.content.text,
+                }
+            )
+            for image in self.content.images:
+                message_contents.append(
                     {
-                        "type": "text",
-                        "text": self.content.text,
-                    },
-                    *(
-                        [
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": image.image_uri
-                                }
-                            }
-                            for image in self.content.images
-                        ]
-                        # ASSISTANTロールで画像を入力すると OpenAI では API エラーになるため入力しない
-                        # 実際には ASSISTANT が応答文中に画像へのリンクを含めると Slack が画像を展開するため ASSISTANTロールでも画像付きメッセージが存在する
-                        if not self.role == AiPromptRole.ASSISTANT else []
-                    )
-                ],
-                **({"name": self.name} if self.name else {})
-            },
-            *(
-                [
+                        "type": "image_url",
+                        "image_url": {
+                            "url": image.image_uri
+                        }
+                    }
+                )
+            message = {
+                "role": AiPromptRole.USER.value,
+                "content": message_contents,
+            }
+        else:
+            raise ValueError("Unknown AiPromptRole: " + str(self.role))
+        if self.name:
+            message["name"] = self.name
+        messages.append(message)
+
+        if self.content.is_dict or rag_info:
+            tool_calls: list[ChatCompletionMessageToolCallParam] = []
+            if self.content.is_dict:
+                tool_calls.append(
                     {
-                        "role": AiPromptRole.ASSISTANT.value,
-                        "content": None,
-                        "tool_calls": [
-                            *(
-                                [
-                                    {
-                                        "id": f"call_{function_id.call_id}",
-                                        "type": "function",
-                                        "function": {
-                                            "name": "get_last_message_detail",
-                                            "arguments": "",
-                                        },
-                                    }
-                                ] if self.content.is_dict else []
-                            ),
-                            *(
-                                [
-                                    {
-                                        "id": f"call_{function_id.call_id}",
-                                        "type": "function",
-                                        "function": {
-                                            "name": "get_related_information",
-                                            "arguments": json.dumps(rag_info.words, ensure_ascii=False),
-                                        },
-                                    }
-                                ] if rag_info else []
-                            ),
-                        ],
-                    },
-                ] if self.content.is_dict or rag_info else []
-            ),
-            *(
-                [
+                        "id": f"call_{function_id.call_id}",
+                        "type": "function",
+                        "function": {
+                            "name": "get_last_message_detail",
+                            "arguments": "",
+                        },
+                    }
+                )
+            if rag_info:
+                tool_calls.append(
                     {
-                        "tool_call_id": f"call_{function_id.response_id}",
-                        "role": "tool",
-                        "name": "get_last_message_detail",
-                        "content": json.dumps(self.content.detail, ensure_ascii=False, separators=(',', ':')),
-                    },
-                ] if self.content.is_dict else []
-            ),
-            *(
-                [
-                    {
-                        "tool_call_id": f"call_{function_id.response_id}",
-                        "role": "tool",
-                        "name": "get_related_information",
-                        "content": json.dumps(
-                            rag_info.contents if len(rag_info.contents) > 0 else {
-                                "status": "No valid information was found in the get_related_information results, please respond in general terms."
-                            },
-                            ensure_ascii=False,
-                            separators=(',', ':')
-                        ),
-                    },
-                ] if rag_info else []
-            ),
-        ]
+                        "id": f"call_{function_id.call_id}",
+                        "type": "function",
+                        "function": {
+                            "name": "get_related_information",
+                            "arguments": json.dumps(rag_info.words, ensure_ascii=False),
+                        },
+                    }
+                )
+            messages.append(
+                {
+                    "role": AiPromptRole.ASSISTANT.value,
+                    "content": None,
+                    "tool_calls": tool_calls,
+                }
+            )
+        if self.content.is_dict:
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": f"call_{function_id.response_id}",
+                    "content": json.dumps(self.content.detail, ensure_ascii=False, separators=(',', ':')),
+                },
+            )
+        if rag_info:
+            messages.append(
+                {
+                    "tool_call_id": f"call_{function_id.response_id}",
+                    "role": "tool",
+                    "content": json.dumps(
+                        rag_info.contents if len(rag_info.contents) > 0 else {
+                            "status": "No valid information was found in the get_related_information results, please respond in general terms."
+                        },
+                        ensure_ascii=False,
+                        separators=(',', ':')
+                    ),
+                },
+            )
+        return messages
 
     def to_gemini_content(self, rag_info: Optional[AiPromptRagInfo] = None) -> list[types.ContentDict]:
         contents: list[types.ContentDict] = []
@@ -372,7 +378,33 @@ class AiPrompt:
     def is_json(self) -> bool:
         return self.schema is not None
 
-    def to_openai_prompt(self) -> list[dict[str, str | list[dict[str, Any]]]]:
+    @overload
+    @staticmethod
+    def _convert_type_to_lower(values: dict[str, Any]) -> dict[str, Any]:
+        ...
+
+    @overload
+    @staticmethod
+    def _convert_type_to_lower(values: list[Any]) -> list[Any]:
+        ...
+
+    @staticmethod
+    def _convert_type_to_lower(values: dict[str, Any] | list[Any]) -> dict[str, Any] | list[Any]:
+        if isinstance(values, list):
+            return [
+                AiPrompt._convert_type_to_lower(v) if isinstance(v, (dict, list)) else v
+                for v in values]
+        if isinstance(values, dict):
+            return {
+                k: (
+                    AiPrompt._convert_type_to_lower(v) if isinstance(v, (dict, list)) else (
+                        v.lower() if k == "type" and isinstance(v, str) else v
+                    )
+                )
+                for (k, v) in values.items()
+            }
+
+    def to_openai_messages(self) -> Iterable[ChatCompletionMessageParam]:
         function_id = AiPromptFunctionId()
         return [
             {
@@ -385,6 +417,50 @@ class AiPrompt:
             *(
                 list(itertools.chain.from_iterable([message.to_openai_prompt(function_id, self.rag_info) for message in self.messages[-1:]]))
             ),
+        ]
+
+    def to_openai_response_format(self) -> completion_create_params.ResponseFormat:
+        if self.is_json and self.schema:
+            return {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "ossans_navi_response",
+                    "description": "ossans_navi_response schema",
+                    "schema": AiPrompt._convert_type_to_lower(
+                        self.schema.model_dump(exclude_unset=True, exclude_defaults=True)
+                    ),
+                },
+            }
+        else:
+            return {
+                "type": "text",
+            }
+
+    def to_openai_tools(self) -> Iterable[ChatCompletionToolParam]:
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_last_message_detail",
+                    "description": "Get detailed information about the message.",
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_related_information",
+                    "description": "Get Related information found in this slack group.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "terms": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            }
+                        }
+                    }
+                },
+            },
         ]
 
     def to_gemini_config(self) -> types.GenerateContentConfigDict:
@@ -571,10 +647,10 @@ class AiService:
             prompt: AiPrompt,
     ) -> AiResponse:
         if logger.isEnabledFor(logging.DEBUG):
-            logger.debug(f"_chat_completions model={model.name}, prompt={json.dumps(prompt.to_gemini_rest(), ensure_ascii=False)}")
+            logger.debug(f"chat_completions({model.name}) body={json.dumps(prompt.to_gemini_rest(), ensure_ascii=False)}")
         else:
             logger.info(
-                f"_chat_completions model={model.name}, prompt(shrink)={json.dumps(shrink_message(prompt.to_gemini_rest()), ensure_ascii=False)}"
+                f"chat_completions({model.name}) body(shrink)={json.dumps(shrink_message(prompt.to_gemini_rest()), ensure_ascii=False)}"
             )
         start_time = time.time()
         last_exception: Optional[Exception] = None
@@ -617,11 +693,25 @@ class AiService:
             model: AiModel,
             prompt: AiPrompt,
     ) -> AiResponse:
-        messages: Iterable = prompt.to_openai_prompt()
+        messages: Iterable = prompt.to_openai_messages()
+        response_format = prompt.to_openai_response_format()
+        tools = prompt.to_openai_tools()
         if logger.isEnabledFor(logging.DEBUG):
-            logger.debug(f"_chat_completions model={model.name}, messages={json.dumps(messages, ensure_ascii=False)}")
+            logger.debug(
+                f"chat_completions({model.name}) body={
+                    json.dumps(
+                        {
+                            "response_format": response_format,
+                            "tools": tools,
+                            "tool_choice": "none",
+                            "messages": messages,
+                        },
+                        ensure_ascii=False
+                    )
+                }"
+            )
         else:
-            logger.info(f"_chat_completions model={model.name}, messages(shrink)={json.dumps(shrink_message(messages), ensure_ascii=False)}")
+            logger.info(f"chat_completions({model.name}) body(shrink)={json.dumps(shrink_message(messages), ensure_ascii=False)}")
         start_time = time.time()
         last_exception: Optional[Exception] = None
         response = None
@@ -629,35 +719,11 @@ class AiService:
             try:
                 response = self.client_openai.chat.completions.create(
                     model=model.name,
-                    response_format=({"type": "json_object"} if prompt.is_json else NOT_GIVEN),
+                    response_format=response_format,
                     messages=messages,
-                    n=prompt.choices,
+                    n=1,  # 2025-06-05現在、OpenAI の API で n >= 2 を指定すると出力結果が途中で途切れる現象が発生するため n: 1 とする
                     timeout=300,
-                    tools=[
-                        {
-                            "type": "function",
-                            "function": {
-                                "name": "get_last_message_detail",
-                                "description": "Get detailed information about the message.",
-                            },
-                        },
-                        {
-                            "type": "function",
-                            "function": {
-                                "name": "get_related_information",
-                                "description": "Get Related information found in this slack group.",
-                                "parameters": {
-                                    "type": "object",
-                                    "properties": {
-                                        "terms": {
-                                            "type": "array",
-                                            "items": {"type": "string"},
-                                        }
-                                    }
-                                }
-                            },
-                        },
-                    ],
+                    tools=tools,
                     tool_choice="none"
                 )
                 break

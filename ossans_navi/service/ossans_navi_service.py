@@ -280,7 +280,7 @@ class OssansNaviService:
             len(thread_messages) >= 3
             and (
                 self.models.low_cost.tokenizer.messages_tokens(
-                    self.get_ai_prompt("", thread_messages).to_openai_prompt()
+                    self.get_ai_prompt("", thread_messages).to_openai_messages()
                 ) > config.MAX_THREAD_TOKENS
             )
         ):
@@ -492,7 +492,7 @@ class OssansNaviService:
             self.get_ai_prompt(
                 self.ai_prompt_service.image_description_prompt(),
                 thread_messages,
-            ).to_openai_prompt()
+            ).to_openai_messages()
         )
         for i in range(len(thread_messages)):
             if (
@@ -659,7 +659,7 @@ class OssansNaviService:
                 self.ai_prompt_service.refine_slack_searches_prompt(),
                 thread_messages,
                 rag_info=AiPromptRagInfo([], [v.words for v in self.slack_searches]),
-            ).to_openai_prompt()
+            ).to_openai_messages()
         )
         logger.info(f"{base_messages_token=}")
         # メンションされた場合か、OssansNavi のメッセージの次のメッセージの場合はちゃんと調べる、それ以外は手を抜いて調べる
@@ -812,7 +812,7 @@ class OssansNaviService:
                 thread_messages,
                 limit=10000,
                 limit_last_message=30000,
-            ).to_openai_prompt()
+            ).to_openai_messages()
         )
         # 低価格LLM が精査してくれた結果を元にトークン数が収まる範囲で入力データとする
         check_dup_files_dict: dict[str, int] = {}
