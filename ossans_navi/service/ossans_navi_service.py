@@ -15,8 +15,8 @@ from PIL import Image, ImageFile
 from ossans_navi import config
 from ossans_navi.common.cache import LRUCache
 from ossans_navi.service.ai_prompt_service import AiPromptService
-from ossans_navi.service.ai_service import (AiModels, AiPrompt, AiPromptContent, AiPromptImage, AiPromptMessage, AiPromptRole, AiService,
-                                            QualityCheckResponse, AiPromptRagInfo)
+from ossans_navi.service.ai_service import (AiModels, AiPrompt, AiPromptContent, AiPromptImage, AiPromptMessage, AiPromptRagInfo, AiPromptRole,
+                                            AiService, QualityCheckResponse)
 from ossans_navi.service.slack_service import SlackService
 from ossans_navi.type import ossans_navi_types
 from ossans_navi.type.slack_type import SlackFile, SlackMessage, SlackMessageEvent, SlackMessageLite, SlackSearches, SlackSearchTerm
@@ -294,7 +294,7 @@ class OssansNaviService:
                 thread_messages[0].files = []
                 thread_messages[0].attachments = []
                 continue
-            # 古い順に1メッセージ削除する [1, 2, 3, 4, 5] → [1, 3, 4, 5]
+            # 親メッセージを除いた一番古いメッセージを1つ削除する [1, 2, 3, 4, 5] → [1, 3, 4, 5]
             thread_messages = [thread_messages[0], *thread_messages[2:]]
         logger.info(
             "conversations_replies(omit)="

@@ -395,6 +395,7 @@ purpose: {{ event.channel.purpose }}
 - "The message you intend to send", which I will quote later, is the message you intend to respond to.
 - Verify that the content is worth sending before sending it to the user.
 - Please output your response in JSON format according to the "Output format" described below.
+- Please think in {{ language }} and respond in {{ language }}.
 
 # Output format
 {
@@ -407,7 +408,7 @@ purpose: {{ event.channel.purpose }}
 - If the last message does not contain an intention, null is output.
 
 # Rules for "response_quality"
-- Outputs true if "user_intent" can not be resolved with the response message and the response message is a useful message.
+- Outputs true if "user_intent" can be resolved with the response message and the response message is a useful message.
 - Outputs false if other than above.
 
 # The message you intend to send

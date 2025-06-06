@@ -1,6 +1,6 @@
 import math
 import threading
-from typing import Any, Protocol
+from typing import Any, Iterable, Mapping, Protocol
 
 import tiktoken
 
@@ -15,7 +15,7 @@ class AiTokenize(Protocol):
         ...
 
     @staticmethod
-    def messages_tokens(messages: list[dict[str, Any]]) -> int:
+    def messages_tokens(messages: Iterable[Mapping[str, Any]]) -> int:
         ...
 
 
@@ -35,7 +35,7 @@ class AiTokenizeGpt4o:
             return len(tiktoken.encoding_for_model("gpt-4o").encode(content))
 
     @staticmethod
-    def messages_tokens(messages: list[dict[str, Any]]) -> int:
+    def messages_tokens(messages: Iterable[Mapping[str, Any]]) -> int:
         enc = tiktoken.encoding_for_model("gpt-4o")
         with AiTokenizeGpt4o._LOCK:
             summed = 0

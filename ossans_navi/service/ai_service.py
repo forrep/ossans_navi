@@ -178,7 +178,7 @@ class AiPromptMessage:
     content: AiPromptContent
     name: Optional[str] = dataclasses.field(default=None)
 
-    def to_openai_prompt(self, function_id: AiPromptFunctionId, rag_info: Optional[AiPromptRagInfo] = None) -> list[ChatCompletionMessageParam]:
+    def to_openai_messages(self, function_id: AiPromptFunctionId, rag_info: Optional[AiPromptRagInfo] = None) -> list[ChatCompletionMessageParam]:
         messages: list[ChatCompletionMessageParam] = []
         message: Optional[ChatCompletionMessageParam] = None
         if self.role == AiPromptRole.ASSISTANT:
@@ -412,10 +412,10 @@ class AiPrompt:
                 "content": self.system,
             },
             *(
-                list(itertools.chain.from_iterable([message.to_openai_prompt(function_id) for message in self.messages[:-1]]))
+                list(itertools.chain.from_iterable([message.to_openai_messages(function_id) for message in self.messages[:-1]]))
             ),
             *(
-                list(itertools.chain.from_iterable([message.to_openai_prompt(function_id, self.rag_info) for message in self.messages[-1:]]))
+                list(itertools.chain.from_iterable([message.to_openai_messages(function_id, self.rag_info) for message in self.messages[-1:]]))
             ),
         ]
 

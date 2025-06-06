@@ -212,10 +212,12 @@ def do_ossans_navi_response(say, event: SlackMessageEvent, models: AiModels) -> 
 
     # メッセージの仕分けを行う、質問かどうか判別する
     event.classification = ossans_navi_service.classify(thread_messages)
-    logger.info(
-        f"{event.user_intent=}, {event.user_intentions_type=}, {event.who_to_talk_to=}, "
-        + f"{event.user_emotions=}, {event.required_knowledge_types=}, {event.slack_emoji_names=}"
-    )
+    logger.info(f"classify intent:          {event.user_intent}")
+    logger.info(f"classify intent_type:     {event.user_intentions_type}")
+    logger.info(f"classify who_to_talk_to:  {event.who_to_talk_to}")
+    logger.info(f"classify emotions:        {event.user_emotions}")
+    logger.info(f"classify knowledge_types: {event.required_knowledge_types}")
+    logger.info(f"classify slack_emojis:    {event.slack_emoji_names}")
 
     if not event.is_need_response() and not event.is_mention:
         # 質問・相談ではなく、メンションされていない場合はここで終了
