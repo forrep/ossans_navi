@@ -14,6 +14,7 @@ from ossans_navi.service.slack_service import EventGuard, SlackService
 from ossans_navi.type.slack_type import SlackMessageEvent
 
 MAIN_EXECUTOR: Optional[ThreadPoolExecutor] = None
+REFINE_EXECUTOR: Optional[ThreadPoolExecutor] = None
 MAIN_EXECUTOR_WORKERS: Final[int] = 2
 EVENT_GUARD = EventGuard()
 
@@ -25,8 +26,8 @@ logger = logging.getLogger(__name__)
 
 @slack_service.app.event("message")
 def handle_message_events(say, event: dict[str, dict]):
-    if not MAIN_EXECUTOR:
-        logger.error("MAIN_EXECUTOR is not initialized.")
+    if not MAIN_EXECUTOR or not REFINE_EXECUTOR:
+        logger.error("MAIN_EXECUTOR or REFINE_EXECUTOR is not initialized.")
         return
     logger.info("event=" + json.dumps(event, ensure_ascii=False))
     message_event = SlackMessageEvent(event)
@@ -69,11 +70,11 @@ def handle_message_events(say, event: dict[str, dict]):
         else:
             logger.info("This is not message_post or message_changed event, finished")
             return
-        future = MAIN_EXECUTOR.submit(do_ossans_navi_response_safe, say, message_event)
+        future = MAIN_EXECUTOR.submit(do_ossans_navi_response_safe, say, message_event, REFINE_EXECUTOR)
         future.add_done_callback(future_callback)
 
 
-def do_ossans_navi_response_safe(say, event: SlackMessageEvent):
+def do_ossans_navi_response_safe(say, event: SlackMessageEvent, refine_executor: ThreadPoolExecutor) -> None:
     # スレッド名を Main_0_{event.id()} の形式にする。すでにその形式なら event.id() 部分だけ置換
     thread = current_thread()
     (thread_name, thread_index, _) = f"{thread.name}_0".split("_", 2)
@@ -108,7 +109,7 @@ def do_ossans_navi_response_safe(say, event: SlackMessageEvent):
             + f"is_mention={event.is_mention}, is_dm={event.is_dm()}, is_talk_to_other={event.is_talk_to_other}"
         )
 
-        for _ in do_ossans_navi_response(event, models):
+        for _ in do_ossans_navi_response(event, models, refine_executor):
             # yield のタイミングで処理が戻されるごとにイベントがキャンセルされていないか確認して、キャンセルされていれば終了する
             if EVENT_GUARD.is_canceled(event):
                 logger.info(f"Event canceled: {event.id()}({event.channel_id},{event.thread_ts},{event.ts})")
@@ -130,8 +131,14 @@ def do_ossans_navi_response_safe(say, event: SlackMessageEvent):
             logger.info(f"    tokens_out = {model.tokens_out}")
 
 
-def do_ossans_navi_response(event: SlackMessageEvent, models: AiModels) -> Generator[None, None, None]:
-    ossans_navi_service = OssansNaviService(ai_service=ai_service, slack_service=slack_service, models=models, event=event)
+def do_ossans_navi_response(event: SlackMessageEvent, models: AiModels, refine_executor: ThreadPoolExecutor) -> Generator[None, None, None]:
+    ossans_navi_service = OssansNaviService(
+        ai_service=ai_service,
+        slack_service=slack_service,
+        models=models,
+        event=event,
+        refine_executor=refine_executor,
+    )
 
     # yield で呼び出し元に戻すとイベントのキャンセルチェックをして、キャンセルされていれば終了する
     yield
@@ -220,12 +227,12 @@ def do_ossans_navi_response(event: SlackMessageEvent, models: AiModels) -> Gener
 
     # メッセージの仕分けを行う、質問かどうか判別する
     event.classification = ossans_navi_service.classify(thread_messages)
-    logger.info(f"classify intent          :{event.user_intent}")
-    logger.info(f"classify intent_type     :{event.user_intentions_type}")
-    logger.info(f"classify who_to_talk_to  :{event.who_to_talk_to}")
-    logger.info(f"classify emotions        :{event.user_emotions}")
-    logger.info(f"classify knowledge_types :{event.required_knowledge_types}")
-    logger.info(f"classify slack_emojis    :{event.slack_emoji_names}")
+    logger.info(f"classify intent          {event.user_intent}")
+    logger.info(f"classify intent_type     {event.user_intentions_type}")
+    logger.info(f"classify who_to_talk_to  {event.who_to_talk_to}")
+    logger.info(f"classify emotions        {event.user_emotions}")
+    logger.info(f"classify knowledge_types {event.required_knowledge_types}")
+    logger.info(f"classify slack_emojis    {event.slack_emoji_names}")
 
     if not event.is_need_response() and not event.is_mention:
         # 質問・相談ではなく、メンションされていない場合はここで終了
@@ -345,8 +352,12 @@ if __name__ == "__main__":
     if "--unsafe" in args:
         config.SAFE_MODE = False
 
-    with ThreadPoolExecutor(max_workers=MAIN_EXECUTOR_WORKERS, thread_name_prefix="Main") as main_executor:
+    with (
+        ThreadPoolExecutor(max_workers=MAIN_EXECUTOR_WORKERS, thread_name_prefix="Main") as main_executor,
+        ThreadPoolExecutor(max_workers=config.REFINE_SLACK_SEARCHES_THREADS, thread_name_prefix="Refine") as refine_executor,
+    ):
         MAIN_EXECUTOR = main_executor
+        REFINE_EXECUTOR = refine_executor
         logger.info(
             f"Strat in {"development" if config.DEVELOPMENT_MODE else "production"},"
             + f" {"silent" if config.SILENT_MODE else "no-silent"}, {"safe" if config.SAFE_MODE else "unsafe"} mode"

@@ -1,11 +1,12 @@
+import concurrent.futures
 import datetime
 import itertools
 import json
 import logging
 import re
 from collections.abc import Generator
-from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
+from threading import current_thread
 from typing import Any, Optional, overload
 
 import html2text
@@ -27,12 +28,19 @@ logger = logging.getLogger(__name__)
 class OssansNaviService:
     image_cache = LRUCache[str, list[dict[str, str]]](capacity=500, expire=1 * 60 * 60 * 24)
 
-    def __init__(self, ai_service: AiService, slack_service: SlackService, models: AiModels, event: SlackMessageEvent) -> None:
+    def __init__(
+        self, ai_service: AiService,
+        slack_service: SlackService,
+        models: AiModels,
+        event: SlackMessageEvent,
+        refine_executor: concurrent.futures.ThreadPoolExecutor,
+    ) -> None:
         self.ai_service = ai_service
         self.slack_service = slack_service
         self.ai_prompt_service = AiPromptService(event, self.slack_service.get_assistant_names())
         self.models = models
         self.event = event
+        self.refine_executor = refine_executor
         self.config = self.get_config()
         self.slack_searches = SlackSearches()
         self.slack_file_permalinks: dict[str, SlackFile] = {}
@@ -670,11 +678,18 @@ class OssansNaviService:
             refine_slack_searches_count = config.REFINE_SLACK_SEARCHES_COUNT_NO_MENTION
             refine_slack_searches_depth = config.REFINE_SLACK_SEARCHES_DEPTH_NO_MENTION
         for i in range(refine_slack_searches_depth):
-            with ThreadPoolExecutor(max_workers=config.REFINE_SLACK_SEARCHES_THREADS, thread_name_prefix=f"Refine_{self.event.id()}") as executor:
-                # 最後の refine かどうか？最後以外は新たな検索ワードを追加する処理などがある
-                is_last_refine = i + 1 == 2
-                for _ in range(refine_slack_searches_count):
-                    executor.submit(self._refine_slack_searches_safe, thread_messages, base_messages_token, is_last_refine)
+            # 最後の refine かどうか？最後以外は新たな検索ワードを追加する処理などがある
+            is_last_refine = i + 1 == refine_slack_searches_depth
+            (_, not_done) = concurrent.futures.wait(
+                [
+                    self.refine_executor.submit(self._refine_slack_searches_safe, thread_messages, base_messages_token, is_last_refine)
+                    for _ in range(refine_slack_searches_count)
+                ]
+            )
+            if not_done:
+                # 何らかの理由でスレッドが終了してしまった場合は処理を終了する
+                logger.error(f"refine_slack_searches failed: {not_done}")
+                raise RuntimeError("refine_slack_searches failed")
             yield
 
     def _refine_slack_searches_safe(
@@ -683,6 +698,10 @@ class OssansNaviService:
         base_messages_token: int,
         is_last_refine: bool
     ) -> None:
+        # スレッド名を Main_0_{event.id()} の形式にする。すでにその形式なら event.id() 部分だけ置換
+        thread = current_thread()
+        (thread_name, thread_index, _) = f"{thread.name}_0".split("_", 2)
+        thread.name = f"{thread_name}_{thread_index}_{self.event.id()}"
         try:
             self._refine_slack_searches(thread_messages, base_messages_token, is_last_refine)
         except Exception as e:
