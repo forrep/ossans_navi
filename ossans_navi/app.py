@@ -4,8 +4,8 @@ import logging
 import signal
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from threading import Event
-from typing import Final, Generator
+from threading import Event, current_thread
+from typing import Final, Generator, Optional
 
 from ossans_navi import config
 from ossans_navi.service.ai_service import AiModels, AiService
@@ -13,8 +13,8 @@ from ossans_navi.service.ossans_navi_service import OssansNaviService
 from ossans_navi.service.slack_service import EventGuard, SlackService
 from ossans_navi.type.slack_type import SlackMessageEvent
 
-_EXECUTOR: ThreadPoolExecutor
-_EXECUTOR_WORKERS: Final[int] = 2
+MAIN_EXECUTOR: Optional[ThreadPoolExecutor] = None
+MAIN_EXECUTOR_WORKERS: Final[int] = 2
 EVENT_GUARD = EventGuard()
 
 slack_service = SlackService()
@@ -25,6 +25,9 @@ logger = logging.getLogger(__name__)
 
 @slack_service.app.event("message")
 def handle_message_events(say, event: dict[str, dict]):
+    if not MAIN_EXECUTOR:
+        logger.error("MAIN_EXECUTOR is not initialized.")
+        return
     logger.info("event=" + json.dumps(event, ensure_ascii=False))
     message_event = SlackMessageEvent(event)
 
@@ -66,11 +69,16 @@ def handle_message_events(say, event: dict[str, dict]):
         else:
             logger.info("This is not message_post or message_changed event, finished")
             return
-        future = _EXECUTOR.submit(do_ossans_navi_response_safe, say, message_event)
+        future = MAIN_EXECUTOR.submit(do_ossans_navi_response_safe, say, message_event)
         future.add_done_callback(future_callback)
 
 
 def do_ossans_navi_response_safe(say, event: SlackMessageEvent):
+    # スレッド名を Main_0_{event.id()} の形式にする。すでにその形式なら event.id() 部分だけ置換
+    thread = current_thread()
+    (thread_name, thread_index, _) = f"{thread.name}_0".split("_", 2)
+    thread.name = f"{thread_name}_{thread_index}_{event.id()}"
+
     with EVENT_GUARD:
         if EVENT_GUARD.is_canceled(event):
             logger.info(f"Event canceled: {event.id()} ({event.channel_id},{event.thread_ts},{event.ts})")
@@ -100,7 +108,7 @@ def do_ossans_navi_response_safe(say, event: SlackMessageEvent):
             + f"is_mention={event.is_mention}, is_dm={event.is_dm()}, is_talk_to_other={event.is_talk_to_other}"
         )
 
-        for _ in do_ossans_navi_response(say, event, models):
+        for _ in do_ossans_navi_response(event, models):
             # yield のタイミングで処理が戻されるごとにイベントがキャンセルされていないか確認して、キャンセルされていれば終了する
             if EVENT_GUARD.is_canceled(event):
                 logger.info(f"Event canceled: {event.id()}({event.channel_id},{event.thread_ts},{event.ts})")
@@ -122,7 +130,7 @@ def do_ossans_navi_response_safe(say, event: SlackMessageEvent):
             logger.info(f"    tokens_out = {model.tokens_out}")
 
 
-def do_ossans_navi_response(say, event: SlackMessageEvent, models: AiModels) -> Generator[None, None, None]:
+def do_ossans_navi_response(event: SlackMessageEvent, models: AiModels) -> Generator[None, None, None]:
     ossans_navi_service = OssansNaviService(ai_service=ai_service, slack_service=slack_service, models=models, event=event)
 
     # yield で呼び出し元に戻すとイベントのキャンセルチェックをして、キャンセルされていれば終了する
@@ -212,12 +220,12 @@ def do_ossans_navi_response(say, event: SlackMessageEvent, models: AiModels) -> 
 
     # メッセージの仕分けを行う、質問かどうか判別する
     event.classification = ossans_navi_service.classify(thread_messages)
-    logger.info(f"classify intent:          {event.user_intent}")
-    logger.info(f"classify intent_type:     {event.user_intentions_type}")
-    logger.info(f"classify who_to_talk_to:  {event.who_to_talk_to}")
-    logger.info(f"classify emotions:        {event.user_emotions}")
-    logger.info(f"classify knowledge_types: {event.required_knowledge_types}")
-    logger.info(f"classify slack_emojis:    {event.slack_emoji_names}")
+    logger.info(f"classify intent          :{event.user_intent}")
+    logger.info(f"classify intent_type     :{event.user_intentions_type}")
+    logger.info(f"classify who_to_talk_to  :{event.who_to_talk_to}")
+    logger.info(f"classify emotions        :{event.user_emotions}")
+    logger.info(f"classify knowledge_types :{event.required_knowledge_types}")
+    logger.info(f"classify slack_emojis    :{event.slack_emoji_names}")
 
     if not event.is_need_response() and not event.is_mention:
         # 質問・相談ではなく、メンションされていない場合はここで終了
@@ -337,8 +345,8 @@ if __name__ == "__main__":
     if "--unsafe" in args:
         config.SAFE_MODE = False
 
-    with ThreadPoolExecutor(max_workers=_EXECUTOR_WORKERS, thread_name_prefix="Worker") as executor:
-        _EXECUTOR = executor
+    with ThreadPoolExecutor(max_workers=MAIN_EXECUTOR_WORKERS, thread_name_prefix="Main") as main_executor:
+        MAIN_EXECUTOR = main_executor
         logger.info(
             f"Strat in {"development" if config.DEVELOPMENT_MODE else "production"},"
             + f" {"silent" if config.SILENT_MODE else "no-silent"}, {"safe" if config.SAFE_MODE else "unsafe"} mode"

@@ -670,7 +670,7 @@ class OssansNaviService:
             refine_slack_searches_count = config.REFINE_SLACK_SEARCHES_COUNT_NO_MENTION
             refine_slack_searches_depth = config.REFINE_SLACK_SEARCHES_DEPTH_NO_MENTION
         for i in range(refine_slack_searches_depth):
-            with ThreadPoolExecutor(max_workers=config.REFINE_SLACK_SEARCHES_THREADS, thread_name_prefix="RefineWorker") as executor:
+            with ThreadPoolExecutor(max_workers=config.REFINE_SLACK_SEARCHES_THREADS, thread_name_prefix=f"Refine_{self.event.id()}") as executor:
                 # 最後の refine かどうか？最後以外は新たな検索ワードを追加する処理などがある
                 is_last_refine = i + 1 == 2
                 for _ in range(refine_slack_searches_count):
