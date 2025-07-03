@@ -4,14 +4,14 @@ import os
 import time
 from io import IOBase
 from threading import RLock
-from typing import Callable, Dict, Optional, Sequence, TypeVar, Union, Any, List
+from typing import Any, Callable, Dict, List, Optional, Sequence, TypeVar, Union
 
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 from slack_sdk.models.attachments import Attachment
 from slack_sdk.models.blocks import Block
 from slack_sdk.models.metadata import Metadata
-from slack_sdk.web.base_client import SlackResponse
+from slack_sdk.web.slack_response import SlackResponse
 
 F = TypeVar('F', bound=Callable[..., SlackResponse])
 
@@ -75,10 +75,11 @@ def cursor_pager(response: SlackResponse, kwargs: dict) -> bool:
 
 def concat_response(name: str) -> Callable[[SlackResponse, SlackResponse], SlackResponse]:
     def _concat_response(response1: SlackResponse, response2: SlackResponse) -> SlackResponse:
-        if name not in response1 or name not in response2:
-            return response1
-        concat_list: list = response1[name]
-        concat_list.extend(response2[name])
+        if (
+            isinstance((v1 := response1.get(name)), list)
+            and isinstance((v2 := response2.get(name)), list)
+        ):
+            v1.extend(v2)
         return response1
     return _concat_response
 

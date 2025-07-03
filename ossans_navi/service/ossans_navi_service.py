@@ -326,8 +326,8 @@ class OssansNaviService:
             )
         )
 
-    def store_config(self, config: ossans_navi_types.OssansNaviConfig) -> None:
-        self.slack_service.store_config_dict(config.to_dict())
+    def store_config(self, config: ossans_navi_types.OssansNaviConfig, clear_cache: bool = True) -> None:
+        self.slack_service.store_config_dict(config.to_dict(), clear_cache)
 
     def get_config(self) -> ossans_navi_types.OssansNaviConfig:
         config_dict = self.slack_service.get_config_dict()
@@ -340,7 +340,20 @@ class OssansNaviService:
         special_command を実行した場合は True を返す、special_command に該当しなければ False を返すので、呼び出し元は通常のメッセージとして扱う
         呼び出し元は False が返った場合は元の処理を継続する、True の場合は special_command を実行しているので処理を打ち切る
         """
-        if (
+        if self.event.channel_id == self.slack_service.slackbot_channel_id:
+            # Slackbot のチャネルにメッセージが投稿された場合は special_command を実行しない（return False）
+            # config用メッセージは Slackbot チャネルに保存している。このチャネルにメッセージが来ると config用メッセージが 1メッセージ分だけ下に流される
+            # そのため一番上に持ってくる目的で再度保存（送信）する
+            # ただし、以下の場合には二重で設定が保存されるが、支障は無いので許容する
+            # 1. Slackbot チャネルへ何らかのメッセージが流れてきて OssansNavi の処理スタート（例: あなたは ** さんにより ** から外されました）
+            # 2. get_config() でキャッシュミスして、Slackbot チャネルの最新メッセージ一覧を conversations.history API で取得する
+            # 3. config用メッセージが 2メッセージ目以降に保存されている状況※ なので get_config() 内で保存処理がされる
+            #    ※Slackbot チャネルに何らかのメッセージが流れてきてキックされたイベントなので必ず2メッセージ目以降になっている
+            # 4. special_command() で Slackbot チャネルへの投稿に反応して設定を保存する（ここで二重の保存処理が実行される）
+            #    ※get_config() でキャッシュヒットした場合は再保存されないので、当処理での保存処理は必要
+            self.store_config(self.config, False)
+            return False
+        elif (
             match := re.match(
                 r'config\s+(trusted_bots|allow_responds|admin_users|viewable_private_channels)\s+(show|add|remove)(?:\s+(.+))?',
                 self.event.text
@@ -397,7 +410,7 @@ class OssansNaviService:
                             text += f"\nremoved: <@{target_user.user_id}>"
                             logger.info(f"{category} removed: {target_user.name}({target_user.user_id})")
                         self.config.trusted_bots = list(now_users.keys())
-                        self.slack_service.store_config_dict(self.config.to_dict())
+                        self.store_config(self.config)
                 text += ("\n• " if len(now_users) > 0 else "\nempty")
                 text += "\n• ".join([f"<@{bot.user_id}>" for bot in now_users.values()])
                 self.slack_service.chat_post_message(channel=self.event.channel_id, thread_ts=self.event.thread_ts, text=text)
@@ -423,7 +436,7 @@ class OssansNaviService:
                             text += f"\nremoved: <@{target_user.user_id}>"
                             logger.info(f"{category} removed: {target_user.name}({target_user.user_id})")
                         self.config.allow_responds = list(now_users.keys())
-                        self.slack_service.store_config_dict(self.config.to_dict())
+                        self.store_config(self.config)
                 text += ("\n• " if len(now_users) > 0 else "\nempty")
                 text += "\n• ".join([f"<@{bot.user_id}>" for bot in now_users.values()])
                 self.slack_service.chat_post_message(channel=self.event.channel_id, thread_ts=self.event.thread_ts, text=text)
@@ -445,7 +458,7 @@ class OssansNaviService:
                             text += f"\nremoved: <@{target_user.user_id}>"
                             logger.info(f"{category} removed: {target_user.name}({target_user.user_id})")
                         self.config.admin_users = list(now_users.keys())
-                        self.slack_service.store_config_dict(self.config.to_dict())
+                        self.store_config(self.config)
                 text += ("\n• " if len(now_users) > 0 else "\nempty")
                 text += "\n• ".join([f"<@{user.user_id}>" for user in now_users.values()])
                 self.slack_service.chat_post_message(channel=self.event.channel_id, thread_ts=self.event.thread_ts, text=text)
@@ -471,7 +484,7 @@ class OssansNaviService:
                             text += f"\nremoved: <#{target_channel.channel_id}>"
                             logger.info(f"{category} removed: {target_channel.name}({target_channel.channel_id})")
                         self.config.viewable_private_channels = list(now_channels.keys())
-                        self.slack_service.store_config_dict(self.config.to_dict())
+                        self.store_config(self.config)
                 text += ("\n• " if len(now_channels) > 0 else "\nempty")
                 text += "\n• ".join([f"<#{channel.channel_id}>" for channel in now_channels.values()])
                 self.slack_service.chat_post_message(channel=self.event.channel_id, thread_ts=self.event.thread_ts, text=text)
@@ -891,7 +904,7 @@ class OssansNaviService:
             return
         file.is_initialized = True
         try:
-            file.content = self.slack_service.load_file(file.download_url, user_client)
+            file.content = self.slack_service.load_file(file.url_private, user_client)
             if file.is_image:
                 bytes_io = BytesIO(file.content)
                 image: Image.Image | ImageFile.ImageFile = Image.open(bytes_io)

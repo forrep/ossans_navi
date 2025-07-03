@@ -1,48 +1,48 @@
 import datetime
 
-from ossans_navi.type.slack_type import SlackMessageEvent, SlackSearchTerm
+from ossans_navi.type.slack_type import SlackMessageEvent, SlackSearchTerm, SlackConversationsRepliesResponse
 
 from . import slack_messages_sample
 
 
 def test_slack_search_term():
-    t1 = SlackSearchTerm(("ワード1", "ワード2", "ワード3",), datetime.datetime(2024, 11, 8, 0, 0, 0, 0), datetime.datetime(2024, 12, 8, 0, 0, 0, 0))
-    t1_sub1 = SlackSearchTerm(("ワード1", "ワード2",), None, None)
-    t1_sub2 = SlackSearchTerm(("ワード1", "ワード2",), datetime.datetime(2024, 11, 8, 0, 0, 0, 0), None)
-    t1_sub3 = SlackSearchTerm(("ワード1", "ワード2",), None, datetime.datetime(2024, 12, 8, 0, 0, 0, 0))
-    t1_sub4 = SlackSearchTerm(("ワード1", "ワード2",), datetime.datetime(2024, 11, 8, 0, 0, 0, 0), datetime.datetime(2024, 12, 8, 0, 0, 0, 0))
-    t1_sub5 = SlackSearchTerm(("ワード1", "ワード2",), datetime.datetime(2024, 11, 7, 0, 0, 0, 0), datetime.datetime(2024, 12, 9, 0, 0, 0, 0))
+    t1 = SlackSearchTerm(frozenset(("ワード1", "ワード2", "ワード3",)), datetime.datetime(2024, 11, 8, 0, 0, 0, 0), datetime.datetime(2024, 12, 8, 0, 0, 0, 0))
+    t1_sub1 = SlackSearchTerm(frozenset(("ワード1", "ワード2",)), None, None)
+    t1_sub2 = SlackSearchTerm(frozenset(("ワード1", "ワード2",)), datetime.datetime(2024, 11, 8, 0, 0, 0, 0), None)
+    t1_sub3 = SlackSearchTerm(frozenset(("ワード1", "ワード2",)), None, datetime.datetime(2024, 12, 8, 0, 0, 0, 0))
+    t1_sub4 = SlackSearchTerm(frozenset(("ワード1", "ワード2",)), datetime.datetime(2024, 11, 8, 0, 0, 0, 0), datetime.datetime(2024, 12, 8, 0, 0, 0, 0))
+    t1_sub5 = SlackSearchTerm(frozenset(("ワード1", "ワード2",)), datetime.datetime(2024, 11, 7, 0, 0, 0, 0), datetime.datetime(2024, 12, 9, 0, 0, 0, 0))
     assert t1_sub1.is_subset(t1)
     assert t1_sub2.is_subset(t1)
     assert t1_sub3.is_subset(t1)
     assert t1_sub4.is_subset(t1)
     assert t1_sub5.is_subset(t1)
 
-    t1_not_sub1 = SlackSearchTerm(("ワード1", "ワード2",), datetime.datetime(2024, 11, 9, 0, 0, 0, 0), None)
-    t1_not_sub2 = SlackSearchTerm(("ワード1", "ワード2",), None, datetime.datetime(2024, 12, 7, 0, 0, 0, 0))
+    t1_not_sub1 = SlackSearchTerm(frozenset(("ワード1", "ワード2",)), datetime.datetime(2024, 11, 9, 0, 0, 0, 0), None)
+    t1_not_sub2 = SlackSearchTerm(frozenset(("ワード1", "ワード2",)), None, datetime.datetime(2024, 12, 7, 0, 0, 0, 0))
     assert not t1_not_sub1.is_subset(t1)
     assert not t1_not_sub2.is_subset(t1)
 
-    o1_1 = SlackSearchTerm(("ワード1", "ワード2",), None, None)
-    o1_2 = SlackSearchTerm(("ワード1", "ワード2", "ワード3",), None, None)
+    o1_1 = SlackSearchTerm(frozenset(("ワード1", "ワード2",)), None, None)
+    o1_2 = SlackSearchTerm(frozenset(("ワード1", "ワード2", "ワード3",)), None, None)
     assert sorted([o1_1, o1_2]) == sorted([o1_2, o1_1]) == [o1_1, o1_2]
 
-    o2_1 = SlackSearchTerm(("ワード1", "ワード2",), None, None)
-    o2_2 = SlackSearchTerm(("ワード1", "ワーード2",), None, None)
+    o2_1 = SlackSearchTerm(frozenset(("ワード1", "ワード2",)), None, None)
+    o2_2 = SlackSearchTerm(frozenset(("ワード1", "ワーード2",)), None, None)
     assert sorted([o2_1, o2_2]) == sorted([o2_2, o2_1]) == [o2_1, o2_2]
 
-    o3_1 = SlackSearchTerm(("ワード1", "ワード2",), None, None)
-    o3_2 = SlackSearchTerm(("ワード1", "ワーー2",), None, None)
+    o3_1 = SlackSearchTerm(frozenset(("ワード1", "ワード2",)), None, None)
+    o3_2 = SlackSearchTerm(frozenset(("ワード1", "ワーー2",)), None, None)
     assert sorted([o3_1, o3_2]) == sorted([o3_2, o3_1]) == [o3_1, o3_2]
 
-    o4_1 = SlackSearchTerm(("ワード1", "ワード2",), None, None)
-    o4_2 = SlackSearchTerm(("ワード1", "ワード2",), datetime.datetime(2024, 11, 9, 0, 0, 0, 0), None)
-    o4_3 = SlackSearchTerm(("ワード1", "ワード2",), datetime.datetime(2024, 11, 9, 0, 0, 0, 0), datetime.datetime(2024, 12, 7, 0, 0, 0, 0))
+    o4_1 = SlackSearchTerm(frozenset(("ワード1", "ワード2",)), None, None)
+    o4_2 = SlackSearchTerm(frozenset(("ワード1", "ワード2",)), datetime.datetime(2024, 11, 9, 0, 0, 0, 0), None)
+    o4_3 = SlackSearchTerm(frozenset(("ワード1", "ワード2",)), datetime.datetime(2024, 11, 9, 0, 0, 0, 0), datetime.datetime(2024, 12, 7, 0, 0, 0, 0))
     assert sorted([o4_1, o4_2, o4_3]) == sorted([o4_3, o4_2, o4_1]) == [o4_1, o4_2, o4_3]
 
-    o5_1 = SlackSearchTerm(("ワード1", "ワード2",), datetime.datetime(2024, 11, 7, 0, 0, 0, 0), datetime.datetime(2024, 12, 5, 0, 0, 0, 0))
-    o5_2 = SlackSearchTerm(("ワード1", "ワード2",), datetime.datetime(2024, 11, 8, 0, 0, 0, 0), datetime.datetime(2024, 12, 6, 0, 0, 0, 0))
-    o5_3 = SlackSearchTerm(("ワード1", "ワード2",), datetime.datetime(2024, 11, 9, 0, 0, 0, 0), datetime.datetime(2024, 12, 7, 0, 0, 0, 0))
+    o5_1 = SlackSearchTerm(frozenset(("ワード1", "ワード2",)), datetime.datetime(2024, 11, 7, 0, 0, 0, 0), datetime.datetime(2024, 12, 5, 0, 0, 0, 0))
+    o5_2 = SlackSearchTerm(frozenset(("ワード1", "ワード2",)), datetime.datetime(2024, 11, 8, 0, 0, 0, 0), datetime.datetime(2024, 12, 6, 0, 0, 0, 0))
+    o5_3 = SlackSearchTerm(frozenset(("ワード1", "ワード2",)), datetime.datetime(2024, 11, 9, 0, 0, 0, 0), datetime.datetime(2024, 12, 7, 0, 0, 0, 0))
     assert sorted([o5_1, o5_2, o5_3]) == sorted([o5_3, o5_2, o5_1]) == [o5_1, o5_2, o5_3]
 
     # 不正フォーマットが指定されたら None を返却する
@@ -297,3 +297,110 @@ def test_slack_message_event():
     assert not event_bot_message_file_share.is_open_channel()
     assert not event_bot_message_file_share.is_dm()
     assert not event_bot_message_file_share.is_mention_to_subteam()
+
+
+def test_slack_responses():
+    SlackConversationsRepliesResponse(
+        **(
+            {
+                "ok": True,
+                "messages": [
+                    {
+                        "user": "U7CAL37D0",
+                        "type": "message",
+                        "ts": "1717984816.912149",
+                        "client_msg_id": "6aca2cf7-6744-4584-99e1-17b6e7875ef8",
+                        "text": "<@U06NDV477T2> あなたの名前を教えてください",
+                        "team": "T02L3BLC1",
+                        "thread_ts": "1717984816.912149",
+                        "reply_count": 1,
+                        "reply_users_count": 1,
+                        "latest_reply": "1717984901.384369",
+                        "reply_users": [
+                            "U0761EBMQ6S"
+                        ],
+                        "is_locked": False,
+                        "subscribed": False,
+                        "blocks": [
+                            {
+                                "type": "rich_text",
+                                "block_id": "s0JXq",
+                                "elements": [
+                                    {
+                                        "type": "rich_text_section",
+                                        "elements": [
+                                            {
+                                                "type": "user",
+                                                "user_id": "U06NDV477T2"
+                                            },
+                                            {
+                                                "type": "text",
+                                                "text": " あなたの名前を教えてください"
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "user": "U0761EBMQ6S",
+                        "type": "message",
+                        "ts": "1717984901.384369",
+                        "bot_id": "B075TGHDXHD",
+                        "app_id": "A075TGF8U4F",
+                        "text": "私の名前は「おっさんずナビ」または「ossans_navi」です。よろしくお願いします！:blush:\n",
+                        "team": "T02L3BLC1",
+                        "bot_profile": {
+                            "id": "B075TGHDXHD",
+                            "deleted": False,
+                            "name": "dev_ossans_navi",
+                            "updated": 1718237139,
+                            "app_id": "A075TGF8U4F",
+                            "user_id": "U0761EBMQ6S",
+                            "icons": {
+                                "image_36": "https://avatars.slack-edge.com/2024-06-12/7261233488758_ba2838395cd61c1c0866_36.png",
+                                "image_48": "https://avatars.slack-edge.com/2024-06-12/7261233488758_ba2838395cd61c1c0866_48.png",
+                                "image_72": "https://avatars.slack-edge.com/2024-06-12/7261233488758_ba2838395cd61c1c0866_72.png"
+                            },
+                            "team_id": "T02L3BLC1"
+                        },
+                        "thread_ts": "1717984816.912149",
+                        "parent_user_id": "U7CAL37D0",
+                        "blocks": [
+                            {
+                                "type": "rich_text",
+                                "block_id": "VcUwK",
+                                "elements": [
+                                    {
+                                        "type": "rich_text_section",
+                                        "elements": [
+                                            {
+                                                "type": "text",
+                                                "text": "私の名前は「おっさんずナビ」または「ossans_navi」です。よろしくお願いします！"
+                                            },
+                                            {
+                                                "type": "emoji",
+                                                "name": "blush",
+                                                "unicode": "1f60a"
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ],
+                        "reactions": [
+                            {
+                                "name": "+1",
+                                "users": [
+                                    "U7CAL37D0"
+                                ],
+                                "count": 1
+                            }
+                        ]
+                    }
+                ],
+                "has_more": False
+            }
+        )
+    )

@@ -1,3 +1,4 @@
+import dataclasses
 import os
 import re
 
@@ -9,6 +10,11 @@ from slack_sdk.errors import SlackApiError
 from ossans_navi.service.slack_service import SlackService
 from ossans_navi.service.slack_wrapper import SlackWrapper
 from ossans_navi.type.slack_type import SlackChannel, SlackUser
+
+
+@dataclasses.dataclass
+class SlackResponseDummy:
+    data: dict
 
 
 def dedent(text, indent: int = 8) -> str:
@@ -140,61 +146,63 @@ def slack_service(monkeypatch: pytest.MonkeyPatch):
 def test_get_user(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
     def users_info_dummy(self, user: str):
         if user == "U7CAL37X0":
-            return {
-                "ok": True,
-                "user": {
-                    "id": "U7CAL37X0",
-                    "team_id": "T02L3BLC1",
-                    "name": "yamada",
-                    "deleted": False,
-                    "color": "c386df",
-                    "real_name": "山田 太郎",
-                    "tz": "Asia/Tokyo",
-                    "tz_label": "Japan Standard Time",
-                    "tz_offset": 32400,
-                    "profile": {
-                        "title": "",
-                        "phone": "",
-                        "skype": "",
+            return SlackResponseDummy(
+                {
+                    "ok": True,
+                    "user": {
+                        "id": "U7CAL37X0",
+                        "team_id": "T02L3BLC1",
+                        "name": "yamada",
+                        "deleted": False,
+                        "color": "c386df",
                         "real_name": "山田 太郎",
-                        "real_name_normalized": "山田 太郎",
-                        "display_name": "yamada.taro",
-                        "display_name_normalized": "yamada.taro",
-                        "fields": None,
-                        "status_text": "",
-                        "status_emoji": "",
-                        "status_emoji_display_info": [],
-                        "status_expiration": 0,
-                        "avatar_hash": "0f9d312d5edb",
-                        "start_date": "2000-03-20",
-                        "image_original": "https://avatars.slack-edge.com/2017-10-12/254469866048_0f9d312d5edb4ae3b1c7_original.jpg",
-                        "is_custom_image": True,
-                        "huddle_state": "default_unset",
-                        "huddle_state_expiration_ts": 0,
-                        "first_name": "山田",
-                        "last_name": "太郎",
-                        "image_24": "https://avatars.slack-edge.com/2017-10-12/254469866048_0f9d312d5edb4ae3b1c7_24.jpg",
-                        "image_32": "https://avatars.slack-edge.com/2017-10-12/254469866048_0f9d312d5edb4ae3b1c7_32.jpg",
-                        "image_48": "https://avatars.slack-edge.com/2017-10-12/254469866048_0f9d312d5edb4ae3b1c7_48.jpg",
-                        "image_72": "https://avatars.slack-edge.com/2017-10-12/254469866048_0f9d312d5edb4ae3b1c7_72.jpg",
-                        "image_192": "https://avatars.slack-edge.com/2017-10-12/254469866048_0f9d312d5edb4ae3b1c7_192.jpg",
-                        "image_512": "https://avatars.slack-edge.com/2017-10-12/254469866048_0f9d312d5edb4ae3b1c7_512.jpg",
-                        "image_1024": "https://avatars.slack-edge.com/2017-10-12/254469866048_0f9d312d5edb4ae3b1c7_1024.jpg",
-                        "status_text_canonical": "",
-                        "team": "T02L3BLC1"
-                    },
-                    "is_admin": False,
-                    "is_owner": False,
-                    "is_primary_owner": False,
-                    "is_restricted": False,
-                    "is_ultra_restricted": False,
-                    "is_bot": False,
-                    "is_app_user": False,
-                    "updated": 1721801012,
-                    "is_email_confirmed": True,
-                    "who_can_share_contact_card": "EVERYONE"
+                        "tz": "Asia/Tokyo",
+                        "tz_label": "Japan Standard Time",
+                        "tz_offset": 32400,
+                        "profile": {
+                            "title": "",
+                            "phone": "",
+                            "skype": "",
+                            "real_name": "山田 太郎",
+                            "real_name_normalized": "山田 太郎",
+                            "display_name": "yamada.taro",
+                            "display_name_normalized": "yamada.taro",
+                            "fields": None,
+                            "status_text": "",
+                            "status_emoji": "",
+                            "status_emoji_display_info": [],
+                            "status_expiration": 0,
+                            "avatar_hash": "0f9d312d5edb",
+                            "start_date": "2000-03-20",
+                            "image_original": "https://avatars.slack-edge.com/2017-10-12/254469866048_0f9d312d5edb4ae3b1c7_original.jpg",
+                            "is_custom_image": True,
+                            "huddle_state": "default_unset",
+                            "huddle_state_expiration_ts": 0,
+                            "first_name": "山田",
+                            "last_name": "太郎",
+                            "image_24": "https://avatars.slack-edge.com/2017-10-12/254469866048_0f9d312d5edb4ae3b1c7_24.jpg",
+                            "image_32": "https://avatars.slack-edge.com/2017-10-12/254469866048_0f9d312d5edb4ae3b1c7_32.jpg",
+                            "image_48": "https://avatars.slack-edge.com/2017-10-12/254469866048_0f9d312d5edb4ae3b1c7_48.jpg",
+                            "image_72": "https://avatars.slack-edge.com/2017-10-12/254469866048_0f9d312d5edb4ae3b1c7_72.jpg",
+                            "image_192": "https://avatars.slack-edge.com/2017-10-12/254469866048_0f9d312d5edb4ae3b1c7_192.jpg",
+                            "image_512": "https://avatars.slack-edge.com/2017-10-12/254469866048_0f9d312d5edb4ae3b1c7_512.jpg",
+                            "image_1024": "https://avatars.slack-edge.com/2017-10-12/254469866048_0f9d312d5edb4ae3b1c7_1024.jpg",
+                            "status_text_canonical": "",
+                            "team": "T02L3BLC1"
+                        },
+                        "is_admin": False,
+                        "is_owner": False,
+                        "is_primary_owner": False,
+                        "is_restricted": False,
+                        "is_ultra_restricted": False,
+                        "is_bot": False,
+                        "is_app_user": False,
+                        "updated": 1721801012,
+                        "is_email_confirmed": True,
+                        "who_can_share_contact_card": "EVERYONE"
+                    }
                 }
-            }
+            )
         if user.startswith("U1"):
             raise SlackApiError("", {
                 "ok": False,
@@ -274,21 +282,23 @@ def test_get_user(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
 def test_get_bot(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
     def bots_info_dummy(self, bot: str):
         if bot == "BCL3TC9NW":
-            return {
-                "ok": True,
-                "bot": {
-                    "id": "BCL3TC9NW",
-                    "deleted": False,
-                    "name": "Good || New TeamBuilder",
-                    "updated": 1595922010,
-                    "app_id": "A0F7XDUAZ",
-                    "icons": {
-                        "image_36": "https://avatars.slack-edge.com/2018-09-03/428285650437_178ec1ec6d89ec78dd37_36.png",
-                        "image_48": "https://avatars.slack-edge.com/2018-09-03/428285650437_178ec1ec6d89ec78dd37_48.png",
-                        "image_72": "https://avatars.slack-edge.com/2018-09-03/428285650437_178ec1ec6d89ec78dd37_72.png"
+            return SlackResponseDummy(
+                {
+                    "ok": True,
+                    "bot": {
+                        "id": "BCL3TC9NW",
+                        "deleted": False,
+                        "name": "Good || New TeamBuilder",
+                        "updated": 1595922010,
+                        "app_id": "A0F7XDUAZ",
+                        "icons": {
+                            "image_36": "https://avatars.slack-edge.com/2018-09-03/428285650437_178ec1ec6d89ec78dd37_36.png",
+                            "image_48": "https://avatars.slack-edge.com/2018-09-03/428285650437_178ec1ec6d89ec78dd37_48.png",
+                            "image_72": "https://avatars.slack-edge.com/2018-09-03/428285650437_178ec1ec6d89ec78dd37_72.png"
+                        }
                     }
                 }
-            }
+            )
         if bot.startswith("B1"):
             raise SlackApiError("", {
                 "ok": False,
@@ -354,24 +364,26 @@ def test_get_bot(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
 def test_get_conversations_members(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
     def conversations_members_dummy(self, channel: str, limit):
         if channel == "C7GGZ82UR":
-            return {
-                "ok": True,
-                "members": [
-                    "U02L3BLC5",
-                    "U48KQ57L3",
-                    "U496LGCUR",
-                    "U4BBS3ACF",
-                    "U05S968BH70",
-                    "U05U7AMDMSR",
-                    "U0632DZFHR9",
-                    "U066PRQ7CS0",
-                    "U06DS98ACSZ",
-                    "U06MZAAG012"
-                ],
-                "response_metadata": {
-                    "next_cursor": ""
+            return SlackResponseDummy(
+                {
+                    "ok": True,
+                    "members": [
+                        "U02L3BLC5",
+                        "U48KQ57L3",
+                        "U496LGCUR",
+                        "U4BBS3ACF",
+                        "U05S968BH70",
+                        "U05U7AMDMSR",
+                        "U0632DZFHR9",
+                        "U066PRQ7CS0",
+                        "U06DS98ACSZ",
+                        "U06MZAAG012"
+                    ],
+                    "response_metadata": {
+                        "next_cursor": ""
+                    }
                 }
-            }
+            )
         if channel.startswith("C1"):
             raise SlackApiError("", {
                 "ok": False,
@@ -403,10 +415,8 @@ def test_get_conversations_members(slack_service: SlackService, monkeypatch: pyt
     assert slack_service.get_conversations_members("C1XXXXXXX") == []
 
     # request_timeout が返るパターン
-    # ・・・互換性の検証のため、今は例外を送出せずに既存の動作である空データを返す仕様なので代わりのテストを実施
-    # with pytest.raises(SlackApiError):
-    #     slack_service.get_conversations_members("C2XXXXXXX")
-    assert slack_service.get_conversations_members("C2XXXXXXX") == []
+    with pytest.raises(SlackApiError):
+        slack_service.get_conversations_members("C2XXXXXXX")
 
     # その他のエラーが発生した場合
     with pytest.raises(ValueError):
@@ -431,15 +441,19 @@ def test_get_conversations_members(slack_service: SlackService, monkeypatch: pyt
 def test_get_presence(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
     def users_getPresence_dummy(self, user: str):
         if user == "U7CAL37X0":
-            return {
-                "ok": True,
-                "presence": "active"
-            }
+            return SlackResponseDummy(
+                {
+                    "ok": True,
+                    "presence": "active"
+                }
+            )
         if user == "U4XXXXXXX":
-            return {
-                "ok": True,
-                "presence": "away"
-            }
+            return SlackResponseDummy(
+                {
+                    "ok": True,
+                    "presence": "away"
+                }
+            )
         if user.startswith("U1"):
             raise SlackApiError("", {
                 "ok": False,
@@ -477,101 +491,103 @@ def test_get_presence(slack_service: SlackService, monkeypatch: pytest.MonkeyPat
 
 def test_get_channels(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
     def conversations_list_dummy1(self, limit: int):
-        return {
-            "ok": True,
-            "channels": [
-                {
-                    "id": "C02R7KJPW3H",
-                    "name": "ts_team_2nd",
-                    "is_channel": True,
-                    "is_group": False,
-                    "is_im": False,
-                    "is_mpim": False,
-                    "is_private": False,
-                    "created": 1640160311,
-                    "is_archived": False,
-                    "is_general": False,
-                    "unlinked": 0,
-                    "name_normalized": "ts_team_2nd",
-                    "is_shared": False,
-                    "is_org_shared": False,
-                    "is_pending_ext_shared": False,
-                    "pending_shared": [],
-                    "context_team_id": "T02L3BLC1",
-                    "updated": 1640160311852,
-                    "parent_conversation": None,
-                    "creator": "U7FDACAJD",
-                    "is_ext_shared": False,
-                    "shared_team_ids": [
-                        "T02L3BLC1"
-                    ],
-                    "pending_connected_team_ids": [],
-                    "is_member": False,
-                    "topic": {
-                        "value": "",
-                        "creator": "",
-                        "last_set": 0
-                    },
-                    "purpose": {
-                        "value": "開発第2チームでの共有とか相談とかとか",
+        return SlackResponseDummy(
+            {
+                "ok": True,
+                "channels": [
+                    {
+                        "id": "C02R7KJPW3H",
+                        "name": "ts_team_2nd",
+                        "is_channel": True,
+                        "is_group": False,
+                        "is_im": False,
+                        "is_mpim": False,
+                        "is_private": False,
+                        "created": 1640160311,
+                        "is_archived": False,
+                        "is_general": False,
+                        "unlinked": 0,
+                        "name_normalized": "ts_team_2nd",
+                        "is_shared": False,
+                        "is_org_shared": False,
+                        "is_pending_ext_shared": False,
+                        "pending_shared": [],
+                        "context_team_id": "T02L3BLC1",
+                        "updated": 1640160311852,
+                        "parent_conversation": None,
                         "creator": "U7FDACAJD",
-                        "last_set": 1640160311
+                        "is_ext_shared": False,
+                        "shared_team_ids": [
+                            "T02L3BLC1"
+                        ],
+                        "pending_connected_team_ids": [],
+                        "is_member": False,
+                        "topic": {
+                            "value": "",
+                            "creator": "",
+                            "last_set": 0
+                        },
+                        "purpose": {
+                            "value": "開発第2チームでの共有とか相談とかとか",
+                            "creator": "U7FDACAJD",
+                            "last_set": 1640160311
+                        },
+                        "previous_names": [],
+                        "num_members": 13
                     },
-                    "previous_names": [],
-                    "num_members": 13
-                },
-                {
-                    "id": "C03KM3J23B9",
-                    "name": "ダーツの旅_実況",
-                    "is_channel": True,
-                    "is_group": False,
-                    "is_im": False,
-                    "is_mpim": False,
-                    "is_private": False,
-                    "created": 1655421861,
-                    "is_archived": False,
-                    "is_general": False,
-                    "unlinked": 0,
-                    "name_normalized": "ﾀﾞｰﾂの旅_実況",
-                    "is_shared": False,
-                    "is_org_shared": False,
-                    "is_pending_ext_shared": False,
-                    "pending_shared": [],
-                    "context_team_id": "T02L3BLC1",
-                    "updated": 1705295424646,
-                    "parent_conversation": None,
-                    "creator": "U7G0M3J92",
-                    "is_ext_shared": False,
-                    "shared_team_ids": [
-                        "T02L3BLC1"
-                    ],
-                    "pending_connected_team_ids": [],
-                    "is_member": False,
-                    "topic": {
-                        "value": "",
-                        "creator": "",
-                        "last_set": 0
-                    },
-                    "purpose": {
-                        "value": "ダーツの旅の状況を、写真とともにリアルタイムであげてもらうチャンネルです。",
+                    {
+                        "id": "C03KM3J23B9",
+                        "name": "ダーツの旅_実況",
+                        "is_channel": True,
+                        "is_group": False,
+                        "is_im": False,
+                        "is_mpim": False,
+                        "is_private": False,
+                        "created": 1655421861,
+                        "is_archived": False,
+                        "is_general": False,
+                        "unlinked": 0,
+                        "name_normalized": "ﾀﾞｰﾂの旅_実況",
+                        "is_shared": False,
+                        "is_org_shared": False,
+                        "is_pending_ext_shared": False,
+                        "pending_shared": [],
+                        "context_team_id": "T02L3BLC1",
+                        "updated": 1705295424646,
+                        "parent_conversation": None,
                         "creator": "U7G0M3J92",
-                        "last_set": 1655421861
-                    },
-                    "properties": {
-                        "canvas": {
-                            "file_id": "F06DVMQCZ18",
-                            "is_empty": True,
-                            "quip_thread_id": "IOR9AAqvG46"
-                        }
-                    },
-                    "previous_names": [],
-                    "num_members": 150
+                        "is_ext_shared": False,
+                        "shared_team_ids": [
+                            "T02L3BLC1"
+                        ],
+                        "pending_connected_team_ids": [],
+                        "is_member": False,
+                        "topic": {
+                            "value": "",
+                            "creator": "",
+                            "last_set": 0
+                        },
+                        "purpose": {
+                            "value": "ダーツの旅の状況を、写真とともにリアルタイムであげてもらうチャンネルです。",
+                            "creator": "U7G0M3J92",
+                            "last_set": 1655421861
+                        },
+                        "properties": {
+                            "canvas": {
+                                "file_id": "F06DVMQCZ18",
+                                "is_empty": True,
+                                "quip_thread_id": "IOR9AAqvG46"
+                            }
+                        },
+                        "previous_names": [],
+                        "num_members": 150
+                    }
+                ],
+                "response_metadata": {
+                    "next_cursor": ""
                 }
-            ],
-            "response_metadata": {
-                "next_cursor": ""
             }
-        }
+        )
 
     def conversations_list_dummy2(self, limit: int):
         raise SlackApiError("", {
@@ -616,48 +632,50 @@ def test_get_channels(slack_service: SlackService, monkeypatch: pytest.MonkeyPat
 def test_get_channel(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
     def conversations_info_dummy(self, channel: str):
         if channel == "C7GGZ82UR":
-            return {
-                "ok": True,
-                "channel": {
-                    "id": "C7GGZ82UR",
-                    "name": "本社3階",
-                    "is_channel": True,
-                    "is_group": False,
-                    "is_im": False,
-                    "is_mpim": False,
-                    "is_private": False,
-                    "created": 1507776105,
-                    "is_archived": False,
-                    "is_general": False,
-                    "unlinked": 0,
-                    "name_normalized": "本社3階",
-                    "is_shared": False,
-                    "is_org_shared": False,
-                    "is_pending_ext_shared": False,
-                    "pending_shared": [],
-                    "context_team_id": "T02L3BLC1",
-                    "updated": 1558159185014,
-                    "parent_conversation": None,
-                    "creator": "U02L3BLC5",
-                    "is_ext_shared": False,
-                    "shared_team_ids": [
-                        "T02L3BLC1"
-                    ],
-                    "pending_connected_team_ids": [],
-                    "is_member": False,
-                    "topic": {
-                        "value": "3Fのメンバーだけに告知したい場合はこちら",
+            return SlackResponseDummy(
+                {
+                    "ok": True,
+                    "channel": {
+                        "id": "C7GGZ82UR",
+                        "name": "本社3階",
+                        "is_channel": True,
+                        "is_group": False,
+                        "is_im": False,
+                        "is_mpim": False,
+                        "is_private": False,
+                        "created": 1507776105,
+                        "is_archived": False,
+                        "is_general": False,
+                        "unlinked": 0,
+                        "name_normalized": "本社3階",
+                        "is_shared": False,
+                        "is_org_shared": False,
+                        "is_pending_ext_shared": False,
+                        "pending_shared": [],
+                        "context_team_id": "T02L3BLC1",
+                        "updated": 1558159185014,
+                        "parent_conversation": None,
                         "creator": "U02L3BLC5",
-                        "last_set": 1507776774
-                    },
-                    "purpose": {
-                        "value": "3Fのメンバーにお知らせするチャンネル",
-                        "creator": "U02L3BLC5",
-                        "last_set": 1507776106
-                    },
-                    "previous_names": []
+                        "is_ext_shared": False,
+                        "shared_team_ids": [
+                            "T02L3BLC1"
+                        ],
+                        "pending_connected_team_ids": [],
+                        "is_member": False,
+                        "topic": {
+                            "value": "3Fのメンバーだけに告知したい場合はこちら",
+                            "creator": "U02L3BLC5",
+                            "last_set": 1507776774
+                        },
+                        "purpose": {
+                            "value": "3Fのメンバーにお知らせするチャンネル",
+                            "creator": "U02L3BLC5",
+                            "last_set": 1507776106
+                        },
+                        "previous_names": []
+                    }
                 }
-            }
+            )
         if channel.startswith("C1"):
             raise SlackApiError("", {
                 "ok": False,

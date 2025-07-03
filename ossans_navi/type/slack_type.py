@@ -7,6 +7,8 @@ import re
 from threading import RLock
 from typing import Any, Iterable, Optional
 
+from pydantic import BaseModel, Field
+
 
 @dataclasses.dataclass
 class SlackUser:
@@ -29,11 +31,11 @@ class SlackAttachment:
     user: Optional[SlackUser] = dataclasses.field(default=None, init=False)
 
     @staticmethod
-    def from_dict(attachment: dict[str, str]) -> 'SlackAttachment':
+    def from_model(attachment: 'SlackAttachmentType') -> 'SlackAttachment':
         return SlackAttachment(
-            title=attachment.get("title", ""),
-            text=attachment.get("text", ""),
-            link=attachment.get("title_link", attachment.get("from_url", "")),
+            title=attachment.title,
+            text=attachment.text,
+            link=attachment.title_link or attachment.from_url or "",
         )
 
 
@@ -58,7 +60,7 @@ class SlackFile:
     title: str
     mimetype: str
     filetype: str
-    download_url: str
+    url_private: str
     pretty_type: str
     permalink: str
     is_public: bool
@@ -71,23 +73,23 @@ class SlackFile:
     _width: int = dataclasses.field(default=0, init=False)
 
     @staticmethod
-    def from_dict(file: dict[str, str | bool]) -> Optional['SlackFile']:
-        if any([v not in file for v in ("permalink", "is_public", "url_private",)]):
+    def from_model(file: 'SlackFileType') -> Optional['SlackFile']:
+        if file.permalink is None or file.is_public is None or file.url_private is None:
             # 必須項目が1つでも存在しなければ None を返す（呼び出し元で None を除外する想定）
             return None
         slack_file = SlackFile(
-            title=str(file.get("title", "")),
-            mimetype=str(file.get("mimetype", "")),
-            filetype=str(file.get("filetype", "")),
-            download_url=str(file["url_private"]),
-            pretty_type=str(file.get("pretty_type", "")),
-            permalink=str(file["permalink"]),
-            is_public=bool(file["is_public"]),
+            title=file.title,
+            mimetype=file.mimetype,
+            filetype=file.filetype,
+            url_private=file.url_private,
+            pretty_type=file.pretty_type,
+            permalink=file.permalink,
+            is_public=file.is_public,
         )
-        if slack_file.is_text and file.get("plain_text"):
+        if slack_file.is_text and file.plain_text:
             # text で plain_text があればそれを利用する
             slack_file.is_initialized = True
-            slack_file.text = str(file["plain_text"])
+            slack_file.text = file.plain_text
         return slack_file
 
     @property
@@ -145,7 +147,7 @@ class SlackFile:
             "title": self.title,
             "mimetype": self.mimetype,
             "pretty_type": self.pretty_type,
-            "download_url": self.download_url,
+            "url_private": self.url_private,
             "permalink": self.permalink,
             **(
                 {
@@ -778,3 +780,194 @@ class SlackMessageEvent:
 
     def id(self) -> str:
         return hashlib.sha256(f"{self.channel_id},{self.thread_ts},{self.ts}".encode('utf8')).hexdigest()[:16]
+
+
+class SlackBaseResponse(BaseModel):
+    """Slack API レスポンスの基本型定義"""
+    ok: bool
+    error: Optional[str] = None
+
+
+class SlackAuthTestUserResponse(SlackBaseResponse):
+    """Slack auth.test API レスポンスの型定義"""
+    url: str
+    team: str
+    user: str
+    team_id: str
+    user_id: str
+
+
+class SlackAuthTestBotResponse(SlackBaseResponse):
+    """Slack auth.test API レスポンスの型定義"""
+    url: str
+    team: str
+    user: str
+    team_id: str
+    user_id: str
+    bot_id: str
+
+
+class SlackAuthTestAppResponse(SlackBaseResponse):
+    """Slack auth.test API レスポンスの型定義"""
+    app_name: str
+    app_id: str
+
+
+class SlackUserType(BaseModel):
+    """Slack users.info.user API レスポンスの型定義"""
+    id: str
+    name: str = "Unknown"
+    real_name: str = "Unknown"
+    profile: dict[str, Any] = Field(default_factory=dict)
+    deleted: bool = False
+    is_admin: bool = False
+    is_restricted: bool = True
+    is_bot: bool = False
+    is_stranger: bool = False
+
+
+class SlackUsersInfoResponse(SlackBaseResponse):
+    """Slack users.info API レスポンスの型定義"""
+    user: SlackUserType
+
+
+class SlackBotResponse(BaseModel):
+    """Slack bots.info.bot API レスポンスの型定義"""
+    id: str
+    user_id: Optional[str] = None
+    deleted: bool = False
+    name: str = "Unknown Bot"
+
+
+class SlackBotsInfoResponse(SlackBaseResponse):
+    """Slack bots.info API レスポンスの型定義"""
+    bot: SlackBotResponse
+
+
+class SlackChannelTopicPurposeType(BaseModel):
+    """Slack channels.info.channel.topic/purpose API レスポンスの型定義"""
+    value: str = ""
+
+
+class SlackChannelType(BaseModel):
+    """Slack channels.info.channel API レスポンスの型定義"""
+    id: str
+    name: str = ""
+    topic: SlackChannelTopicPurposeType = Field(default_factory=SlackChannelTopicPurposeType)
+    purpose: SlackChannelTopicPurposeType = Field(default_factory=SlackChannelTopicPurposeType)
+    is_private: bool = False
+    is_im: bool = False
+    is_mpim: bool = False
+    num_members: int = 0
+
+
+class SlackConversationsInfoResponse(SlackBaseResponse):
+    """Slack conversations.info API レスポンスの型定義"""
+    channel: SlackChannelType
+
+
+class SlackUsersGetPresenceResponse(SlackBaseResponse):
+    """Slack users.getPresence API レスポンスの型定義"""
+    presence: str
+
+    @property
+    def is_active(self) -> bool:
+        """ユーザーがアクティブかどうかを判定する"""
+        return self.presence == "active"
+
+
+class SlackConversationsMembersResponse(SlackBaseResponse):
+    """Slack conversations.members API レスポンスの型定義"""
+    members: list[str] = Field(default_factory=list)
+
+
+class SlackConversationsListResponse(SlackBaseResponse):
+    """Slack conversations.list API レスポンスの型定義"""
+    channels: list[SlackChannelType] = Field(default_factory=list)
+
+
+class SlackFileType(BaseModel):
+    id: str
+    url_private: Optional[str] = None
+    permalink: Optional[str] = None
+    is_public: Optional[bool] = None
+    title: str = ""
+    mimetype: str = ""
+    filetype: str = ""
+    pretty_type: str = ""
+    plain_text: Optional[str] = None
+
+
+class SlackAttachmentType(BaseModel):
+    """Slack conversations.replies/conversations.history API レスポンスのアタッチメント型定義"""
+    name: str = ""
+    title: str = ""
+    text: str = ""
+    author_id: str = ""
+    from_url: Optional[str] = None
+    title_link: Optional[str] = None
+
+    @property
+    def link(self) -> str:
+        """アタッチメントのリンクを返す"""
+        return self.title_link or self.from_url or ""
+
+
+class SlackReactionType(BaseModel):
+    """Slack reactions.add API レスポンスのリアクション型定義"""
+    name: str
+    count: int
+    users: list[str] = Field(default_factory=list)
+    is_custom_emoji: bool = False
+
+
+class SlackMessageType(BaseModel):
+    """Slack conversations.replies/conversations.history API レスポンスのメッセージ型定義"""
+    ts: str
+    text: str = ""
+    channel: Optional[SlackChannelType] = None
+    score: float = 0.0
+    permalink: str = ""
+    type: str = ""
+    user: Optional[str] = None
+    bot_id: Optional[str] = None
+    attachments: list[SlackAttachmentType] = Field(default_factory=list)
+    files: list[SlackFileType] = Field(default_factory=list)
+    thread_ts: Optional[str] = None
+    reactions: list[SlackReactionType] = Field(default_factory=list)
+
+
+class SlackConversationsRepliesResponse(SlackBaseResponse):
+    """Slack conversations.replies API レスポンスの型定義"""
+    messages: list[SlackMessageType]
+
+
+class SlackPaginationType(BaseModel):
+    """Slack API レスポンスのページング情報型定義"""
+    total_count: int = 0
+    page: int = 1
+    first: int = 1
+    last: int = 0
+
+
+class SlackSearchMessagesType(BaseModel):
+    """Slack search.messages API レスポンスのメッセージ型定義"""
+    total: int = 0
+    pagination: SlackPaginationType = Field(default_factory=SlackPaginationType)
+    matches: list[SlackMessageType] = Field(default_factory=list)
+
+
+class SlackSearchMessagesResponse(SlackBaseResponse):
+    """Slack search.messages API レスポンスの型定義"""
+    query: str
+    messages: SlackSearchMessagesType
+
+
+class SlackConversationsOpenResponse(SlackBaseResponse):
+    """Slack conversations.open API レスポンスの型定義"""
+    channel: SlackChannelType
+
+
+class SlackConversationsHistoryResponse(SlackBaseResponse):
+    """Slack conversations.history API レスポンスの型定義"""
+    messages: list[SlackMessageType] = Field(default_factory=list)
