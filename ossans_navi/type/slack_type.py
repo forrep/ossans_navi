@@ -466,6 +466,7 @@ class SlackMessageEvent:
     classification: Optional[dict[str, str | list[str]]] = dataclasses.field(init=False)
     settings: str = dataclasses.field(default="", init=False)
     canceled_events: list['SlackMessageEvent'] = dataclasses.field(default_factory=list, init=False)
+    reactions_to_message: list[str] = dataclasses.field(default_factory=list, init=False)
 
     def valid(self) -> bool:
         return bool(self._user)
@@ -922,7 +923,7 @@ class SlackReactionType(BaseModel):
 
 
 class SlackMessageType(BaseModel):
-    """Slack conversations.replies/conversations.history API レスポンスのメッセージ型定義"""
+    """Slack conversations.history/search.messages API レスポンスのメッセージ型定義"""
     ts: str
     text: str = ""
     channel: Optional[SlackChannelType] = None
@@ -937,9 +938,21 @@ class SlackMessageType(BaseModel):
     reactions: list[SlackReactionType] = Field(default_factory=list)
 
 
+class SlackConversationRepliesMessageType(BaseModel):
+    """Slack conversations.replies API レスポンスのメッセージ型定義"""
+    ts: str
+    text: str = ""
+    user: Optional[str] = None
+    bot_id: Optional[str] = None
+    attachments: list[SlackAttachmentType] = Field(default_factory=list)
+    files: list[SlackFileType] = Field(default_factory=list)
+    thread_ts: Optional[str] = None
+    reactions: list[SlackReactionType] = Field(default_factory=list)
+
+
 class SlackConversationsRepliesResponse(SlackBaseResponse):
     """Slack conversations.replies API レスポンスの型定義"""
-    messages: list[SlackMessageType]
+    messages: list[SlackConversationRepliesMessageType]
 
 
 class SlackPaginationType(BaseModel):

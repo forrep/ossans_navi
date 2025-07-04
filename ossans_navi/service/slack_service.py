@@ -509,7 +509,9 @@ class SlackService:
                 text=text,
             )
 
-    def add_reaction(self, channel: str, ts: str, names: list[str]) -> None:
+    def add_reaction(self, channel: str, ts: str, names: str | list[str]) -> None:
+        if isinstance(names, str):
+            names = [names]
         if not isinstance(names, list) or len(names) == 0:
             return
         name = re.sub(r'^:(.+):$', lambda v: v.group(1), names[0])
@@ -525,6 +527,17 @@ class SlackService:
                     return
             logger.error("reactions_add() return error.")
             logger.error(e, exc_info=True)
+
+    def remove_reaction(self, channel: str, ts: str, names: str | list[str]) -> None:
+        if isinstance(names, str):
+            names = [names]
+        for name in names:
+            try:
+                self.bot_client.reactions_remove(channel=channel, timestamp=ts, name=name)
+            except Exception as e:
+                # 削除できなくてもエラーとせずに無視する
+                logger.info(f"reactions_remove returns error, channel={channel}, ts={ts}, name={name}")
+                logger.info(e, exc_info=True)
 
     @staticmethod
     def convert_markdown_to_mrkdwn(text: str):

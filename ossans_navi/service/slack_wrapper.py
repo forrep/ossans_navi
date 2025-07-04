@@ -236,6 +236,20 @@ class SlackWrapper:
         )
 
     @api_wrapper()
+    def reactions_remove(
+        self,
+        *,
+        channel: str,
+        name: str,
+        timestamp: str,
+    ) -> SlackResponse:
+        return self.client.reactions_remove(
+            channel=channel,
+            name=name,
+            timestamp=timestamp,
+        )
+
+    @api_wrapper()
     def chat_postMessage(
         self,
         *,
