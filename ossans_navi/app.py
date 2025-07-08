@@ -109,12 +109,22 @@ def do_ossans_navi_response_safe(say, event: SlackMessageEvent, refine_executor:
             + f"is_mention={event.is_mention}, is_dm={event.is_dm()}, is_talk_to_other={event.is_talk_to_other}"
         )
 
-        for _ in do_ossans_navi_response(event, models, refine_executor):
+        ossans_navi_service = OssansNaviService(
+            ai_service=ai_service,
+            slack_service=slack_service,
+            models=models,
+            event=event,
+            refine_executor=refine_executor,
+        )
+
+        for _ in do_ossans_navi_response(ossans_navi_service, event, models):
             # yield のタイミングで処理が戻されるごとにイベントがキャンセルされていないか確認して、キャンセルされていれば終了する
             if EVENT_GUARD.is_canceled(event):
                 logger.info(f"Event canceled: {event.id()}({event.channel_id},{event.thread_ts},{event.ts})")
                 logger.info("Finished.")
                 break
+        # キャンセルなどのパターンで終了した場合は、ここでリアクションを削除する
+        ossans_navi_service.remove_progress_reaction()
     except Exception as e:
         logger.error("do_ossans_navi_response return error")
         logger.error(e, exc_info=True)
@@ -131,19 +141,14 @@ def do_ossans_navi_response_safe(say, event: SlackMessageEvent, refine_executor:
             logger.info(f"    tokens_out = {model.tokens_out}")
 
 
-def do_ossans_navi_response(event: SlackMessageEvent, models: AiModels, refine_executor: ThreadPoolExecutor) -> Generator[None, None, None]:
-    ossans_navi_service = OssansNaviService(
-        ai_service=ai_service,
-        slack_service=slack_service,
-        models=models,
-        event=event,
-        refine_executor=refine_executor,
-    )
-
+def do_ossans_navi_response(
+    ossans_navi_service: OssansNaviService,
+    event: SlackMessageEvent,
+    models: AiModels,
+) -> Generator[None, None, None]:
     if event.is_mention:
-        # 応答が確定している場合は処理中にリアクションを付けて UX を向上させる
-        slack_service.add_reaction(event.channel_id, event.ts, "thinking_face")
-        event.reactions_to_message.append("thinking_face")
+        # 応答が確定している場合は処理中を示すリアクションを付けて UX を向上させる
+        ossans_navi_service.do_progress_reaction(config.PROGRESS_REACTION_THINKING)
 
     # yield で呼び出し元に戻すとイベントのキャンセルチェックをして、キャンセルされていれば終了する
     yield
@@ -243,11 +248,7 @@ def do_ossans_navi_response(event: SlackMessageEvent, models: AiModels, refine_e
         # 質問・相談ではなく、メンションされていない場合はここで終了
         if event.is_reply_to_ossans_navi():
             # OssansNavi へ話かけているならリアクションで返す
-            slack_service.add_reaction(
-                event.channel_id,
-                event.ts,
-                event.slack_emoji_names
-            )
+            slack_service.add_reaction(event.channel_id, event.ts, event.slack_emoji_names)
             logger.info("Finished with reaction.")
         return
 
@@ -265,12 +266,9 @@ def do_ossans_navi_response(event: SlackMessageEvent, models: AiModels, refine_e
     ossans_navi_service.analyze_image_description(thread_messages)
 
     if event.is_need_additional_information:
-        if event.reactions_to_message:
-            # すでにリアクションが付いている場合はリアクションを更新する
-            slack_service.add_reaction(event.channel_id, event.ts, "mag")
-            slack_service.remove_reaction(event.channel_id, event.ts, event.reactions_to_message)
-            event.reactions_to_message.clear()
-            event.reactions_to_message.append("mag")
+        if ossans_navi_service.has_progress_reaction():
+            # 処理中リアクションが付いている場合はリアクションを更新する
+            ossans_navi_service.do_progress_reaction(config.PROGRESS_REACTION_SEARCH)
         # Slack ワークスペースを検索するワードを生成してもらう
         # get_slack_searches() は Generator で処理単位ごとに yield している
         # なぜならば、呼び出し側で EVENT_GUARD.is_canceled() をチェックするタイミングを用意するためで、ループごとに確認してキャンセルされていれば終了する
@@ -278,12 +276,9 @@ def do_ossans_navi_response(event: SlackMessageEvent, models: AiModels, refine_e
             # 定期的にイベントがキャンセルされていないか確認して、キャンセルされていれば終了する
             yield
 
-        if event.reactions_to_message:
-            # すでにリアクションが付いている場合はリアクションを更新する
-            slack_service.add_reaction(event.channel_id, event.ts, "memo")
-            slack_service.remove_reaction(event.channel_id, event.ts, event.reactions_to_message)
-            event.reactions_to_message.clear()
-            event.reactions_to_message.append("memo")
+        if ossans_navi_service.has_progress_reaction():
+            # 処理中リアクションが付いている場合はリアクションを更新する
+            ossans_navi_service.do_progress_reaction(config.PROGRESS_REACTION_REFINE)
         # slack_searches の結果から有用な情報を抽出するフェーズ（refine_slack_searches）
         # トークン数の上限があるので複数回に分けて実行して、大量の検索結果の中から必要な情報を絞り込む
         # RAG で入力する情報以外のトークン数を求めておく（システムプロンプトなど）、RAG で入力可能な情報を計算する為に使う
@@ -291,12 +286,9 @@ def do_ossans_navi_response(event: SlackMessageEvent, models: AiModels, refine_e
             # 定期的にイベントがキャンセルされていないか確認して、キャンセルされていれば終了する
             yield
 
-    if event.reactions_to_message:
-        # リアクションが付いている場合はリアクションを更新する
-        slack_service.add_reaction(event.channel_id, event.ts, "speech_balloon")
-        slack_service.remove_reaction(event.channel_id, event.ts, event.reactions_to_message)
-        event.reactions_to_message.clear()
-        event.reactions_to_message.append("speech_balloon")
+    if ossans_navi_service.has_progress_reaction():
+        # 処理中リアクションが付いている場合はリアクションを更新する
+        ossans_navi_service.do_progress_reaction(config.PROGRESS_REACTION_LASTSHOT)
     # 集まった情報を元に返答を生成するフェーズ（lastshot）
     # GPT-4o で最終的な答えを生成する（GPT-4o mini で精査した情報を利用）
     lastshot_responses = ossans_navi_service.lastshot(thread_messages=thread_messages)
@@ -332,10 +324,8 @@ def do_ossans_navi_response(event: SlackMessageEvent, models: AiModels, refine_e
     yield
 
     if do_response:
-        if event.reactions_to_message:
-            # リアクションが付いている場合は削除する
-            slack_service.remove_reaction(event.channel_id, event.ts, event.reactions_to_message)
-            event.reactions_to_message.clear()
+        # 処理中リアクションが付いている場合は削除する
+        ossans_navi_service.remove_progress_reaction()
         with EVENT_GUARD:
             # 同タイミングでキャンセルされた場合に応答しないため、ロックした状態で応答処理をする
             if EVENT_GUARD.is_canceled(event):

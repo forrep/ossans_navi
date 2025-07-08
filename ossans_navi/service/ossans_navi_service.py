@@ -989,3 +989,27 @@ class OssansNaviService:
                         self.load_slack_file(file, True)
         except Exception as e:
             logger.error(e, exc_info=True)
+
+    def has_progress_reaction(self) -> bool:
+        """処理の進捗を示すリアクションが付いているか？"""
+        return bool(self.event.reactions_to_message)
+
+    def do_progress_reaction(self, reaction: str) -> None:
+        """処理の進捗を示すリアクションを付ける、すでに付いているリアクションは削除する"""
+        try:
+            # 最初にリアクションを追加する
+            # なぜなら先に削除すると Slack UI 上でリアクションの分だけ画面表示がずれて、追加時に再度ズレる。それを防ぐため
+            self.slack_service.add_reaction(self.event.channel_id, self.event.ts, reaction)
+        except Exception as e:
+            # メッセージを編集すると先行イベントが同一リアクションをすでに行っていてエラーが発生するパターンがある、実際にはエラーではないので無視する
+            logger.info(e, exc_info=True)
+            pass
+        # 処理中リアクションが付いている場合は削除
+        self.remove_progress_reaction()
+        self.event.reactions_to_message.append(reaction)
+
+    def remove_progress_reaction(self) -> None:
+        """処理の進捗を示すリアクションを削除する"""
+        if self.has_progress_reaction():
+            self.slack_service.remove_reaction(self.event.channel_id, self.event.ts, self.event.reactions_to_message)
+            self.event.reactions_to_message.clear()

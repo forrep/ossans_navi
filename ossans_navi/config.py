@@ -101,3 +101,9 @@ SAFE_MODE = True
 
 # 静かモード、メンションしていないと反応しないなど
 SILENT_MODE = False
+
+# 処理中のリアクション
+PROGRESS_REACTION_THINKING = "thinking_face"
+PROGRESS_REACTION_SEARCH = "mag"
+PROGRESS_REACTION_REFINE = "memo"
+PROGRESS_REACTION_LASTSHOT = "speech_balloon"
