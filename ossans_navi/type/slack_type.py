@@ -940,13 +940,16 @@ class SlackMessageType(BaseModel):
 
 class SlackConversationRepliesMessageType(BaseModel):
     """Slack conversations.replies API レスポンスのメッセージ型定義"""
+    # conversations.replies は channel で返却される形式が文字列（チャネルID）
+    # conversations.history/search.messages はチャネル情報を含む辞書形式、互換性がないので conversations.replies 専用タイプを用意
+    # 問題となった channel は conversations.replies の場合に必要ないので受け取らない
     ts: str
-    text: str = ""
+    thread_ts: Optional[str] = None
     user: Optional[str] = None
     bot_id: Optional[str] = None
+    text: str = ""
     attachments: list[SlackAttachmentType] = Field(default_factory=list)
     files: list[SlackFileType] = Field(default_factory=list)
-    thread_ts: Optional[str] = None
     reactions: list[SlackReactionType] = Field(default_factory=list)
 
 

@@ -1,6 +1,7 @@
 import datetime
 
-from ossans_navi.type.slack_type import SlackMessageEvent, SlackSearchTerm, SlackConversationsRepliesResponse
+from ossans_navi.type.slack_type import (SlackAuthTestAppResponse, SlackAuthTestBotResponse, SlackAuthTestUserResponse,
+                                         SlackConversationsRepliesResponse, SlackMessageEvent, SlackReactionType, SlackSearchTerm)
 
 from . import slack_messages_sample
 
@@ -299,8 +300,65 @@ def test_slack_message_event():
     assert not event_bot_message_file_share.is_mention_to_subteam()
 
 
-def test_slack_responses():
-    SlackConversationsRepliesResponse(
+def test_slack_auth_test():
+    response_app = SlackAuthTestAppResponse(
+        **(
+            {
+                "ok": True,
+                "app_name": "dev_ossans_navi",
+                "app_id": "A075111XXXX"
+            }
+        )
+    )
+    assert response_app.ok
+    assert response_app.app_name == "dev_ossans_navi"
+    assert response_app.app_id == "A075111XXXX"
+
+    response_user = SlackAuthTestUserResponse(
+        **(
+            {
+                "ok": True,
+                "url": "https://example.slack.com/",
+                "team": "example",
+                "user": "hayama",
+                "team_id": "T02111XXX",
+                "user_id": "U7C111XXX",
+                "is_enterprise_install": False
+            }
+        )
+    )
+    assert response_user.ok
+    assert response_user.url == "https://example.slack.com/"
+    assert response_user.team == "example"
+    assert response_user.user == "hayama"
+    assert response_user.team_id == "T02111XXX"
+    assert response_user.user_id == "U7C111XXX"
+
+    response_bot = SlackAuthTestBotResponse(
+        **(
+            {
+                "ok": True,
+                "url": "https://example.slack.com/",
+                "team": "example",
+                "user": "ossansnavidev",
+                "team_id": "T02111XXX",
+                "user_id": "U0761111XXX",
+                "bot_id": "B075T111XXX",
+                "is_enterprise_install": False
+            }
+        )
+    )
+    assert response_bot.ok
+    assert response_bot.url == "https://example.slack.com/"
+    assert response_bot.team == "example"
+    assert response_bot.user == "ossansnavidev"
+    assert response_bot.team_id == "T02111XXX"
+    assert response_bot.user_id == "U0761111XXX"
+    assert response_bot.bot_id == "B075T111XXX"
+
+
+def test_slack_conversations_replies():
+    response1 = SlackConversationsRepliesResponse(
         **(
             {
                 "ok": True,
@@ -404,3 +462,458 @@ def test_slack_responses():
             }
         )
     )
+    assert response1.ok
+    assert response1.messages[0].ts == "1717984816.912149"
+    assert response1.messages[0].thread_ts == "1717984816.912149"
+    assert response1.messages[0].user == "U7CAL37D0"
+    assert response1.messages[0].bot_id is None
+    assert response1.messages[0].text == "<@U06NDV477T2> あなたの名前を教えてください"
+    assert len(response1.messages[0].attachments) == 0
+    assert len(response1.messages[0].files) == 0
+    assert len(response1.messages[0].reactions) == 0
+    assert response1.messages[1].ts == "1717984901.384369"
+    assert response1.messages[1].thread_ts == "1717984816.912149"
+    assert response1.messages[1].user == "U0761EBMQ6S"
+    assert response1.messages[1].bot_id == "B075TGHDXHD"
+    assert response1.messages[1].text == "私の名前は「おっさんずナビ」または「ossans_navi」です。よろしくお願いします！:blush:\n"
+    assert response1.messages[1].reactions == [SlackReactionType(name="+1", users=["U7CAL37D0"], count=1)]
+
+    response2 = SlackConversationsRepliesResponse(
+        **(
+            {
+                "ok": True,
+                "messages": [
+                    {
+                        "user": "USLACKBOT",
+                        "channel": "CXXXXXXX",
+                        "room": {
+                            "id": "RXXXXXXXX",
+                            "name": "",
+                            "media_server": "",
+                            "created_by": "UXXXXXXX",
+                            "date_start": 1745387799,
+                            "date_end": 1745389769,
+                            "participants": [],
+                            "participant_history": [
+                                "UXXXXXXX",
+                                "UYYYYYYY",
+                                "UZZZZZZZ",
+                                "UWWWWWWW"
+                            ],
+                            "participants_events": {
+                                "UXXXXXXX": {
+                                    "user_team": {},
+                                    "joined": True,
+                                    "camera_on": False,
+                                    "camera_off": False,
+                                    "screenshare_on": False,
+                                    "screenshare_off": False
+                                },
+                                "UYYYYYYY": {
+                                    "user_team": {},
+                                    "joined": True,
+                                    "camera_on": False,
+                                    "camera_off": False,
+                                    "screenshare_on": False,
+                                    "screenshare_off": False
+                                },
+                                "UZZZZZZZ": {
+                                    "user_team": {},
+                                    "joined": True,
+                                    "camera_on": False,
+                                    "camera_off": False,
+                                    "screenshare_on": False,
+                                    "screenshare_off": False
+                                },
+                                "UWWWWWWW": {
+                                    "user_team": {},
+                                    "joined": True,
+                                    "camera_on": False,
+                                    "camera_off": False,
+                                    "screenshare_on": False,
+                                    "screenshare_off": False
+                                }
+                            },
+                            "participants_camera_on": [],
+                            "participants_camera_off": [],
+                            "participants_screenshare_on": [],
+                            "participants_screenshare_off": [],
+                            "canvas_thread_ts": "1745387799.160249",
+                            "thread_root_ts": "1745387799.160249",
+                            "channels": [
+                                "CXXXXXXX"
+                            ],
+                            "is_dm_call": False,
+                            "was_rejected": False,
+                            "was_missed": False,
+                            "was_accepted": False,
+                            "has_ended": True,
+                            "background_id": "ARIZONA",
+                            "canvas_background": "ARIZONA",
+                            "is_prewarmed": False,
+                            "is_scheduled": False,
+                            "recording": {
+                                "can_record_summary": "unavailable"
+                            },
+                            "locale": "ja-JP",
+                            "attached_file_ids": [],
+                            "media_backend_type": "free_willy",
+                            "display_id": "",
+                            "external_unique_id": "e05fb6c4-6342-4ead-b07a-b3a518df2713",
+                            "app_id": "A00",
+                            "call_family": "huddle",
+                            "pending_invitees": {},
+                            "last_invite_status_by_user": {},
+                            "knocks": {},
+                            "huddle_link": "https://example.com/huddle/TXXXXXXX/CXXXXXXX"
+                        },
+                        "no_notifications": True,
+                        "permalink": "https://example.com/call/RXXXXXXXX",
+                        "subtype": "huddle_thread",
+                        "type": "message",
+                        "ts": "1745387799.160249",
+                        "edited": {
+                            "user": "USLACKBOT",
+                            "ts": "1745389769.000000"
+                        },
+                        "text": "",
+                        "team": "TXXXXXXX",
+                        "thread_ts": "1745387799.160249",
+                        "reply_count": 4,
+                        "reply_users_count": 2,
+                        "latest_reply": "1745389431.931479",
+                        "reply_users": [
+                            "UXXXXXXX",
+                            "UYYYYYYY"
+                        ],
+                        "is_locked": False,
+                        "subscribed": False,
+                        "blocks": [
+                            {
+                                "type": "rich_text",
+                                "block_id": "VZ2F3",
+                                "elements": [
+                                    {
+                                        "type": "rich_text_section",
+                                        "elements": [
+                                            {
+                                                "type": "text",
+                                                "text": "ハドルミーティングが開始しました"
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "subtype": "thread_broadcast",
+                        "user": "UXXXXXXX",
+                        "thread_ts": "1745387799.160249",
+                        "root": {
+                            "user": "USLACKBOT",
+                            "channel": "CXXXXXXX",
+                            "room": {
+                                "id": "RXXXXXXXX",
+                                "name": "",
+                                "media_server": "",
+                                "created_by": "UXXXXXXX",
+                                "date_start": 1745387799,
+                                "date_end": 1745389769,
+                                "participants": [],
+                                "participant_history": [
+                                    "UXXXXXXX",
+                                    "UYYYYYYY",
+                                    "UZZZZZZZ",
+                                    "UWWWWWWW"
+                                ],
+                                "participants_events": {
+                                    "UXXXXXXX": {
+                                        "user_team": {},
+                                        "joined": True,
+                                        "camera_on": False,
+                                        "camera_off": False,
+                                        "screenshare_on": False,
+                                        "screenshare_off": False
+                                    },
+                                    "UYYYYYYY": {
+                                        "user_team": {},
+                                        "joined": True,
+                                        "camera_on": False,
+                                        "camera_off": False,
+                                        "screenshare_on": False,
+                                        "screenshare_off": False
+                                    },
+                                    "UZZZZZZZ": {
+                                        "user_team": {},
+                                        "joined": True,
+                                        "camera_on": False,
+                                        "camera_off": False,
+                                        "screenshare_on": False,
+                                        "screenshare_off": False
+                                    },
+                                    "UWWWWWWW": {
+                                        "user_team": {},
+                                        "joined": True,
+                                        "camera_on": False,
+                                        "camera_off": False,
+                                        "screenshare_on": False,
+                                        "screenshare_off": False
+                                    }
+                                },
+                                "participants_camera_on": [],
+                                "participants_camera_off": [],
+                                "participants_screenshare_on": [],
+                                "participants_screenshare_off": [],
+                                "canvas_thread_ts": "1745387799.160249",
+                                "thread_root_ts": "1745387799.160249",
+                                "channels": [
+                                    "CXXXXXXX"
+                                ],
+                                "is_dm_call": False,
+                                "was_rejected": False,
+                                "was_missed": False,
+                                "was_accepted": False,
+                                "has_ended": True,
+                                "background_id": "ARIZONA",
+                                "canvas_background": "ARIZONA",
+                                "is_prewarmed": False,
+                                "is_scheduled": False,
+                                "recording": {
+                                    "can_record_summary": "unavailable"
+                                },
+                                "locale": "ja-JP",
+                                "attached_file_ids": [],
+                                "media_backend_type": "free_willy",
+                                "display_id": "",
+                                "external_unique_id": "e05fb6c4-6342-4ead-b07a-b3a518df2713",
+                                "app_id": "A00",
+                                "call_family": "huddle",
+                                "pending_invitees": {},
+                                "last_invite_status_by_user": {},
+                                "knocks": {},
+                                "huddle_link": "https://example.com/huddle/TXXXXXXX/CXXXXXXX"
+                            },
+                            "no_notifications": True,
+                            "permalink": "https://example.com/call/RXXXXXXXX",
+                            "subtype": "huddle_thread",
+                            "type": "message",
+                            "ts": "1745387799.160249",
+                            "edited": {
+                                "user": "USLACKBOT",
+                                "ts": "1745389769.000000"
+                            },
+                            "text": "",
+                            "team": "TXXXXXXX",
+                            "thread_ts": "1745387799.160249",
+                            "reply_count": 4,
+                            "reply_users_count": 2,
+                            "latest_reply": "1745389431.931479",
+                            "reply_users": [
+                                "UXXXXXXX",
+                                "UYYYYYYY"
+                            ],
+                            "is_locked": False,
+                            "subscribed": False,
+                            "blocks": [
+                                {
+                                    "type": "rich_text",
+                                    "block_id": "VZ2F3",
+                                    "elements": [
+                                        {
+                                            "type": "rich_text_section",
+                                            "elements": [
+                                                {
+                                                    "type": "text",
+                                                    "text": "ハドルミーティングが開始しました"
+                                                }
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        "type": "message",
+                        "ts": "1745389271.537969",
+                        "client_msg_id": "304f2f73-f25c-471d-9956-2c4d6659a4bd",
+                        "text": "<https://example.com/dp/ITEM1>",
+                        "attachments": [
+                            {
+                                "from_url": "https://example.com/dp/ITEM1",
+                                "service_icon": "https://example.com/favicon.ico",
+                                "id": 1,
+                                "original_url": "https://example.com/dp/ITEM1",
+                                "fallback": "Anker Prime Power Bank ...",
+                                "text": "Anker Prime Power Bank ...",
+                                "service_name": "example.com"
+                            }
+                        ],
+                        "blocks": [
+                            {
+                                "type": "rich_text",
+                                "block_id": "+l+Wa",
+                                "elements": [
+                                    {
+                                        "type": "rich_text_section",
+                                        "elements": [
+                                            {
+                                                "type": "link",
+                                                "url": "https://example.com/dp/ITEM1"
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "user": "UYYYYYYY",
+                        "type": "message",
+                        "ts": "1745389299.990499",
+                        "client_msg_id": "f5fa3f54-7e88-46aa-bdf9-2cd26e652d14",
+                        "text": "<https://example.com/dp/ITEM2>",
+                        "team": "TXXXXXXX",
+                        "thread_ts": "1745387799.160249",
+                        "parent_user_id": "USLACKBOT",
+                        "attachments": [
+                            {
+                                "from_url": "https://example.com/dp/ITEM2",
+                                "service_icon": "https://example.com/favicon.ico",
+                                "id": 1,
+                                "original_url": "https://example.com/dp/ITEM2",
+                                "fallback": "UGREEN Nexode モバイルバッテリー ...",
+                                "text": "UGREEN Nexode モバイルバッテリー ...",
+                                "service_name": "example.com"
+                            }
+                        ],
+                        "blocks": [
+                            {
+                                "type": "rich_text",
+                                "block_id": "kbIkx",
+                                "elements": [
+                                    {
+                                        "type": "rich_text_section",
+                                        "elements": [
+                                            {
+                                                "type": "link",
+                                                "url": "https://example.com/dp/ITEM2"
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "user": "UYYYYYYY",
+                        "type": "message",
+                        "ts": "1745389392.318809",
+                        "client_msg_id": "5e34a7bb-2afa-4206-bf95-58d2823a9f64",
+                        "text": "<https://example.com/dp/ITEM3>",
+                        "team": "TXXXXXXX",
+                        "thread_ts": "1745387799.160249",
+                        "parent_user_id": "USLACKBOT",
+                        "attachments": [
+                            {
+                                "from_url": "https://example.com/dp/ITEM3",
+                                "service_icon": "https://example.com/favicon.ico",
+                                "id": 1,
+                                "original_url": "https://example.com/dp/ITEM3",
+                                "fallback": "CIO NovaPort DUOⅡ 65W ...",
+                                "text": "CIO NovaPort DUOⅡ 65W ...",
+                                "service_name": "example.com"
+                            }
+                        ],
+                        "blocks": [
+                            {
+                                "type": "rich_text",
+                                "block_id": "/XMBz",
+                                "elements": [
+                                    {
+                                        "type": "rich_text_section",
+                                        "elements": [
+                                            {
+                                                "type": "link",
+                                                "url": "https://example.com/dp/ITEM3"
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "text": "",
+                        "files": [
+                            {
+                                "id": "FXXXXXXX",
+                                "created": 1745389429,
+                                "timestamp": 1745389429,
+                                "name": "image.png",
+                                "title": "image.png",
+                                "mimetype": "image/png",
+                                "filetype": "png",
+                                "pretty_type": "PNG",
+                                "user": "UYYYYYYY",
+                                "user_team": "TXXXXXXX",
+                                "editable": False,
+                                "size": 232277,
+                                "mode": "hosted",
+                                "is_external": False,
+                                "external_type": "",
+                                "is_public": True,
+                                "public_url_shared": False,
+                                "display_as_bot": False,
+                                "username": "",
+                                "url_private": "https://example.com/files-pri/TXXXXXXX-FXXXXXXX/image.png",
+                                "url_private_download": "https://example.com/files-pri/TXXXXXXX-FXXXXXXX/download/image.png",
+                                "media_display_type": "unknown",
+                                "thumb_64": "https://example.com/files-tmb/TXXXXXXX-FXXXXXXX/image_64.png",
+                                "thumb_80": "https://example.com/files-tmb/TXXXXXXX-FXXXXXXX/image_80.png",
+                                "thumb_360": "https://example.com/files-tmb/TXXXXXXX-FXXXXXXX/image_360.png",
+                                "thumb_360_w": 278,
+                                "thumb_360_h": 360,
+                                "thumb_480": "https://example.com/files-tmb/TXXXXXXX-FXXXXXXX/image_480.png",
+                                "thumb_480_w": 371,
+                                "thumb_480_h": 480,
+                                "thumb_160": "https://example.com/files-tmb/TXXXXXXX-FXXXXXXX/image_160.png",
+                                "original_w": 555,
+                                "original_h": 718,
+                                "thumb_tiny": "AwAwACWcDNGDSgUuBTAbRTsCigBtFOooABS9ao3bsyLkY57U6wYh8epFAFzFIQcE9h3qaXIQkelM3DyMn05pAR5ozUCSMFAwKXzW9BTAe0av95QaFhRCCq4PtUlIaABiWXBYkemaZsUKQBwaf2pOaAIfKj/uijyo/wC6KkINJzQB/9k=",
+                                "permalink": "https://example.com/files/UXXXXXXX/FXXXXXXX/image.png",
+                                "permalink_public": "https://example.com/TXXXXXXX-FXXXXXXX-abcdefg",
+                                "is_starred": False,
+                                "skipped_shares": True,
+                                "has_rich_preview": False,
+                                "file_access": "visible"
+                            }
+                        ],
+                        "upload": False,
+                        "user": "UYYYYYYY",
+                        "display_as_bot": False,
+                        "type": "message",
+                        "ts": "1745389431.931479",
+                        "client_msg_id": "7f17c724-1a33-46b0-a407-11b26e24d832",
+                        "thread_ts": "1745387799.160249",
+                        "parent_user_id": "USLACKBOT"
+                    }
+                ],
+                "has_more": False
+            }
+        )
+    )
+
+    assert response2.ok
+    assert len(response2.messages) == 5
+    assert response2.messages[0].ts == "1745387799.160249"
+    assert response2.messages[0].thread_ts == "1745387799.160249"
+    assert response2.messages[0].user == "USLACKBOT"
+    assert response2.messages[0].bot_id is None
+    assert response2.messages[0].text == ""
+    assert len(response2.messages[0].attachments) == 0
+    assert len(response2.messages[0].files) == 0
+    assert len(response2.messages[0].reactions) == 0
+    assert len(response2.messages[1].attachments) == 1
+    assert len(response2.messages[2].attachments) == 1
+    assert len(response2.messages[3].attachments) == 1
+    assert len(response2.messages[4].files) == 1
