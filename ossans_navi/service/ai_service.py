@@ -7,6 +7,7 @@ import threading
 import time
 from collections import defaultdict
 from enum import Enum
+from io import BytesIO
 from operator import itemgetter
 from typing import Any, Iterable, Optional, overload
 
@@ -133,9 +134,22 @@ class AiPromptImage:
 
 
 @dataclasses.dataclass
+class AiPromptUploadFile:
+    data: bytes
+    mimetype: str
+    title: str
+    file: Optional[types.File] = dataclasses.field(default=None, init=False)
+
+    def to_bytes_io(self) -> BytesIO:
+        return BytesIO(self.data)
+
+
+@dataclasses.dataclass
 class AiPromptContent:
     data: str | dict[str, Any]
     images: list[AiPromptImage] = dataclasses.field(default_factory=list)
+    videos: list[AiPromptUploadFile] = dataclasses.field(default_factory=list)
+    audios: list[AiPromptUploadFile] = dataclasses.field(default_factory=list)
 
     @property
     def is_dict(self) -> bool:
@@ -276,7 +290,7 @@ class AiPromptMessage:
         parts: list[types.PartDict] = []
         parts.append({"text": self.content.text})
         if self.role != AiPromptRole.ASSISTANT:
-            # AiPromptRole.ASSISTANT ではない場合のみ画像を読み込む
+            # AiPromptRole.ASSISTANT ではない場合のみ画像・映像・音声を読み込む
             # モデルが画像生成機能を持たない現時点では、AiPromptRole.ASSISTANT に画像データが付随するケースは電文を偽造しない限りない
             # そのため現時点では画像を送信しても処理対象にならない、そのため送らない
             parts.extend(
@@ -288,6 +302,28 @@ class AiPromptMessage:
                         }
                     }
                     for image in self.content.images
+                ]
+            )
+            parts.extend(
+                [
+                    {
+                        "file_data": {
+                            "mime_type": video.file.mime_type,
+                            "file_uri": video.file.uri,
+                        },
+                    }
+                    for video in self.content.videos if video.file is not None
+                ]
+            )
+            parts.extend(
+                [
+                    {
+                        "file_data": {
+                            "mime_type": audio.file.mime_type,
+                            "file_uri": audio.file.uri,
+                        },
+                    }
+                    for audio in self.content.audios if audio.file is not None
                 ]
             )
         contents.append({
@@ -522,6 +558,10 @@ class AiPrompt:
             "contents": AiPrompt.convert_bytes_to_base64(self.to_gemini_contents()),
         }
 
+    def get_upload_files(self) -> list[AiPromptUploadFile]:
+        """Get all files to be uploaded."""
+        return list(itertools.chain.from_iterable([message.content.videos + message.content.audios for message in self.messages]))
+
     @staticmethod
     def convert_bytes_to_base64(value: dict[str, Any] | list[Any] | Any) -> dict[str, Any] | list[Any] | Any:
         if isinstance(value, dict):
@@ -646,17 +686,40 @@ class AiService:
             model: AiModel,
             prompt: AiPrompt,
     ) -> AiResponse:
-        if logger.isEnabledFor(logging.DEBUG):
-            logger.debug(f"chat_completions({model.name}) body={json.dumps(prompt.to_gemini_rest(), ensure_ascii=False)}")
-        else:
-            logger.info(
-                f"chat_completions({model.name}) body(shrink)={json.dumps(shrink_message(prompt.to_gemini_rest()), ensure_ascii=False)}"
-            )
         start_time = time.time()
         last_exception: Optional[Exception] = None
         response: Optional[types.GenerateContentResponse] = None
+        try:
+            for file in prompt.get_upload_files():
+                file.file = self.client_gemini.files.upload(
+                    file=file.to_bytes_io(),
+                    config={
+                        "mime_type": file.mimetype,
+                        "display_name": file.title,
+                    },
+                )
+        except Exception as e:
+            # ファイルのアップロード失敗はエラーとせずに処理を続行する
+            logger.warning(f"Failed to upload files: {e}")
+
+        try:
+            for file in prompt.get_upload_files():
+                for _ in range(100):
+                    if file.file and file.file.name and file.file.state == types.FileState.PROCESSING:
+                        time.sleep(2)
+                        file.file = self.client_gemini.files.get(name=file.file.name)
+        except Exception as e:
+            # ファイルのアップロード失敗はエラーとせずに処理を続行する
+            logger.warning(f"Failed to upload files: {e}")
+
         for _ in range(10):
             try:
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(f"chat_completions({model.name}) body={json.dumps(prompt.to_gemini_rest(), ensure_ascii=False)}")
+                else:
+                    logger.info(
+                        f"chat_completions({model.name}) body(shrink)={json.dumps(shrink_message(prompt.to_gemini_rest()), ensure_ascii=False)}"
+                    )
                 response = self.client_gemini.models.generate_content(
                     model=model.name,
                     config=prompt.to_gemini_config(),
@@ -670,6 +733,16 @@ class AiService:
                 logger.error(e)
                 last_exception = e
                 time.sleep(30)
+
+        try:
+            for file in prompt.get_upload_files():
+                # アップロードしたファイルを削除する
+                if file.file and file.file.name:
+                    self.client_gemini.files.delete(name=file.file.name)
+                    file.file = None
+        except Exception as e:
+            # ファイルの削除失敗はエラーとせずに処理を続行する
+            logger.warning(f"Failed to delete files: {e}")
 
         if response is None:
             # 実行に失敗していた場合は例外を送出

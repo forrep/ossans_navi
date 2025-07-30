@@ -1,4 +1,3 @@
-import itertools
 import json
 import logging
 import signal
@@ -259,8 +258,22 @@ def do_ossans_navi_response(
     # ## このタイミングまでファイルをロードしない理由
     # ossans_navi_service.classify 以前のフェーズは大量のメッセージが流入することを考慮が必要
     # 重い処理や費用の増加する処理は classify を通過して応答フェーズに入った後に実施する
-    for file in itertools.chain.from_iterable([message.files for message in thread_messages]):
-        ossans_navi_service.load_slack_file(file, False)
+    for (i, message) in enumerate(thread_messages):
+        is_latest_message = i == len(thread_messages) - 1
+        for file in message.files:
+            if file.is_text or file.is_canvas or file.is_image:
+                # テキストファイル、キャンバス、画像ファイルはロードする
+                ossans_navi_service.load_slack_file(file, user_client=False, load_file=True, load_vtt=False)
+            elif file.is_video or file.is_audio:
+                if is_latest_message and event.is_mention and config.LOAD_VIDEO_AUDIO_FILES:
+                    # 動画や音声ファイルは負荷とコストが高いので以下の条件に適合する場合のみロードする
+                    #   - 最新メッセージに添付されている
+                    #   - OssansNavi がメンションされている
+                    #   - 動画や音声ファイルのロードが有効になっている
+                    ossans_navi_service.load_slack_file(file, user_client=False, load_file=True, load_vtt=True)
+                else:
+                    # それ以外の場合は vtt だけ読み込む
+                    ossans_navi_service.load_slack_file(file, user_client=False, load_file=False, load_vtt=True)
 
     # 添付画像がある場合は画像の説明を取得する
     ossans_navi_service.analyze_image_description(thread_messages)
@@ -289,6 +302,7 @@ def do_ossans_navi_response(
     if ossans_navi_service.has_progress_reaction():
         # 処理中リアクションが付いている場合はリアクションを更新する
         ossans_navi_service.do_progress_reaction(config.PROGRESS_REACTION_LASTSHOT)
+
     # 集まった情報を元に返答を生成するフェーズ（lastshot）
     # GPT-4o で最終的な答えを生成する（GPT-4o mini で精査した情報を利用）
     lastshot_responses = ossans_navi_service.lastshot(thread_messages=thread_messages)

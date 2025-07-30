@@ -69,29 +69,33 @@ REFINE_SLACK_SEARCHES_DEPTH_WITH_MENTION = 2
 REFINE_SLACK_SEARCHES_COUNT_NO_MENTION = 3
 REFINE_SLACK_SEARCHES_DEPTH_NO_MENTION = 2
 
-# 入力する会話コンテキスト（スレッド）の最大トークン数
-MAX_THREAD_TOKENS = 12000
-# refine_slack_searches の1回あたり許容するトークン数
-REFINE_SLACK_SEARCHES_TOKEN = 24000
-# lastshot で許容するトークン数
-LASTSHOT_TOKEN_WITH_MENTION = 20000
-# lastshot で許容するトークン数（メンションなし）
-LASTSHOT_TOKEN_NO_MENTION = 10000
-# lastshot で再入力する画像数
-LASTSHOT_INPUT_IMAGE_FILES = 0
-
 if AI_SERVICE_TYPE == AiServiceType.GEMINI:
     # Gemini の場合は API利用料金が安いのとコンテキストサイズが大きいので入力トークン数を増量
     # 入力する会話コンテキスト（スレッド）の最大トークン数
-    MAX_THREAD_TOKENS = 24000
+    MAX_THREAD_TOKENS = 36000
     # refine_slack_searches の1回あたり許容するトークン数
     REFINE_SLACK_SEARCHES_TOKEN = 30000
     # lastshot で許容するトークン数
-    LASTSHOT_TOKEN_WITH_MENTION = 40000
+    LASTSHOT_TOKEN_WITH_MENTION = 80000
     # lastshot で許容するトークン数（メンションなし）
-    LASTSHOT_TOKEN_NO_MENTION = 20000
+    LASTSHOT_TOKEN_NO_MENTION = 40000
     # lastshot で再入力する画像数
     LASTSHOT_INPUT_IMAGE_FILES = 2
+    # 動画・音声ファイルを入力する
+    LOAD_VIDEO_AUDIO_FILES = True
+else:
+    # 入力する会話コンテキスト（スレッド）の最大トークン数
+    MAX_THREAD_TOKENS = 12000
+    # refine_slack_searches の1回あたり許容するトークン数
+    REFINE_SLACK_SEARCHES_TOKEN = 24000
+    # lastshot で許容するトークン数
+    LASTSHOT_TOKEN_WITH_MENTION = 20000
+    # lastshot で許容するトークン数（メンションなし）
+    LASTSHOT_TOKEN_NO_MENTION = 10000
+    # lastshot で再入力する画像数
+    LASTSHOT_INPUT_IMAGE_FILES = 0
+    # 動画・音声ファイルを入力する
+    LOAD_VIDEO_AUDIO_FILES = False
 
 # 開発モードのデフォルト値（起動時に --production が渡されると上書きされて本番モードになる）
 DEVELOPMENT_MODE = True

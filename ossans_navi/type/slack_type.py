@@ -64,6 +64,8 @@ class SlackFile:
     pretty_type: str
     permalink: str
     is_public: bool
+    transcription_complete: bool
+    vtt: Optional[str]
     is_initialized: bool = dataclasses.field(default=False, init=False)
     is_analyzed: bool = dataclasses.field(default=False, init=False)
     description: Optional[str] = dataclasses.field(default=None, init=False)
@@ -85,6 +87,8 @@ class SlackFile:
             pretty_type=file.pretty_type,
             permalink=file.permalink,
             is_public=file.is_public,
+            transcription_complete=True if file.transcription and file.transcription.status == "complete" else False,
+            vtt=file.vtt,
         )
         if slack_file.is_text and file.plain_text:
             # text で plain_text があればそれを利用する
@@ -107,6 +111,14 @@ class SlackFile:
         return self.mimetype.startswith("image/")
 
     @property
+    def is_video(self) -> bool:
+        return self.mimetype.startswith("video/")
+
+    @property
+    def is_audio(self) -> bool:
+        return self.mimetype.startswith("audio/")
+
+    @property
     def is_text(self) -> bool:
         return self.mimetype.startswith("text/")
 
@@ -120,7 +132,7 @@ class SlackFile:
 
     @property
     def is_textualize(self) -> bool:
-        return self.is_text or self.is_canvas or (self.is_image and self.is_analyzed)
+        return self.is_text or self.is_canvas or (self.is_image and self.is_analyzed) or ((self.is_video or self.is_audio) and bool(self.text))
 
     @property
     def width(self) -> int:
@@ -887,6 +899,10 @@ class SlackConversationsListResponse(SlackBaseResponse):
     channels: list[SlackChannelType] = Field(default_factory=list)
 
 
+class SlackTranscriptionType(BaseModel):
+    status: str
+
+
 class SlackFileType(BaseModel):
     id: str
     url_private: Optional[str] = None
@@ -897,6 +913,8 @@ class SlackFileType(BaseModel):
     filetype: str = ""
     pretty_type: str = ""
     plain_text: Optional[str] = None
+    transcription: Optional[SlackTranscriptionType] = None
+    vtt: Optional[str] = None
 
 
 class SlackAttachmentType(BaseModel):

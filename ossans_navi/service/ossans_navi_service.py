@@ -17,7 +17,7 @@ from ossans_navi import config
 from ossans_navi.common.cache import LRUCache
 from ossans_navi.service.ai_prompt_service import AiPromptService
 from ossans_navi.service.ai_service import (AiModels, AiPrompt, AiPromptContent, AiPromptImage, AiPromptMessage, AiPromptRagInfo, AiPromptRole,
-                                            AiService, QualityCheckResponse)
+                                            AiPromptUploadFile, AiService, QualityCheckResponse)
 from ossans_navi.service.slack_service import SlackService
 from ossans_navi.type import ossans_navi_types
 from ossans_navi.type.slack_type import SlackFile, SlackMessage, SlackMessageEvent, SlackMessageLite, SlackSearches, SlackSearchTerm
@@ -194,12 +194,13 @@ class OssansNaviService:
         self,
         system: str,
         messages: list[SlackMessageLite],
-        with_image_files: bool = False,
+        analyze_image_files: bool = False,
         input_image_files: int = 0,
         limit: int = 800,
         limit_last_message: int = -1,
         schema: Optional[Schema] = None,
         rag_info: Optional[AiPromptRagInfo] = None,
+        input_video_audio_files: bool = False,
     ) -> AiPrompt:
         if limit_last_message < 0:
             limit_last_message = limit
@@ -216,11 +217,14 @@ class OssansNaviService:
                             allow_private_files=True,
                         ),
                         images=(
+                            # analyze_image_files が有効の場合は画像を解析して文字列化するために、未解析の画像ファイルを入力する
+                            # input_image_files が有効の場合は lastshot で何枚かの画像を再入力する
+                            # それ以外の場合は画像を入力しない
                             [
                                 AiPromptImage(data=file.content)
                                 for file in message.files if file.is_image and not file.is_analyzed and file.is_valid
                             ]
-                            if with_image_files and message.has_not_analyzed_files() else (
+                            if analyze_image_files and message.has_not_analyzed_files() else (
                                 [
                                     # input_image_files に指定した枚数だけ画像ファイルを再度入力する
                                     # lastshot で画像そのものを入力した方が精度が上がるため、安価な Gemini 限定で入力する
@@ -241,8 +245,21 @@ class OssansNaviService:
                                 if input_image_files > 0 and message.user.user_id not in self.slack_service.my_bot_user_id
                                 else []
                             )
-                        )
-
+                        ),
+                        videos=(
+                            [
+                                AiPromptUploadFile(file.content, file.mimetype, file.title)
+                                for file in message.files if file.is_video and file.is_valid
+                            ]
+                            if input_video_audio_files else []
+                        ),
+                        audios=(
+                            [
+                                AiPromptUploadFile(file.content, file.mimetype, file.title)
+                                for file in message.files if file.is_audio and file.is_valid
+                            ]
+                            if input_video_audio_files else []
+                        ),
                     ),
                     name=message.user.user_id,
                 )
@@ -552,7 +569,7 @@ class OssansNaviService:
             self.get_ai_prompt(
                 self.ai_prompt_service.image_description_prompt(),
                 thread_messages,
-                with_image_files=True,
+                analyze_image_files=True,
                 schema=Schema(
                     type=Type.OBJECT,
                     properties={
@@ -842,8 +859,8 @@ class OssansNaviService:
             self.get_ai_prompt(
                 self.ai_prompt_service.lastshot_prompt(False),
                 thread_messages,
-                limit=10000,
-                limit_last_message=30000,
+                limit=15000,
+                limit_last_message=40000,
             ).to_openai_messages()
         )
         # 低価格LLM が精査してくれた結果を元にトークン数が収まる範囲で入力データとする
@@ -853,7 +870,7 @@ class OssansNaviService:
                 json.dumps(
                     OssansNaviService.slack_message_to_ai_prompt(
                         content,
-                        limit=10000,
+                        limit=15000,
                         check_dup_files=True,
                         check_dup_files_dict=check_dup_files_dict
                     ),
@@ -874,11 +891,12 @@ class OssansNaviService:
                 self.ai_prompt_service.lastshot_prompt(len(current_messages) > 0),
                 thread_messages,
                 input_image_files=config.LASTSHOT_INPUT_IMAGE_FILES,
-                limit=10000,
-                limit_last_message=30000,
+                input_video_audio_files=config.LOAD_VIDEO_AUDIO_FILES,
+                limit=15000,
+                limit_last_message=40000,
                 rag_info=AiPromptRagInfo(
                     OssansNaviService.slack_message_to_ai_prompt(
-                        SlackMessage.sort(current_messages), limit=10000, check_dup_files=True
+                        SlackMessage.sort(current_messages), limit=15000, check_dup_files=True
                     ),
                     self.slack_searches.lastshot_terms
                 )
@@ -898,37 +916,41 @@ class OssansNaviService:
             ),
         )
 
-    def load_slack_file(self, file: SlackFile, user_client: bool = False) -> None:
+    def load_slack_file(self, file: SlackFile, user_client: bool = False, load_file: bool = True, load_vtt: bool = False) -> None:
         if file.is_initialized:
             # ロード済みなら処理せずに終了
             return
         file.is_initialized = True
         try:
-            file.content = self.slack_service.load_file(file.url_private, user_client)
-            if file.is_image:
-                bytes_io = BytesIO(file.content)
-                image: Image.Image | ImageFile.ImageFile = Image.open(bytes_io)
-                max_size = max(image.width, image.height)
-                if max_size > config.MAX_IMAGE_SIZE:
-                    resize_retio = config.MAX_IMAGE_SIZE / max_size
-                    image = image.resize((int(image.width * resize_retio), int(image.height * resize_retio)))
-                bytes_io = BytesIO()
-                image.save(bytes_io, format="PNG")
-                file.content = bytes_io.getvalue()
-                file.mimetype = 'image/png'
-                file._height = image.height
-                file._width = image.width
-            elif file.is_text:
-                file.text = file.content.decode("utf-8")
-            elif file.is_canvas:
-                html_content = file.content.decode("utf-8")
-                parser = html2text.HTML2Text()
-                parser.images_to_alt = True
-                html_parsed = parser.handle(html_content)
-                file.text = html_parsed
-                file.mimetype = "text/markdown"
-                file.filetype = "markdown"
-                file.pretty_type = "Markdown"
+            if load_vtt:
+                if file.transcription_complete and file.vtt:
+                    file.text = self.slack_service.load_file(file.vtt, user_client).decode("utf-8")
+            if load_file:
+                file.content = self.slack_service.load_file(file.url_private, user_client)
+                if file.is_image:
+                    bytes_io = BytesIO(file.content)
+                    image: Image.Image | ImageFile.ImageFile = Image.open(bytes_io)
+                    max_size = max(image.width, image.height)
+                    if max_size > config.MAX_IMAGE_SIZE:
+                        resize_retio = config.MAX_IMAGE_SIZE / max_size
+                        image = image.resize((int(image.width * resize_retio), int(image.height * resize_retio)))
+                    bytes_io = BytesIO()
+                    image.save(bytes_io, format="PNG")
+                    file.content = bytes_io.getvalue()
+                    file.mimetype = 'image/png'
+                    file._height = image.height
+                    file._width = image.width
+                elif file.is_text:
+                    file.text = file.content.decode("utf-8")
+                elif file.is_canvas:
+                    html_content = file.content.decode("utf-8")
+                    parser = html2text.HTML2Text()
+                    parser.images_to_alt = True
+                    html_parsed = parser.handle(html_content)
+                    file.text = html_parsed
+                    file.mimetype = "text/markdown"
+                    file.filetype = "markdown"
+                    file.pretty_type = "Markdown"
         except Exception as e:
             logger.info(f"Slack get_image failed: {str(e)}")
 
@@ -984,9 +1006,12 @@ class OssansNaviService:
             ]:
                 for file in message_lite.files:
                     # テキストファイルかcanvasだった場合はファイルをロードする
+                    # 動画や音声ファイルは VTT をロードする
                     # 画像は読み込んでも利用しないので読み込まない
                     if file.is_text or file.is_canvas:
-                        self.load_slack_file(file, True)
+                        self.load_slack_file(file, user_client=True, load_file=True, load_vtt=False)
+                    elif file.is_video or file.is_audio:
+                        self.load_slack_file(file, user_client=True, load_file=False, load_vtt=True)
         except Exception as e:
             logger.error(e, exc_info=True)
 
