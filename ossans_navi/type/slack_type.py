@@ -479,6 +479,7 @@ class SlackMessageEvent:
     settings: str = dataclasses.field(default="", init=False)
     canceled_events: list['SlackMessageEvent'] = dataclasses.field(default_factory=list, init=False)
     reactions_to_message: list[str] = dataclasses.field(default_factory=list, init=False)
+    has_image_video_audio: bool = dataclasses.field(default=False, init=False)
 
     def valid(self) -> bool:
         return bool(self._user)

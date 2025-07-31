@@ -69,6 +69,7 @@ class AiPromptService:
                     "channel": self.event.channel,
                     "settings": self.event.settings,
                     "is_open_channel": self.event.is_open_channel(),
+                    "has_image_video_audio": self.event.has_image_video_audio,
                 },
                 **(extra or {}),
             }

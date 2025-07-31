@@ -104,7 +104,8 @@ purpose: {{ event.channel.purpose }}
 
 # What I need you to do
 - Please output your response in JSON format according to the "Output format" described below.
-
+{% if event.has_image_video_audio %}- The attached image, video, and audio content will be analyzed and entered later. Please respond to this task on the assumption that they have been entered.
+{% endif %}
 # Output format
 {
 "user_intent": contents,
@@ -235,6 +236,8 @@ purpose: {{ event.channel.purpose }}
 - Please output your response in JSON format according to the "Output format" described below.
 - Please think in {{ language }} and respond in {{ language }}.
 - Slack is used by all employees for work, chatting, etc., so you can retrieve information that the "{{ workspace_name }}" has when you search for it.
+{% if event.has_image_video_audio %}- The attached image, video, and audio content will be analyzed and entered later. Please respond to this task on the assumption that they have been entered.
+{% endif %}
 
 # Output format
 {
@@ -304,6 +307,8 @@ purpose: {{ event.channel.purpose }}
 - If you have a link in the text that may have the information you need, please specify the link in "get_messages".
 - Please output your response in JSON format according to the "Output format" described below.
 - Please think in {{ language }} and respond in {{ language }}.
+{% if event.has_image_video_audio %}- The attached image, video, and audio content will be analyzed and entered later. Please respond to this task on the assumption that they have been entered.
+{% endif %}
 
 # Output format
 {

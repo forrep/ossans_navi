@@ -234,6 +234,15 @@ def do_ossans_navi_response(
     # 定期的にイベントがキャンセルされていないか確認して、キャンセルされていれば終了する
     yield
 
+    # スレッド内のメッセージに添付されているファイルが画像、動画、音声ファイルかどうかを判定する
+    # それによってプロンプトの内容をカスタマイズする
+    event.has_image_video_audio = any(
+        [
+            len([True for file in message.files if file.is_image or file.is_video or file.is_audio]) > 0
+            for message in thread_messages
+        ]
+    )
+
     # メッセージの仕分けを行う、質問かどうか判別する
     event.classification = ossans_navi_service.classify(thread_messages)
     logger.info(f"classify intent          {event.user_intent}")
