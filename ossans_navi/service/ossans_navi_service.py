@@ -916,15 +916,25 @@ class OssansNaviService:
             ),
         )
 
-    def load_slack_file(self, file: SlackFile, user_client: bool = False, load_file: bool = True, load_vtt: bool = False) -> None:
+    def load_slack_file(
+        self,
+        file: SlackFile,
+        user_client: bool = False,
+        load_file: bool = True,
+        load_vtt: bool = False,
+        initialized: bool = True
+    ) -> None:
         if file.is_initialized:
             # ロード済みなら処理せずに終了
             return
-        file.is_initialized = True
+        file.is_initialized = initialized
         try:
-            if load_vtt:
-                if file.transcription_complete and file.vtt:
-                    file.text = self.slack_service.load_file(file.vtt, user_client).decode("utf-8")
+            if load_vtt and file.transcription_complete and file.vtt and not file.text:
+                # 以下の全てに適合する場合に vtt をロードする
+                # - load_vtt の指示がある
+                # - slack が vtt を生成している ※file.transcription_complete and file.vtt
+                # - file.text が空 ※file.text が空ではないならすでに vtt をロードしている
+                file.text = self.slack_service.load_file(file.vtt, user_client).decode("utf-8")
             if load_file:
                 file.content = self.slack_service.load_file(file.url_private, user_client)
                 if file.is_image:

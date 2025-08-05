@@ -234,14 +234,26 @@ def do_ossans_navi_response(
     # 定期的にイベントがキャンセルされていないか確認して、キャンセルされていれば終了する
     yield
 
-    # スレッド内のメッセージに添付されているファイルが画像、動画、音声ファイルかどうかを判定する
-    # それによってプロンプトの内容をカスタマイズする
-    event.has_image_video_audio = any(
-        [
-            len([True for file in message.files if file.is_image or file.is_video or file.is_audio]) > 0
-            for message in thread_messages
-        ]
-    )
+    # メッセージ内に後のフェーズで解析予定の画像・映像・音声ファイルがあるかどうかを判定する
+    # 画像・映像・音声は文字列情報と違い、各処理フェーズで毎回は入力しない、必要なタイミングでのみ入力する仕様
+    # 画像・映像・音声の解析（入力）タイミングについて
+    #   - 画像: classify（メッセージの仕分け）の次フェーズで解析して文字列化する、設定によっては lastshot でも再入力する
+    #   - 映像・音声: LOAD_VIDEO_AUDIO_FILES が有効な場合は lastshot で入力する、LOAD_VIDEO_AUDIO_FILES が無効な場合は入力しない、vtt は常に入力する
+    # 例えば「添付した音声を要約して」という依頼に対して classify や do_slack_searches で音声を入力していないと検索によって無理に探そうとしてしまう
+    # そのため「音声は後のフェーズで入力するから入力された前提で応答して」というシステムプロンプトを追加する必要がある
+    for (i, message) in enumerate(thread_messages):
+        is_latest_message = i == len(thread_messages) - 1
+        for file in message.files:
+            if file.is_image:
+                # 画像が存在する場合は常に解析対象となる
+                event.has_image_video_audio = True
+            elif file.is_video or file.is_audio:
+                # 映像・音声は条件付きで lastshot に入力する
+                # vtt が存在する場合は、このタイミングで読み込む、classify が vtt 情報を参照できる
+                ossans_navi_service.load_slack_file(file, user_client=False, load_file=False, load_vtt=True, initialized=False)
+                if is_latest_message and event.is_mention and config.LOAD_VIDEO_AUDIO_FILES:
+                    # lastshot で入力する条件が上記の通り、その場合は「後で入力するよ」フラグを立てる
+                    event.has_image_video_audio = True
 
     # メッセージの仕分けを行う、質問かどうか判別する
     event.classification = ossans_navi_service.classify(thread_messages)
@@ -280,9 +292,6 @@ def do_ossans_navi_response(
                     #   - OssansNavi がメンションされている
                     #   - 動画や音声ファイルのロードが有効になっている
                     ossans_navi_service.load_slack_file(file, user_client=False, load_file=True, load_vtt=True)
-                else:
-                    # それ以外の場合は vtt だけ読み込む
-                    ossans_navi_service.load_slack_file(file, user_client=False, load_file=False, load_vtt=True)
 
     # 添付画像がある場合は画像の説明を取得する
     ossans_navi_service.analyze_image_description(thread_messages)

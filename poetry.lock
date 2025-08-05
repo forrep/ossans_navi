@@ -322,14 +322,14 @@ urllib3 = ["packaging", "urllib3"]
 
 [[package]]
 name = "google-genai"
-version = "1.15.0"
+version = "1.28.0"
 description = "GenAI Python SDK"
 optional = false
 python-versions = ">=3.9"
 groups = ["main"]
 files = [
-    {file = "google_genai-1.15.0-py3-none-any.whl", hash = "sha256:6d7f149cc735038b680722bed495004720514c234e2a445ab2f27967955071dd"},
-    {file = "google_genai-1.15.0.tar.gz", hash = "sha256:118bb26960d6343cd64f1aeb5c2b02144a36ad06716d0d1eb1fa3e0904db51f1"},
+    {file = "google_genai-1.28.0-py3-none-any.whl", hash = "sha256:7fd506799005cc87d3c5704a2eb5a2cb020d45b4d216a802e606700308f7f2f3"},
+    {file = "google_genai-1.28.0.tar.gz", hash = "sha256:e93053c02e616842679ba5ecce5b99db8c0ca6310623c55ff6245b5b1d293138"},
 ]
 
 [package.dependencies]
@@ -338,8 +338,12 @@ google-auth = ">=2.14.1,<3.0.0"
 httpx = ">=0.28.1,<1.0.0"
 pydantic = ">=2.0.0,<3.0.0"
 requests = ">=2.28.1,<3.0.0"
+tenacity = ">=8.2.3,<9.0.0"
 typing-extensions = ">=4.11.0,<5.0.0"
 websockets = ">=13.0.0,<15.1.0"
+
+[package.extras]
+aiohttp = ["aiohttp (<4.0.0)"]
 
 [[package]]
 name = "h11"
@@ -1269,6 +1273,22 @@ files = [
 ]
 
 [[package]]
+name = "tenacity"
+version = "8.5.0"
+description = "Retry code until it succeeds"
+optional = false
+python-versions = ">=3.8"
+groups = ["main"]
+files = [
+    {file = "tenacity-8.5.0-py3-none-any.whl", hash = "sha256:b594c2a5945830c267ce6b79a166228323ed52718f30302c1359836112346687"},
+    {file = "tenacity-8.5.0.tar.gz", hash = "sha256:8bc6c0c8a09b31e6cad13c47afbed1a567518250a9a171418582ed8d9c20ca78"},
+]
+
+[package.extras]
+doc = ["reno", "sphinx"]
+test = ["pytest", "tornado (>=4.5)", "typeguard"]
+
+[[package]]
 name = "tiktoken"
 version = "0.7.0"
 description = "tiktoken is a fast BPE tokeniser for use with OpenAI's models"
@@ -1485,4 +1505,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "f1426d969865199d02d67454e157e98614f09ad4a6c8b702fae3ff557399fa92"
+content-hash = "17ce2ade413987fd78fd506fd60ffb074d74ddfec45d4d762d8aadf7e386d0dd"

@@ -81,8 +81,10 @@ if AI_SERVICE_TYPE == AiServiceType.GEMINI:
     LASTSHOT_TOKEN_NO_MENTION = 40000
     # lastshot で再入力する画像数
     LASTSHOT_INPUT_IMAGE_FILES = 2
-    # 動画・音声ファイルを入力する
+    # 映像・音声ファイルを入力する
     LOAD_VIDEO_AUDIO_FILES = True
+    # 映像ファイルの FPS、FPS=0.5 で 2秒ごとに1フレーム消費、1フレームあたり 258トークン消費
+    VIDEO_FPS = 0.5
 else:
     # 入力する会話コンテキスト（スレッド）の最大トークン数
     MAX_THREAD_TOKENS = 12000
@@ -94,8 +96,10 @@ else:
     LASTSHOT_TOKEN_NO_MENTION = 10000
     # lastshot で再入力する画像数
     LASTSHOT_INPUT_IMAGE_FILES = 0
-    # 動画・音声ファイルを入力する
+    # 映像・音声ファイルを入力する
     LOAD_VIDEO_AUDIO_FILES = False
+    # 映像ファイルの FPS、現時点では Gemini のみのサポート
+    VIDEO_FPS = 0.5
 
 # 開発モードのデフォルト値（起動時に --production が渡されると上書きされて本番モードになる）
 DEVELOPMENT_MODE = True

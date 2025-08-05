@@ -534,10 +534,9 @@ class SlackService:
         for name in names:
             try:
                 self.bot_client.reactions_remove(channel=channel, timestamp=ts, name=name)
-            except Exception as e:
+            except Exception:
                 # 削除できなくてもエラーとせずに無視する
-                logger.info(f"reactions_remove returns error, channel={channel}, ts={ts}, name={name}")
-                logger.info(e, exc_info=True)
+                logger.info(f"Already removed, channel={channel}, ts={ts}, name={name}")
 
     @staticmethod
     def convert_markdown_to_mrkdwn(text: str):
