@@ -17,34 +17,38 @@ SLACK_APP_TOKEN = os.environ["OSN_SLACK_APP_TOKEN"]
 SLACK_BOT_TOKEN = os.environ["OSN_SLACK_BOT_TOKEN"]
 SLACK_USER_TOKEN = os.environ["OSN_SLACK_USER_TOKEN"]
 
-AI_SERVICE_TYPE = AiServiceType(os.environ["OSN_AI_SERVICE_TYPE"])
+AI_SERVICE_TYPE = AiServiceType(os.environ.get("OSN_AI_SERVICE_TYPE", "gemini"))
+OPENAI_API_KEY = os.environ.get("OSN_OPENAI_API_KEY")
+AZURE_OPENAI_API_KEY = os.environ.get("OSN_AZURE_OPENAI_API_KEY")
+AZURE_OPENAI_ENDPOINT = os.environ.get("OSN_AZURE_OPENAI_ENDPOINT")
+AZURE_OPENAI_API_VERSION = "2024-10-21"
+GEMINI_API_KEY = os.environ.get("OSN_GEMINI_API_KEY")
 match AI_SERVICE_TYPE:
     case AiServiceType.OPENAI:
-        OPENAI_API_KEY = os.environ["OSN_OPENAI_API_KEY"]
-        OPENAI_MODEL_LOW_COST = os.environ.get("OSN_OPENAI_MODEL_LOW_COST", "gpt-4o-mini")
-        OPENAI_MODEL_LOW_COST_IN = float(os.environ.get("OSN_OPENAI_MODEL_LOW_COST_IN", "0"))
-        OPENAI_MODEL_LOW_COST_OUT = float(os.environ.get("OSN_OPENAI_MODEL_LOW_COST_OUT", "0"))
-        OPENAI_MODEL_HIGH_QUALITY = os.environ.get("OSN_OPENAI_MODEL_HIGH_QUALITY", "gpt-4o")
-        OPENAI_MODEL_HIGH_QUALITY_IN = float(os.environ.get("OSN_OPENAI_MODEL_HIGH_QUALITY_IN", "0"))
-        OPENAI_MODEL_HIGH_QUALITY_OUT = float(os.environ.get("OSN_OPENAI_MODEL_HIGH_QUALITY_OUT", "0"))
+        AI_MODEL_LOW_COST = os.environ.get("OSN_OPENAI_MODEL_LOW_COST", os.environ.get("OSN_AI_MODEL_LOW_COST", "gpt-4o-mini"))
+        AI_MODEL_LOW_COST_IN = float(os.environ.get("OSN_OPENAI_MODEL_LOW_COST_IN", os.environ.get("OSN_AI_MODEL_LOW_COST_IN", "0")))
+        AI_MODEL_LOW_COST_OUT = float(os.environ.get("OSN_OPENAI_MODEL_LOW_COST_OUT", os.environ.get("OSN_AI_MODEL_LOW_COST_OUT", "0")))
+        AI_MODEL_HIGH_QUALITY = os.environ.get("OSN_OPENAI_MODEL_HIGH_QUALITY", os.environ.get("OSN_AI_MODEL_HIGH_QUALITY", "gpt-4o"))
+        AI_MODEL_HIGH_QUALITY_IN = float(os.environ.get("OSN_OPENAI_MODEL_HIGH_QUALITY_IN", os.environ.get("OSN_AI_MODEL_HIGH_QUALITY_IN", "0")))
+        AI_MODEL_HIGH_QUALITY_OUT = float(os.environ.get("OSN_OPENAI_MODEL_HIGH_QUALITY_OUT", os.environ.get("OSN_AI_MODEL_HIGH_QUALITY_OUT", "0")))
     case AiServiceType.AZURE_OPENAI:
-        AZURE_OPENAI_API_KEY = os.environ["OSN_AZURE_OPENAI_API_KEY"]
-        AZURE_OPENAI_ENDPOINT = os.environ["OSN_AZURE_OPENAI_ENDPOINT"]
-        AZURE_OPENAI_API_VERSION = "2024-10-21"
-        AZURE_OPENAI_MODEL_LOW_COST = os.environ.get("OSN_AZURE_OPENAI_MODEL_LOW_COST", "gpt-4o-mini")
-        AZURE_OPENAI_MODEL_LOW_COST_IN = float(os.environ.get("OSN_AZURE_OPENAI_MODEL_LOW_COST_IN", "0"))
-        AZURE_OPENAI_MODEL_LOW_COST_OUT = float(os.environ.get("OSN_AZURE_OPENAI_MODEL_LOW_COST_OUT", "0"))
-        AZURE_OPENAI_MODEL_HIGH_QUALITY = os.environ.get("OSN_AZURE_OPENAI_MODEL_HIGH_QUALITY", "gpt-4o")
-        AZURE_OPENAI_MODEL_HIGH_QUALITY_IN = float(os.environ.get("OSN_AZURE_OPENAI_MODEL_HIGH_QUALITY_IN", "0"))
-        AZURE_OPENAI_MODEL_HIGH_QUALITY_OUT = float(os.environ.get("OSN_AZURE_OPENAI_MODEL_HIGH_QUALITY_OUT", "0"))
+        AI_MODEL_LOW_COST = os.environ.get("OSN_AZURE_OPENAI_MODEL_LOW_COST", os.environ.get("OSN_AI_MODEL_LOW_COST", "gpt-4o-mini"))
+        AI_MODEL_LOW_COST_IN = float(os.environ.get("OSN_AZURE_OPENAI_MODEL_LOW_COST_IN", os.environ.get("OSN_AI_MODEL_LOW_COST_IN", "0")))
+        AI_MODEL_LOW_COST_OUT = float(os.environ.get("OSN_AZURE_OPENAI_MODEL_LOW_COST_OUT", os.environ.get("OSN_AI_MODEL_LOW_COST_OUT", "0")))
+        AI_MODEL_HIGH_QUALITY = os.environ.get("OSN_AZURE_OPENAI_MODEL_HIGH_QUALITY", os.environ.get("OSN_AI_MODEL_HIGH_QUALITY", "gpt-4o"))
+        AI_MODEL_HIGH_QUALITY_IN = float(
+            os.environ.get("OSN_AZURE_OPENAI_MODEL_HIGH_QUALITY_IN", os.environ.get("OSN_AI_MODEL_HIGH_QUALITY_IN", "0")))
+        AI_MODEL_HIGH_QUALITY_OUT = float(
+            os.environ.get("OSN_AZURE_OPENAI_MODEL_HIGH_QUALITY_OUT", os.environ.get("OSN_AI_MODEL_HIGH_QUALITY_OUT", "0")))
     case AiServiceType.GEMINI:
-        GEMINI_API_KEY = os.environ["OSN_GEMINI_API_KEY"]
-        GEMINI_MODEL_LOW_COST = os.environ.get("OSN_GEMINI_MODEL_LOW_COST", "gemini-2.0-flash")
-        GEMINI_MODEL_LOW_COST_IN = float(os.environ.get("OSN_GEMINI_MODEL_LOW_COST_IN", "0"))
-        GEMINI_MODEL_LOW_COST_OUT = float(os.environ.get("OSN_GEMINI_MODEL_LOW_COST_OUT", "0"))
-        GEMINI_MODEL_HIGH_QUALITY = os.environ.get("OSN_GEMINI_MODEL_HIGH_QUALITY", "gemini-2.0-flash")
-        GEMINI_MODEL_HIGH_QUALITY_IN = float(os.environ.get("OSN_GEMINI_MODEL_HIGH_QUALITY_IN", "0"))
-        GEMINI_MODEL_HIGH_QUALITY_OUT = float(os.environ.get("OSN_GEMINI_MODEL_HIGH_QUALITY_OUT", "0"))
+        AI_MODEL_LOW_COST = os.environ.get("OSN_GEMINI_MODEL_LOW_COST", os.environ.get("OSN_AI_MODEL_LOW_COST", "gemini-2.0-flash"))
+        AI_MODEL_LOW_COST_IN = float(os.environ.get("OSN_GEMINI_MODEL_LOW_COST_IN", os.environ.get("OSN_AI_MODEL_LOW_COST_IN", "0")))
+        AI_MODEL_LOW_COST_OUT = float(os.environ.get("OSN_GEMINI_MODEL_LOW_COST_OUT", os.environ.get("OSN_AI_MODEL_LOW_COST_OUT", "0")))
+        AI_MODEL_HIGH_QUALITY = os.environ.get("OSN_GEMINI_MODEL_HIGH_QUALITY", os.environ.get("OSN_AI_MODEL_HIGH_QUALITY", "gemini-2.5-flash"))
+        AI_MODEL_HIGH_QUALITY_IN = float(os.environ.get("OSN_GEMINI_MODEL_HIGH_QUALITY_IN", os.environ.get("OSN_AI_MODEL_HIGH_QUALITY_IN", "0")))
+        AI_MODEL_HIGH_QUALITY_OUT = float(os.environ.get("OSN_GEMINI_MODEL_HIGH_QUALITY_OUT", os.environ.get("OSN_AI_MODEL_HIGH_QUALITY_OUT", "0")))
+    case _:
+        raise ValueError(f"Unknown AI service type: {AI_SERVICE_TYPE}")
 
 WORKSPACE_NAME = v if (v := os.environ.get("OSN_WORKSPACE_NAME")) else "company"
 ASSISTANT_NAMES = v.split(r',') if (v := os.environ.get("OSN_ASSISTANT_NAMES")) else ["assistant"]
@@ -58,7 +62,7 @@ DEVELOPMENT_CHANNELS = v.split(r',') if (v := os.environ.get("OSN_DEVELOPMENT_CH
 RESPONSE_LOGGING_CHANNEL = os.environ.get("OSN_RESPONSE_LOGGING_CHANNEL")
 
 # 読み込む画像の一辺の最大サイズ、これを超える場合は縮小する
-MAX_IMAGE_SIZE = int(os.environ.get("OSN_MAX_IMAGE_SIZE", "2304"))
+MAX_IMAGE_SIZE = int(os.environ.get("OSN_MAX_IMAGE_SIZE", "3072"))
 
 # refine_slack_searches を同時実行するスレッド数
 REFINE_SLACK_SEARCHES_THREADS = 4
@@ -80,7 +84,7 @@ if AI_SERVICE_TYPE == AiServiceType.GEMINI:
     # lastshot で許容するトークン数（メンションなし）
     LASTSHOT_TOKEN_NO_MENTION = 40000
     # lastshot で再入力する画像数
-    LASTSHOT_INPUT_IMAGE_FILES = 2
+    LASTSHOT_INPUT_IMAGE_FILES = 4
     # 映像・音声ファイルを入力する
     LOAD_VIDEO_AUDIO_FILES = True
     # 映像ファイルの FPS、FPS=0.5 で 2秒ごとに1フレーム消費、1フレームあたり 258トークン消費
@@ -95,7 +99,7 @@ else:
     # lastshot で許容するトークン数（メンションなし）
     LASTSHOT_TOKEN_NO_MENTION = 10000
     # lastshot で再入力する画像数
-    LASTSHOT_INPUT_IMAGE_FILES = 0
+    LASTSHOT_INPUT_IMAGE_FILES = 2
     # 映像・音声ファイルを入力する
     LOAD_VIDEO_AUDIO_FILES = False
     # 映像ファイルの FPS、現時点では Gemini のみのサポート

@@ -53,47 +53,47 @@ class AiModels:
         match config.AI_SERVICE_TYPE:
             case AiServiceType.OPENAI:
                 models.low_cost = AiModel(
-                    config.OPENAI_MODEL_LOW_COST,
+                    config.AI_MODEL_LOW_COST,
                     config.AI_SERVICE_TYPE,
-                    config.OPENAI_MODEL_LOW_COST_IN,
-                    config.OPENAI_MODEL_LOW_COST_OUT,
+                    config.AI_MODEL_LOW_COST_IN,
+                    config.AI_MODEL_LOW_COST_OUT,
                     AiTokenizeGpt4o
                 )
                 models.high_quality = AiModel(
-                    config.OPENAI_MODEL_HIGH_QUALITY,
+                    config.AI_MODEL_HIGH_QUALITY,
                     config.AI_SERVICE_TYPE,
-                    config.OPENAI_MODEL_HIGH_QUALITY_IN,
-                    config.OPENAI_MODEL_HIGH_QUALITY_OUT,
+                    config.AI_MODEL_HIGH_QUALITY_IN,
+                    config.AI_MODEL_HIGH_QUALITY_OUT,
                     AiTokenizeGpt4o
                 )
             case AiServiceType.AZURE_OPENAI:
                 models.low_cost = AiModel(
-                    config.AZURE_OPENAI_MODEL_LOW_COST,
+                    config.AI_MODEL_LOW_COST,
                     config.AI_SERVICE_TYPE,
-                    config.AZURE_OPENAI_MODEL_LOW_COST_IN,
-                    config.AZURE_OPENAI_MODEL_LOW_COST_OUT,
+                    config.AI_MODEL_LOW_COST_IN,
+                    config.AI_MODEL_LOW_COST_OUT,
                     AiTokenizeGpt4o
                 )
                 models.high_quality = AiModel(
-                    config.AZURE_OPENAI_MODEL_HIGH_QUALITY,
+                    config.AI_MODEL_HIGH_QUALITY,
                     config.AI_SERVICE_TYPE,
-                    config.AZURE_OPENAI_MODEL_HIGH_QUALITY_IN,
-                    config.AZURE_OPENAI_MODEL_HIGH_QUALITY_OUT,
+                    config.AI_MODEL_HIGH_QUALITY_IN,
+                    config.AI_MODEL_HIGH_QUALITY_OUT,
                     AiTokenizeGpt4o
                 )
             case AiServiceType.GEMINI:
                 models.low_cost = AiModel(
-                    config.GEMINI_MODEL_LOW_COST,
+                    config.AI_MODEL_LOW_COST,
                     config.AI_SERVICE_TYPE,
-                    config.GEMINI_MODEL_LOW_COST_IN,
-                    config.GEMINI_MODEL_LOW_COST_OUT,
+                    config.AI_MODEL_LOW_COST_IN,
+                    config.AI_MODEL_LOW_COST_OUT,
                     AiTokenizeGpt4o
                 )
                 models.high_quality = AiModel(
-                    config.GEMINI_MODEL_HIGH_QUALITY,
+                    config.AI_MODEL_HIGH_QUALITY,
                     config.AI_SERVICE_TYPE,
-                    config.GEMINI_MODEL_HIGH_QUALITY_IN,
-                    config.GEMINI_MODEL_HIGH_QUALITY_OUT,
+                    config.AI_MODEL_HIGH_QUALITY_IN,
+                    config.AI_MODEL_HIGH_QUALITY_OUT,
                     AiTokenizeGpt4o
                 )
             case _:
@@ -125,15 +125,6 @@ class AiPromptRagInfo:
 
 
 @dataclasses.dataclass
-class AiPromptImage:
-    data: bytes
-
-    @property
-    def image_uri(self) -> str:
-        return f"data:image/png;base64,{base64.b64encode(self.data).decode()}"
-
-
-@dataclasses.dataclass
 class AiPromptUploadFile:
     data: bytes
     mimetype: str
@@ -143,11 +134,15 @@ class AiPromptUploadFile:
     def to_bytes_io(self) -> BytesIO:
         return BytesIO(self.data)
 
+    @property
+    def image_uri(self) -> str:
+        return f"data:image/png;base64,{base64.b64encode(self.data).decode()}"
+
 
 @dataclasses.dataclass
 class AiPromptContent:
     data: str | dict[str, Any]
-    images: list[AiPromptImage] = dataclasses.field(default_factory=list)
+    images: list[AiPromptUploadFile] = dataclasses.field(default_factory=list)
     videos: list[AiPromptUploadFile] = dataclasses.field(default_factory=list)
     audios: list[AiPromptUploadFile] = dataclasses.field(default_factory=list)
 
@@ -296,12 +291,12 @@ class AiPromptMessage:
             parts.extend(
                 [
                     {
-                        "inline_data": {
-                            "mime_type": "image/png",
-                            "data": image.data,
+                        "file_data": {
+                            "mime_type": image.file.mime_type,
+                            "file_uri": image.file.uri,
                         }
                     }
-                    for image in self.content.images
+                    for image in self.content.images if image.file is not None
                 ]
             )
             parts.extend(
@@ -563,7 +558,9 @@ class AiPrompt:
 
     def get_upload_files(self) -> list[AiPromptUploadFile]:
         """Get all files to be uploaded."""
-        return list(itertools.chain.from_iterable([message.content.videos + message.content.audios for message in self.messages]))
+        return list(itertools.chain.from_iterable([
+            message.content.images + message.content.videos + message.content.audios for message in self.messages
+        ]))
 
     @staticmethod
     def convert_bytes_to_base64(value: dict[str, Any] | list[Any] | Any) -> dict[str, Any] | list[Any] | Any:
@@ -660,14 +657,20 @@ class AiService:
     def __init__(self) -> None:
         match config.AI_SERVICE_TYPE:
             case AiServiceType.OPENAI:
+                if not config.OPENAI_API_KEY:
+                    raise ValueError("OSN_OPENAI_API_KEY is required when using OpenAI service.")
                 self.client_openai = OpenAI(api_key=config.OPENAI_API_KEY)
             case AiServiceType.AZURE_OPENAI:
+                if not config.AZURE_OPENAI_API_KEY or not config.AZURE_OPENAI_ENDPOINT:
+                    raise ValueError("OSN_AZURE_OPENAI_API_KEY and OSN_AZURE_OPENAI_ENDPOINT are required when using Azure OpenAI service.")
                 self.client_openai = AzureOpenAI(
                     api_key=config.AZURE_OPENAI_API_KEY,
                     api_version=config.AZURE_OPENAI_API_VERSION,
                     azure_endpoint=config.AZURE_OPENAI_ENDPOINT,
                 )
             case AiServiceType.GEMINI:
+                if not config.GEMINI_API_KEY:
+                    raise ValueError("OSN_GEMINI_API_KEY is required when using Gemini service.")
                 self.client_gemini = genai.Client(api_key=config.GEMINI_API_KEY)
             case _:
                 raise NotImplementedError("Unknown AiServiceType")

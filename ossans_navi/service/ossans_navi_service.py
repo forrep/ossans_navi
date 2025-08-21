@@ -16,8 +16,8 @@ from PIL import Image, ImageFile
 from ossans_navi import config
 from ossans_navi.common.cache import LRUCache
 from ossans_navi.service.ai_prompt_service import AiPromptService
-from ossans_navi.service.ai_service import (AiModels, AiPrompt, AiPromptContent, AiPromptImage, AiPromptMessage, AiPromptRagInfo, AiPromptRole,
-                                            AiPromptUploadFile, AiService, QualityCheckResponse)
+from ossans_navi.service.ai_service import (AiModels, AiPrompt, AiPromptContent, AiPromptMessage, AiPromptRagInfo, AiPromptRole, AiPromptUploadFile,
+                                            AiService, QualityCheckResponse)
 from ossans_navi.service.slack_service import SlackService
 from ossans_navi.type import ossans_navi_types
 from ossans_navi.type.slack_type import SlackFile, SlackMessage, SlackMessageEvent, SlackMessageLite, SlackSearches, SlackSearchTerm
@@ -221,7 +221,7 @@ class OssansNaviService:
                             # input_image_files が有効の場合は lastshot で何枚かの画像を再入力する
                             # それ以外の場合は画像を入力しない
                             [
-                                AiPromptImage(data=file.content)
+                                AiPromptUploadFile(file.content, file.mimetype, file.title)
                                 for file in message.files if file.is_image and not file.is_analyzed and file.is_valid
                             ]
                             if analyze_image_files and message.has_not_analyzed_files() else (
@@ -229,7 +229,7 @@ class OssansNaviService:
                                     # input_image_files に指定した枚数だけ画像ファイルを再度入力する
                                     # lastshot で画像そのものを入力した方が精度が上がるため、安価な Gemini 限定で入力する
                                     # また今後画像出力に対応する場合に、元画像を編集する用途には元画像そのものを入力する必要がある
-                                    AiPromptImage(data=file.content)
+                                    AiPromptUploadFile(file.content, file.mimetype, file.title)
                                     for file in message.files
                                     if (
                                         file.is_image
@@ -565,7 +565,7 @@ class OssansNaviService:
 
         # 添付画像を AI で解析実行
         image_description = self.ai_service.request_image_description(
-            self.models.high_quality,
+            self.models.low_cost,
             self.get_ai_prompt(
                 self.ai_prompt_service.image_description_prompt(),
                 thread_messages,
