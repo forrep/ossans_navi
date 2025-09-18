@@ -158,16 +158,13 @@ Graceful Shutdown は新しいメッセージの受信を停止して処理中�
 ### 環境変数
 開発環境では「3. バックエンドアプリの設定」と同様の環境変数を `.devcontainer/devcontainer.env` に設定します。
 
-また、開発環境ではいくつかの追加設定があります。
+DevContainers で開発する場合は、ワークスペースをバインドマウントする際にホスト側の UID/GID とコンテナ内の UID/GID を合わせるために、以下のコマンドで `.devcontainer/.env` を作成します。
 
-```properties
-# DevContainers用の設定（開発時のみ必要）
-# ワークスペースをバインドマウントする際に、ホスト側の UID/GID とコンテナ内の UID/GID を合わせるために必要
-UID=1000
-GID=1000
+```bash
+echo -e "UID=$(id -u)\nGID=$(id -g)" > .devcontainer/.env
 ```
 
-OssansNavi をすでに利用している Slack ワークスペースで開発も行う場合は、開発用に別の Slack アプリを追加した上で以下の設定をします。
+OssansNavi を利用中の Slack ワークスペースで開発を行う場合は、開発用に別の OssansNavi Slack アプリを追加した上で以下の設定をします。
 OSN_DEVELOPMENT_CHANNELS で指定したチャネルには本番モードのアプリが応答せず、開発モードのアプリのみ応答します。
 開発モードのアプリは OSN_DEVELOPERS で指定したユーザーの DM にのみ応答します。
 

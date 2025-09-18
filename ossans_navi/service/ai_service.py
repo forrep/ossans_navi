@@ -49,6 +49,8 @@ class AiModels:
 
     @staticmethod
     def new() -> 'AiModels':
+        if config.AI_MODEL_LOW_COST is None or config.AI_MODEL_HIGH_QUALITY is None:
+            raise ValueError("AI model configuration is incomplete.")
         models = AiModels()
         match config.AI_SERVICE_TYPE:
             case AiServiceType.OPENAI:
@@ -376,7 +378,7 @@ class AiPromptMessage:
                                 **(
                                     {
                                         "status": (
-                                            "No valid information was found in the get_related_information results, "
+                                            "No related information was found in the get_related_information results, "
                                             + "please respond in general terms."
                                         )
                                     } if len(rag_info.contents) == 0 else {}
@@ -601,10 +603,7 @@ class AiResponse:
     def from_gemini_response(response: types.GenerateContentResponse, is_json: bool) -> 'AiResponse':
         ai_response_messages: list[AiResponseMessage] = []
         for candidate in (response.candidates if response.candidates else []):
-            if (
-                candidate.content
-                and candidate.content.parts
-            ):
+            if candidate.content and candidate.content.parts:
                 texts: list[str] = []
                 images: list[ossans_navi_types.Image] = []
                 for part in candidate.content.parts:
@@ -721,10 +720,10 @@ class AiService:
         for _ in range(10):
             try:
                 if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(f"chat_completions({model.name}) body={json.dumps(prompt.to_gemini_rest(), ensure_ascii=False)}")
+                    logger.debug(f"request({model.name})={json.dumps(prompt.to_gemini_rest(), ensure_ascii=False)}")
                 else:
                     logger.info(
-                        f"chat_completions({model.name}) body(shrink)={json.dumps(shrink_message(prompt.to_gemini_rest()), ensure_ascii=False)}"
+                        f"request({model.name})(shrink)={json.dumps(shrink_message(prompt.to_gemini_rest()), ensure_ascii=False)}"
                     )
                 response = self.client_gemini.models.generate_content(
                     model=model.name,
@@ -754,7 +753,7 @@ class AiService:
             # 実行に失敗していた場合は例外を送出
             raise last_exception or RuntimeError()
         logger.info(f"elapsed: {time.time() - start_time}")
-        logger.info("response=" + str(response.model_dump(exclude_unset=True, exclude_defaults=True)))
+        logger.info("response=" + json.dumps(response.model_dump(exclude_unset=True, exclude_defaults=True), ensure_ascii=False))
         # 利用したトークン数を加算する
         if response.usage_metadata:
             if isinstance(response.usage_metadata.prompt_token_count, int):
@@ -777,7 +776,7 @@ class AiService:
         tools = prompt.to_openai_tools()
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(
-                f"chat_completions({model.name}) body={
+                f"request({model.name})={
                     json.dumps(
                         {
                             "response_format": response_format,
@@ -790,7 +789,7 @@ class AiService:
                 }"
             )
         else:
-            logger.info(f"chat_completions({model.name}) body(shrink)={json.dumps(shrink_message(messages), ensure_ascii=False)}")
+            logger.info(f"request({model.name})(shrink)={json.dumps(shrink_message(messages), ensure_ascii=False)}")
         start_time = time.time()
         last_exception: Optional[Exception] = None
         response = None
