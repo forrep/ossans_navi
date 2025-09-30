@@ -24,7 +24,7 @@ from ossans_navi.type.slack_type import (SlackAttachment, SlackAuthTestAppRespon
                                          SlackConversationsListResponse, SlackConversationsMembersResponse, SlackConversationsOpenResponse,
                                          SlackConversationsRepliesResponse, SlackFile, SlackMessage, SlackMessageEvent, SlackMessageLite,
                                          SlackMessageType, SlackSearch, SlackSearchMessagesResponse, SlackSearchTerm, SlackUser,
-                                         SlackUsersGetPresenceResponse, SlackUsersInfoResponse)
+                                         SlackUsersGetPresenceResponse, SlackUsersInfoResponse, SlackUsersListResponse)
 
 logger = logging.getLogger(__name__)
 
@@ -221,6 +221,21 @@ class SlackService:
 
     def stop(self) -> None:
         self.socket_mode_hander.close()
+
+    def users_list(self) -> list[SlackUser]:
+        response = SlackUsersListResponse(**(v if isinstance(v := self.bot_client.users_list().data, dict) else {}))
+        return [
+            SlackUser(
+                user_id=user.id,
+                name=user.real_name,
+                username=user.name,
+                mention=f"<@{user.id}>",
+                is_bot=user.is_bot,
+                is_guest=user.is_stranger or user.is_restricted,
+                is_admin=user.is_admin,
+            )
+            for user in response.members
+        ]
 
     def get_user(self, user_id: str) -> SlackUser:
         if (cached := self.cache_get_user.get(user_id)).found:
@@ -484,7 +499,8 @@ class SlackService:
     def chat_post_message(
         self,
         channel: str,
-        text: str,
+        text: Optional[str] = None,
+        blocks: Optional[list[dict[str, Any]]] = None,
         thread_ts: Optional[str] = None,
         images: list[ossans_navi_types.Image] = [],
     ) -> None:
@@ -507,6 +523,7 @@ class SlackService:
                 channel=channel,
                 thread_ts=thread_ts,
                 text=text,
+                blocks=blocks,
             )
 
     def add_reaction(self, channel: str, ts: str, names: str | list[str]) -> None:

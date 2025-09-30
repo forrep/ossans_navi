@@ -1,12 +1,16 @@
 import json
 import logging
+import re
 import signal
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event, current_thread
-from typing import Final, Generator, Optional
+from typing import Any, Callable, Final, Generator, Optional
+
+from slack_sdk import WebClient
 
 from ossans_navi import config
+from ossans_navi.controller import config_controller
 from ossans_navi.service.ai_service import AiModels, AiService
 from ossans_navi.service.ossans_navi_service import OssansNaviService
 from ossans_navi.service.slack_service import EventGuard, SlackService
@@ -23,8 +27,15 @@ ai_service = AiService()
 logger = logging.getLogger(__name__)
 
 
+@slack_service.app.action(re.compile(r".*"))
+def handle_button_click(ack: Callable, body: dict[Any, Any], client: WebClient):
+    ack()
+    logger.info(f"{json.dumps(body, ensure_ascii=False)}")
+    config_controller.routing(body, slack_service)
+
+
 @slack_service.app.event("message")
-def handle_message_events(say, event: dict[str, dict]):
+def handle_message_events(event: dict[str, dict]):
     if not MAIN_EXECUTOR or not REFINE_EXECUTOR:
         logger.error("MAIN_EXECUTOR or REFINE_EXECUTOR is not initialized.")
         return
@@ -69,11 +80,11 @@ def handle_message_events(say, event: dict[str, dict]):
         else:
             logger.info("This is not message_post or message_changed event, finished")
             return
-        future = MAIN_EXECUTOR.submit(do_ossans_navi_response_safe, say, message_event, REFINE_EXECUTOR)
+        future = MAIN_EXECUTOR.submit(do_ossans_navi_response_safe, message_event, REFINE_EXECUTOR)
         future.add_done_callback(future_callback)
 
 
-def do_ossans_navi_response_safe(say, event: SlackMessageEvent, refine_executor: ThreadPoolExecutor) -> None:
+def do_ossans_navi_response_safe(event: SlackMessageEvent, refine_executor: ThreadPoolExecutor) -> None:
     # スレッド名を Main_0_{event.id()} の形式にする。すでにその形式なら event.id() 部分だけ置換
     thread = current_thread()
     (thread_name, thread_index, _) = f"{thread.name}_0".split("_", 2)
@@ -129,7 +140,11 @@ def do_ossans_navi_response_safe(say, event: SlackMessageEvent, refine_executor:
         logger.error(e, exc_info=True)
         if event.is_mention:
             try:
-                say(text=f"申し訳ありません、次のエラーが発生したため回答できません\n\n```{str(e)}```", thread_ts=event.thread_ts)
+                slack_service.chat_post_message(
+                    channel=event.channel_id,
+                    thread_ts=event.thread_ts,
+                    text=f"```{str(e)}```",
+                )
             except Exception as e:
                 logger.error(e, exc_info=True)
     finally:
@@ -145,16 +160,16 @@ def do_ossans_navi_response(
     event: SlackMessageEvent,
     models: AiModels,
 ) -> Generator[None, None, None]:
+    if event.is_dm() and ossans_navi_service.special_command():
+        # DM の場合は special_command() を実行、そして True が返ってきたら special_command を実行しているので通常のメッセージ処理は終了する
+        return
+
     if event.is_mention:
         # 応答が確定している場合は処理中を示すリアクションを付けて UX を向上させる
         ossans_navi_service.do_progress_reaction(config.PROGRESS_REACTION_THINKING)
 
     # yield で呼び出し元に戻すとイベントのキャンセルチェックをして、キャンセルされていれば終了する
     yield
-
-    if event.is_dm() and ossans_navi_service.special_command():
-        # DM の場合は special_command() を実行、そして True が返ってきたら special_command を実行しているので通常のメッセージ処理は終了する
-        return
 
     if event.is_talk_to_other:
         logger.info("Talk to other, finished.")

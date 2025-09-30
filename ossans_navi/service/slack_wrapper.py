@@ -338,3 +338,19 @@ class SlackWrapper:
             thread_ts=thread_ts,
             request_file_info=request_file_info,
         )
+
+    @api_wrapper(pager=cursor_pager, concat=concat_response(name="members"), limit=999)
+    def users_list(
+        self,
+        *,
+        cursor: Optional[str] = None,
+        include_locale: Optional[bool] = None,
+        limit: Optional[int] = None,
+        team_id: Optional[str] = None,
+    ) -> SlackResponse:
+        return self.client.users_list(
+            cursor=cursor,
+            include_locale=include_locale,
+            limit=limit,
+            team_id=team_id,
+        )

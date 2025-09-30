@@ -15,6 +15,7 @@ from PIL import Image, ImageFile
 
 from ossans_navi import config
 from ossans_navi.common.cache import LRUCache
+from ossans_navi.controller import config_controller
 from ossans_navi.service.ai_prompt_service import AiPromptService
 from ossans_navi.service.ai_service import (AiModels, AiPrompt, AiPromptContent, AiPromptMessage, AiPromptRagInfo, AiPromptRole, AiPromptUploadFile,
                                             AiService, QualityCheckResponse)
@@ -370,12 +371,7 @@ class OssansNaviService:
             #    ※get_config() でキャッシュヒットした場合は再保存されないので、当処理での保存処理は必要
             self.store_config(self.config, False)
             return False
-        elif (
-            match := re.match(
-                r'config\s+(trusted_bots|allow_responds|admin_users|viewable_private_channels)\s+(show|add|remove)(?:\s+(.+))?',
-                self.event.text
-            )
-        ):
+        elif re.match(r'\s*config\s*', self.event.text):
             if (
                 not (
                     # 管理者権限を持つユーザーのみ special_command を実行可能、管理者権限のルールは以下のいずれかを満たすこと
@@ -390,121 +386,7 @@ class OssansNaviService:
                 # 管理者権限を持っていないので special_command を実行しないで終了
                 logger.info(f"permission denied. cannot execute special_command. event={self.event}")
                 return False
-            category: str = match.group(1)
-            action: str = match.group(2)
-            value: Optional[str] = match.group(3)
-            value = (value.strip() if isinstance(value, str) else None)
-            text = f"{category} {action}{f" {value}" if value else ""}"
-            target_user = None
-            if (
-                category in ("trusted_bots", "allow_responds", "admin_users")
-                and action in ("add", "remove")
-                and value
-            ):
-                value = re.sub(r'<@([A-Z0-9]+)(\|[^>]+?)?>', "\\1", value)
-                if (v := self.slack_service.get_user(value)).is_valid:
-                    target_user = v
-
-            if category == "trusted_bots":
-                # 現在有効な trusted_bots を取得
-                now_users = {
-                    **(
-                        {
-                            user.user_id: user
-                            for user in [self.slack_service.get_user(user_id) for user_id in self.config.trusted_bots]
-                            if user.is_valid
-                        }
-                    ),
-                }
-                if action in ("add", "remove") and value:
-                    if target_user is not None and target_user.is_bot:
-                        if action == "add":
-                            now_users[target_user.user_id] = target_user
-                            text += f"\nadded: <@{target_user.user_id}>"
-                            logger.info(f"{category} added: {target_user.name}({target_user.user_id})")
-                        if action == "remove" and target_user.user_id in now_users:
-                            del now_users[target_user.user_id]
-                            text += f"\nremoved: <@{target_user.user_id}>"
-                            logger.info(f"{category} removed: {target_user.name}({target_user.user_id})")
-                        self.config.trusted_bots = list(now_users.keys())
-                        self.store_config(self.config)
-                text += ("\n• " if len(now_users) > 0 else "\nempty")
-                text += "\n• ".join([f"<@{bot.user_id}>" for bot in now_users.values()])
-                self.slack_service.chat_post_message(channel=self.event.channel_id, thread_ts=self.event.thread_ts, text=text)
-            if category == "allow_responds":
-                # 現在有効な allow_responds を取得
-                now_users = {
-                    **(
-                        {
-                            user.user_id: user
-                            for user in [self.slack_service.get_user(user_id) for user_id in self.config.allow_responds]
-                            if user.is_valid
-                        }
-                    ),
-                }
-                if action in ("add", "remove") and value:
-                    if target_user is not None:
-                        if action == "add":
-                            now_users[target_user.user_id] = target_user
-                            text += f"\nadded: <@{target_user.user_id}>"
-                            logger.info(f"{category} added: {target_user.name}({target_user.user_id})")
-                        if action == "remove" and target_user.user_id in now_users:
-                            del now_users[target_user.user_id]
-                            text += f"\nremoved: <@{target_user.user_id}>"
-                            logger.info(f"{category} removed: {target_user.name}({target_user.user_id})")
-                        self.config.allow_responds = list(now_users.keys())
-                        self.store_config(self.config)
-                text += ("\n• " if len(now_users) > 0 else "\nempty")
-                text += "\n• ".join([f"<@{bot.user_id}>" for bot in now_users.values()])
-                self.slack_service.chat_post_message(channel=self.event.channel_id, thread_ts=self.event.thread_ts, text=text)
-            if category == "admin_users":
-                # 現在有効な admin_users を取得
-                now_users = {
-                    user.user_id: user
-                    for user in [self.slack_service.get_user(user_id) for user_id in self.config.admin_users]
-                    if user.is_valid
-                }
-                if action in ("add", "remove") and value:
-                    if target_user is not None and not target_user.is_bot and not target_user.is_guest:
-                        if action == "add":
-                            now_users[target_user.user_id] = target_user
-                            text += f"\nadded: <@{target_user.user_id}>"
-                            logger.info(f"{category} added: {target_user.name}({target_user.user_id})")
-                        if action == "remove" and target_user.user_id in now_users:
-                            del now_users[target_user.user_id]
-                            text += f"\nremoved: <@{target_user.user_id}>"
-                            logger.info(f"{category} removed: {target_user.name}({target_user.user_id})")
-                        self.config.admin_users = list(now_users.keys())
-                        self.store_config(self.config)
-                text += ("\n• " if len(now_users) > 0 else "\nempty")
-                text += "\n• ".join([f"<@{user.user_id}>" for user in now_users.values()])
-                self.slack_service.chat_post_message(channel=self.event.channel_id, thread_ts=self.event.thread_ts, text=text)
-            if category == "viewable_private_channels":
-                #  現在有効な viewable_private_channels を取得
-                now_channels = {
-                    channel.channel_id: channel
-                    for channel in [
-                        self.slack_service.get_channel(channel_id, True) for channel_id in self.config.viewable_private_channels
-                    ]
-                    if channel.is_valid and channel.is_private
-                }
-                if action in ("add", "remove") and value:
-                    value = re.sub(r'<#([A-Z0-9]+)(\|[^>]*?)?>', "\\1", value)
-                    target_channel = self.slack_service.get_channel(value, True)
-                    if target_channel.is_valid and target_channel.is_private:
-                        if action == "add":
-                            now_channels[target_channel.channel_id] = target_channel
-                            text += f"\nadded: <#{target_channel.channel_id}>"
-                            logger.info(f"{category} added: {target_channel.name}({target_channel.channel_id})")
-                        if action == "remove" and target_channel.channel_id in now_channels:
-                            del now_channels[target_channel.channel_id]
-                            text += f"\nremoved: <#{target_channel.channel_id}>"
-                            logger.info(f"{category} removed: {target_channel.name}({target_channel.channel_id})")
-                        self.config.viewable_private_channels = list(now_channels.keys())
-                        self.store_config(self.config)
-                text += ("\n• " if len(now_channels) > 0 else "\nempty")
-                text += "\n• ".join([f"<#{channel.channel_id}>" for channel in now_channels.values()])
-                self.slack_service.chat_post_message(channel=self.event.channel_id, thread_ts=self.event.thread_ts, text=text)
+            config_controller.index(self.slack_service, self.event.channel_id, self.event.thread_ts)
             return True
         return False
 

@@ -1006,3 +1006,8 @@ class SlackConversationsOpenResponse(SlackBaseResponse):
 class SlackConversationsHistoryResponse(SlackBaseResponse):
     """Slack conversations.history API レスポンスの型定義"""
     messages: list[SlackMessageType] = Field(default_factory=list)
+
+
+class SlackUsersListResponse(SlackBaseResponse):
+    """Slack users.list API レスポンスの型定義"""
+    members: list[SlackUserType] = Field(default_factory=list)
