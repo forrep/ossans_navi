@@ -4,7 +4,6 @@ import datetime
 import hashlib
 import itertools
 import re
-from threading import RLock
 from typing import Any, Iterable, Optional
 
 from pydantic import BaseModel, Field
@@ -372,7 +371,6 @@ class SlackSearches:
     _used: set[str] = dataclasses.field(default_factory=set, init=False)
     _lastshot: dict[str, SlackMessage] = dataclasses.field(default_factory=dict, init=False)
     _lastshot_terms: set[str] = dataclasses.field(default_factory=set, init=False)
-    _lock: RLock = dataclasses.field(default_factory=RLock, init=False)
     _lastshot_permalinks: set[str] = dataclasses.field(default_factory=set, init=False)
 
     def add(self, result: SlackSearch) -> None:
@@ -458,12 +456,6 @@ class SlackSearches:
     @property
     def lastshot_terms(self) -> list[str]:
         return list(self._lastshot_terms)
-
-    def __enter__(self):
-        return self._lock.__enter__()
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        return self._lock.__exit__(exc_type, exc_value, traceback)
 
 
 @dataclasses.dataclass
@@ -792,8 +784,12 @@ class SlackMessageEvent:
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)
 
+    @property
+    def id_source(self) -> str:
+        return f"{self.channel_id},{self.thread_ts},{self.ts},{self.event_ts}"
+
     def id(self) -> str:
-        return hashlib.sha256(f"{self.channel_id},{self.thread_ts},{self.ts}".encode('utf8')).hexdigest()[:16]
+        return hashlib.sha256(f"{self.channel_id},{self.thread_ts},{self.ts},{self.event_ts}".encode('utf8')).hexdigest()[:16]
 
 
 class SlackBaseResponse(BaseModel):

@@ -1,4 +1,4 @@
-import concurrent.futures
+import asyncio
 import datetime
 import itertools
 import json
@@ -6,7 +6,6 @@ import logging
 import re
 from collections.abc import Generator
 from io import BytesIO
-from threading import current_thread
 from typing import Any, Optional, overload
 
 import html2text
@@ -30,18 +29,19 @@ class OssansNaviService:
     image_cache = LRUCache[str, list[dict[str, str]]](capacity=500, expire=1 * 60 * 60 * 24)
 
     def __init__(
-        self, ai_service: AiService,
+        self,
+        event_loop: asyncio.AbstractEventLoop,
+        ai_service: AiService,
         slack_service: SlackService,
         models: AiModels,
         event: SlackMessageEvent,
-        refine_executor: concurrent.futures.ThreadPoolExecutor,
     ) -> None:
+        self.event_loop = event_loop
         self.ai_service = ai_service
         self.slack_service = slack_service
         self.ai_prompt_service = AiPromptService(event, self.slack_service.get_assistant_names())
         self.models = models
         self.event = event
-        self.refine_executor = refine_executor
         self.config = self.get_config()
         self.slack_searches = SlackSearches()
         self.slack_file_permalinks: dict[str, SlackFile] = {}
@@ -335,12 +335,14 @@ class OssansNaviService:
         return len(thread_messages) >= 2 and thread_messages[-2].user.user_id in self.slack_service.my_bot_user_id
 
     def classify(self, thread_messages: list[SlackMessageLite]) -> dict[str, str | list[str]]:
-        return self.ai_service.request_classify(
-            self.models.low_cost,
-            self.get_ai_prompt(
-                self.ai_prompt_service.classify_prompt(),
-                thread_messages,
-                schema=self.ai_prompt_service.CLASSIFY_SCHEMA,
+        return self.event_loop.run_until_complete(
+            self.ai_service.request_classify(
+                self.models.low_cost,
+                self.get_ai_prompt(
+                    self.ai_prompt_service.classify_prompt(),
+                    thread_messages,
+                    schema=self.ai_prompt_service.CLASSIFY_SCHEMA,
+                )
             )
         )
 
@@ -353,22 +355,23 @@ class OssansNaviService:
 
     def special_command(self) -> bool:
         """
-        管理者が ossans_navi との DM に `config trusted_bots show` などのメッセージを送信することで利用できる special_command の実行判定及び実行を行う
-        special_command では OssansNavi の設定を行うことができる
+        OssansNavi の管理者が ossans_navi との DM に `config` だけを本文とするメッセージを送信すると OssansNavi の設定処理（special_command）を実行する
         special_command を実行した場合は True を返す、special_command に該当しなければ False を返すので、呼び出し元は通常のメッセージとして扱う
-        呼び出し元は False が返った場合は元の処理を継続する、True の場合は special_command を実行しているので処理を打ち切る
+        呼び出し元は False が返った場合は、通常のメッセージハンドリング処理を継続する、True の場合は special_command を実行しているので処理を打ち切る
         """
         if self.event.channel_id == self.slack_service.slackbot_channel_id:
             # Slackbot のチャネルにメッセージが投稿された場合は special_command を実行しない（return False）
-            # config用メッセージは Slackbot チャネルに保存している。このチャネルにメッセージが来ると config用メッセージが 1メッセージ分だけ下に流される
-            # そのため一番上に持ってくる目的で再度保存（送信）する
+            # OssansNavi の設定は JSON 形式で Slackbot への DM に送信することで保持している。
+            # しかし Slackbot の DM はそれ以外のメッセージ（例: あなたは ** さんにより ** から外されました）もやりとりされるため、
+            # そこにメッセージが届くと OssansNavi設定JSON が 1メッセージ分だけ下に流される
+            # そのため、OssansNavi設定JSON を最新メッセージとするために、同じ設定内容で再送信（保存）する
             # ただし、以下の場合には二重で設定が保存されるが、支障は無いので許容する
             # 1. Slackbot チャネルへ何らかのメッセージが流れてきて OssansNavi の処理スタート（例: あなたは ** さんにより ** から外されました）
             # 2. get_config() でキャッシュミスして、Slackbot チャネルの最新メッセージ一覧を conversations.history API で取得する
             # 3. config用メッセージが 2メッセージ目以降に保存されている状況※ なので get_config() 内で保存処理がされる
             #    ※Slackbot チャネルに何らかのメッセージが流れてきてキックされたイベントなので必ず2メッセージ目以降になっている
             # 4. special_command() で Slackbot チャネルへの投稿に反応して設定を保存する（ここで二重の保存処理が実行される）
-            #    ※get_config() でキャッシュヒットした場合は再保存されないので、当処理での保存処理は必要
+            #    ※get_config() はキャッシュヒットすると2メッセージ目になっていても再保存処理が動作しないので、このメソッド内でも保存しておく必要がある
             self.store_config(self.config, False)
             return False
         elif re.match(r'\s*config\s*', self.event.text):
@@ -446,18 +449,20 @@ class OssansNaviService:
             return
 
         # 添付画像を AI で解析実行
-        image_description = self.ai_service.request_image_description(
-            self.models.low_cost,
-            self.get_ai_prompt(
-                self.ai_prompt_service.image_description_prompt(),
-                thread_messages,
-                analyze_image_files=True,
-                schema=Schema(
-                    type=Type.OBJECT,
-                    properties={
-                        message.permalink: self.ai_prompt_service.IMAGE_DESCRIPTION_SCHEMA for message in thread_messages
-                    },
-                    required=[message.permalink for message in thread_messages]
+        image_description = self.event_loop.run_until_complete(
+            self.ai_service.request_image_description(
+                self.models.low_cost,
+                self.get_ai_prompt(
+                    self.ai_prompt_service.image_description_prompt(),
+                    thread_messages,
+                    analyze_image_files=True,
+                    schema=Schema(
+                        type=Type.OBJECT,
+                        properties={
+                            message.permalink: self.ai_prompt_service.IMAGE_DESCRIPTION_SCHEMA for message in thread_messages
+                        },
+                        required=[message.permalink for message in thread_messages]
+                    )
                 )
             )
         )
@@ -521,6 +526,8 @@ class OssansNaviService:
         request_slack_search_words_prompt = self.get_ai_prompt(
             self.ai_prompt_service.slack_search_word_prompt(),
             thread_messages,
+            limit=3000,
+            limit_last_message=6000,
             schema=self.ai_prompt_service.SLACK_SEARCH_WORD_SCHEMA,
         )
 
@@ -528,7 +535,9 @@ class OssansNaviService:
             # 呼び出し元にイベントのキャンセル確認させるために定期的に yield で処理を戻す
             yield
 
-            slack_search_words = self.ai_service.request_slack_search_words(self.models.high_quality, request_slack_search_words_prompt)
+            slack_search_words = self.event_loop.run_until_complete(
+                self.ai_service.request_slack_search_words(self.models.high_quality, request_slack_search_words_prompt)
+            )
 
             # Slack API でキーワード検索を実行して self.slack_searches に積み込む処理
             # slack_searches 内ではヒット件数（total_count）が少ない方がより絞り込めた良いキーワードと判断してヒット件数の昇順で並べる
@@ -589,144 +598,145 @@ class OssansNaviService:
         else:
             refine_slack_searches_count = config.REFINE_SLACK_SEARCHES_COUNT_NO_MENTION
             refine_slack_searches_depth = config.REFINE_SLACK_SEARCHES_DEPTH_NO_MENTION
-        for i in range(refine_slack_searches_depth):
+        for depth in range(refine_slack_searches_depth):
             # 最後の refine かどうか？最後以外は新たな検索ワードを追加する処理などがある
-            is_last_refine = i + 1 == refine_slack_searches_depth
-            (_, not_done) = concurrent.futures.wait(
-                [
-                    self.refine_executor.submit(self._refine_slack_searches_safe, thread_messages, base_messages_token, is_last_refine)
-                    for _ in range(refine_slack_searches_count)
-                ]
+            is_last_refine = depth + 1 == refine_slack_searches_depth
+            self.event_loop.run_until_complete(
+                asyncio.gather(
+                    *[
+                        self._refine_slack_searches_safe(thread_messages, base_messages_token, is_last_refine, depth, node)
+                        for node in range(refine_slack_searches_count)
+                    ]
+                )
             )
-            if not_done:
-                # 何らかの理由でスレッドが終了してしまった場合は処理を終了する
-                logger.error(f"refine_slack_searches failed: {not_done}")
-                raise RuntimeError("refine_slack_searches failed")
             yield
 
-    def _refine_slack_searches_safe(
+    async def _refine_slack_searches_safe(
         self,
         thread_messages: list[SlackMessageLite],
         base_messages_token: int,
-        is_last_refine: bool
+        is_last_refine: bool,
+        depth: int,
+        node: int
     ) -> None:
-        # スレッド名を Main_0_{event.id()} の形式にする。すでにその形式なら event.id() 部分だけ置換
-        thread = current_thread()
-        (thread_name, thread_index, _) = f"{thread.name}_0".split("_", 2)
-        thread.name = f"{thread_name}_{thread_index}_{self.event.id()}"
         try:
-            self._refine_slack_searches(thread_messages, base_messages_token, is_last_refine)
+            await self._refine_slack_searches(thread_messages, base_messages_token, is_last_refine, depth, node)
         except Exception as e:
             logger.error(e, exc_info=True)
 
-    def _refine_slack_searches(
+    async def _refine_slack_searches(
         self,
         thread_messages: list[SlackMessageLite],
         base_messages_token: int,
-        is_last_refine: bool
+        is_last_refine: bool,
+        depth: int,
+        node: int
     ) -> None:
         """
         slack_searches の結果から有用な情報を抽出するフェーズを非同期で行う
         """
-        # slack_searches から入力候補を抽出する処理は同期的に行う（slack_searches でロックを取得）
-        with self.slack_searches:
-            # 入力可能な残りトークン数を保持する、0未満にならないように管理する
-            tokens_remain = config.REFINE_SLACK_SEARCHES_TOKEN - base_messages_token
-            tokens_full: bool = False
-            current_messages: list[SlackMessage] = []
-            for slack_search in self.slack_searches:
-                if tokens_full:
-                    # 入力可能な余剰がなくなったら終了する
-                    break
-                # slack_search は優先度が高い順に並んでいるので、最初の候補から順番に利用する
-                # 1回の検索ワードあたり 5000 トークン以内に収まる範囲で入力する
-                # 安価な GPT-4o mini で slack_search の結果を精査して、lastshot に入力する情報を slack_searches.add_lastshot() に積むのが目的
-                candidate_messages: list[SlackMessage] = []
-                for message in slack_search.messages:
-                    # slack_searches のロックを取得してから、このメッセージがすでに使われているか？などの判定を行って、refine 対象の message を決定する
-                    if self.slack_searches.is_used(message.permalink):
-                        # ヒットしたメッセージがすでにAI入力済みだった場合は次へ
-                        continue
-                    # スレッド情報などを取得する（Slack API実行のため多少時間がかかる）
-                    self.load_slack_message(message)
-                    # 今回の検索結果を追加した場合のトークン数を試算する
-                    tokens = self.models.low_cost.tokenizer.content_tokens(json.dumps(
-                        [OssansNaviService.slack_message_to_ai_prompt(message) for message in [*candidate_messages, message]],
-                        ensure_ascii=False,
-                        separators=(',', ':')
-                    ))
-                    if tokens > tokens_remain:
-                        # 試算結果が入力可能トークン数を上回るなら入力せずに終了
-                        tokens_full = True
-                        break
-                    if len(candidate_messages) >= 1 and tokens > 5000:
-                        # 1つの検索ワードに対してトークン数（試算）が 5000 未満の範囲で入力する、ただし1つのメッセージで 5000 トークンを越える場合は許容する
-                        # 1つの検索ワードで大量の情報を入れるのではなく、多様性のために様々な検索ワードによる検索結果を採用したいため
-                        break
-                    # ここまで到達したなら残トークン数に問題がないということ、入力することが決定
-                    candidate_messages.append(message)
-                    # メッセージそのものと、root_message の permlink を use 状態にしておく、そして別の検索ワードで同一メッセージが何度も引っかかるのを防ぐ
-                    # なぜならば、同一メッセージを何度も入力しても無駄だから
-                    self.slack_searches.use(message.permalink)
-                    if message.is_full:
-                        self.slack_searches.use([v.permalink for v in message.messages])
-                        if message.root_message:
-                            self.slack_searches.use(message.root_message.permalink)
-                # 今回入力するトークン数を slack_searches_tokens_remain から引いておく
-                tokens_remain -= self.models.low_cost.tokenizer.content_tokens(json.dumps(
-                    [OssansNaviService.slack_message_to_ai_prompt(message) for message in candidate_messages],
+        logger.debug(f"[{depth}][{node}] _refine_slack_searches started: is_last_refine={is_last_refine}")
+
+        # slack_searches から入力候補を抽出する処理開始
+        # 入力可能な残りトークン数を保持する、0未満にならないように管理する
+        tokens_remain = config.REFINE_SLACK_SEARCHES_TOKEN - base_messages_token
+        tokens_full: bool = False
+        current_messages: list[SlackMessage] = []
+        for slack_search in self.slack_searches:
+            if tokens_full:
+                # 入力可能な余剰がなくなったら終了する
+                break
+            # slack_search は優先度が高い順に並んでいるので、最初の候補から順番に利用する
+            # 1回の検索ワードあたり 5000 トークン以内に収まる範囲で入力する
+            # 安価な GPT-4o mini で slack_search の結果を精査して、lastshot に入力する情報を slack_searches.add_lastshot() に積むのが目的
+            candidate_messages: list[SlackMessage] = []
+            for message in slack_search.messages:
+                # slack_searches のロックを取得してから、このメッセージがすでに使われているか？などの判定を行って、refine 対象の message を決定する
+                if self.slack_searches.is_used(message.permalink):
+                    # ヒットしたメッセージがすでにAI入力済みだった場合は次へ
+                    continue
+                # スレッド情報などを取得する（Slack API実行のため多少時間がかかる）
+                self.load_slack_message(message)
+                # 今回の検索結果を追加した場合のトークン数を試算する
+                tokens = self.models.low_cost.tokenizer.content_tokens(json.dumps(
+                    [OssansNaviService.slack_message_to_ai_prompt(message) for message in [*candidate_messages, message]],
                     ensure_ascii=False,
                     separators=(',', ':')
                 ))
-                logger.info(
-                    f"words={slack_search.words}{f" (Additional)" if slack_search.is_additional else ""},"
-                    + f" candidate_messages={len(candidate_messages)}, "
-                    + f"content_count={len(slack_search.messages)} total_count={slack_search.total_count}, "
-                    + f"tokens_remain={tokens_remain}, id={slack_search.get_id()}"
-                )
-                current_messages.extend(candidate_messages)
-            if len(current_messages) == 0:
-                # ヒット件数がゼロ件などの理由で入力可能な検索結果が存在しなかったら refine_slack_searches フェーズを終了する
-                logger.info("current_messages is empty, finished.")
-                return
-            refine_slack_searches_prompt = self.get_ai_prompt(
-                self.ai_prompt_service.refine_slack_searches_prompt(),
-                thread_messages,
-                schema=self.ai_prompt_service.REFINE_SLACK_SEARCHES_SCHEMA,
-                rag_info=AiPromptRagInfo(
-                    [OssansNaviService.slack_message_to_ai_prompt(message) for message in SlackMessage.sort(current_messages)],
-                    [v.words for v in self.slack_searches if not v.is_get_messages]
-                )
+                if tokens > tokens_remain:
+                    # 試算結果が入力可能トークン数を上回るなら入力せずに終了
+                    tokens_full = True
+                    break
+                if len(candidate_messages) >= 1 and tokens > 5000:
+                    # 1つの検索ワードに対してトークン数（試算）が 5000 未満の範囲で入力する、ただし1つのメッセージで 5000 トークンを越える場合は許容する
+                    # 1つの検索ワードで大量の情報を入れるのではなく、多様性のために様々な検索ワードによる検索結果を採用したいため
+                    break
+                # ここまで到達したなら残トークン数に問題がないということ、入力することが決定
+                candidate_messages.append(message)
+                # メッセージそのものと、root_message の permlink を use 状態にしておく、そして別の検索ワードで同一メッセージが何度も引っかかるのを防ぐ
+                # なぜならば、同一メッセージを何度も入力しても無駄だから
+                self.slack_searches.use(message.permalink)
+                if message.is_full:
+                    self.slack_searches.use([v.permalink for v in message.messages])
+                    if message.root_message:
+                        self.slack_searches.use(message.root_message.permalink)
+            # 今回入力するトークン数を slack_searches_tokens_remain から引いておく
+            tokens_remain -= self.models.low_cost.tokenizer.content_tokens(json.dumps(
+                [OssansNaviService.slack_message_to_ai_prompt(message) for message in candidate_messages],
+                ensure_ascii=False,
+                separators=(',', ':')
+            ))
+            logger.info(
+                f"[{depth}][{node}] words={slack_search.words}{f" (Additional)" if slack_search.is_additional else ""},"
+                + f" candidate_messages={len(candidate_messages)}, "
+                + f"content_count={len(slack_search.messages)} total_count={slack_search.total_count}, "
+                + f"tokens_remain={tokens_remain}, id={slack_search.get_id()}"
             )
+            current_messages.extend(candidate_messages)
+        if len(current_messages) == 0:
+            # ヒット件数がゼロ件などの理由で入力可能な検索結果が存在しなかったら refine_slack_searches フェーズを終了する
+            logger.info(f"[{depth}][{node}] current_messages is empty, finished.")
+            return
+        refine_slack_searches_prompt = self.get_ai_prompt(
+            self.ai_prompt_service.refine_slack_searches_prompt(),
+            thread_messages,
+            schema=self.ai_prompt_service.REFINE_SLACK_SEARCHES_SCHEMA,
+            rag_info=AiPromptRagInfo(
+                [OssansNaviService.slack_message_to_ai_prompt(message) for message in SlackMessage.sort(current_messages)],
+                [v.words for v in self.slack_searches if not v.is_get_messages]
+            )
+        )
 
         # AI への問い合わせ部分だけ並列で処理する
-        refine_slack_searches_responses = self.ai_service.request_refine_slack_searches(
+        logger.debug(f"[{depth}][{node}] _refine_slack_searches: calling AI service")
+        refine_slack_searches_responses = await self.ai_service.request_refine_slack_searches(
             self.models.low_cost,
             refine_slack_searches_prompt
         )
-        logger.info(f"{refine_slack_searches_responses=}")
+        logger.info(f"[{depth}][{node}] {refine_slack_searches_responses=}")
 
         if len(refine_slack_searches_responses) == 0:
             # 返答が空のケース、普通はないはずだけど AI はどうしても誤動作する可能性があるので、稀にこのパターンも発生する
             # その回の検索結果は諦めて次にトライ、精度は下がるけど仕方なし
-            logger.error("refine_slack_searches_responses is emtpy, continue.")
+            logger.error(f"[{depth}][{node}] refine_slack_searches_responses is emtpy, continue.")
             return
 
-        # response を slack_searches へ反映する処理は同期的に行う（slack_searches でロックを取得）
-        with self.slack_searches:
-            # 参考になった permalink は lastshot で利用するので保存しておく
-            # get_next_messages も参考になった permalink なので追加する
-            for refine_slack_searches_response in refine_slack_searches_responses:
-                self.slack_searches.add_lastshot(refine_slack_searches_response.permalinks)
-                self.slack_searches.add_lastshot(refine_slack_searches_response.get_next_messages)
-                if not is_last_refine:
-                    # 最後の refine ではない→ まだ検索結果を精査するフェーズが残っている
-                    if len(refine_slack_searches_response.additional_search_words) > 0:
-                        # 追加の検索ワードが提供された場合は検索する
-                        self.search(refine_slack_searches_response.additional_search_words, True)
-                    if len(refine_slack_searches_response.get_messages) > 0:
-                        # 追加の取得メッセージが提供された場合は検索する
-                        self.search(refine_slack_searches_response.get_messages, True, True)
+        # response を slack_searches へ反映する処理開始
+        logger.debug(f"[{depth}][{node}] _refine_slack_searches: updating slack_searches")
+        # 参考になった permalink は lastshot で利用するので保存しておく
+        # get_next_messages も参考になった permalink なので追加する
+        for refine_slack_searches_response in refine_slack_searches_responses:
+            self.slack_searches.add_lastshot(refine_slack_searches_response.permalinks)
+            self.slack_searches.add_lastshot(refine_slack_searches_response.get_next_messages)
+            if not is_last_refine:
+                # 最後の refine ではない→ まだ検索結果を精査するフェーズが残っている
+                if len(refine_slack_searches_response.additional_search_words) > 0:
+                    # 追加の検索ワードが提供された場合は検索する
+                    self.search(refine_slack_searches_response.additional_search_words, True)
+                if len(refine_slack_searches_response.get_messages) > 0:
+                    # 追加の取得メッセージが提供された場合は検索する
+                    self.search(refine_slack_searches_response.get_messages, True, True)
+        logger.debug(f"[{depth}][{node}] _refine_slack_searches: finished")
 
     def lastshot(self, thread_messages: list[SlackMessageLite]) -> list[ossans_navi_types.LastshotResponse]:
         current_messages: list[SlackMessage] = []
@@ -767,35 +777,39 @@ class OssansNaviService:
             current_messages.append(content)
         logger.info(f"Lastshot input_count={len(current_messages)}")
 
-        return self.ai_service.request_lastshot(
-            self.models.high_quality,
-            self.get_ai_prompt(
-                self.ai_prompt_service.lastshot_prompt(len(current_messages) > 0),
-                thread_messages,
-                input_image_files=config.LASTSHOT_INPUT_IMAGE_FILES,
-                input_video_audio_files=config.LOAD_VIDEO_AUDIO_FILES,
-                limit=15000,
-                limit_last_message=40000,
-                rag_info=AiPromptRagInfo(
-                    OssansNaviService.slack_message_to_ai_prompt(
-                        SlackMessage.sort(current_messages), limit=15000, check_dup_files=True
-                    ),
-                    self.slack_searches.lastshot_terms
-                )
-            ),
-            n
+        return self.event_loop.run_until_complete(
+            self.ai_service.request_lastshot(
+                self.models.high_quality,
+                self.get_ai_prompt(
+                    self.ai_prompt_service.lastshot_prompt(len(current_messages) > 0),
+                    thread_messages,
+                    input_image_files=config.LASTSHOT_INPUT_IMAGE_FILES,
+                    input_video_audio_files=config.LOAD_VIDEO_AUDIO_FILES,
+                    limit=15000,
+                    limit_last_message=40000,
+                    rag_info=AiPromptRagInfo(
+                        OssansNaviService.slack_message_to_ai_prompt(
+                            SlackMessage.sort(current_messages), limit=15000, check_dup_files=True
+                        ),
+                        self.slack_searches.lastshot_terms
+                    )
+                ),
+                n
+            )
         )
 
     def quality_check(self, thread_messages: list[SlackMessageLite], response_message: str) -> QualityCheckResponse:
-        return self.ai_service.request_quality_check(
-            self.models.low_cost,
-            self.get_ai_prompt(
-                self.ai_prompt_service.quality_check_prompt(response_message),
-                thread_messages,
-                limit=2000,
-                limit_last_message=10000,
-                schema=self.ai_prompt_service.QUALITY_CHECK_SCHEMA,
-            ),
+        return self.event_loop.run_until_complete(
+            self.ai_service.request_quality_check(
+                self.models.low_cost,
+                self.get_ai_prompt(
+                    self.ai_prompt_service.quality_check_prompt(response_message),
+                    thread_messages,
+                    limit=2000,
+                    limit_last_message=10000,
+                    schema=self.ai_prompt_service.QUALITY_CHECK_SCHEMA,
+                ),
+            )
         )
 
     def load_slack_file(

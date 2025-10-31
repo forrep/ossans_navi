@@ -54,7 +54,17 @@
             "request": "launch",
             "program": "ossans_navi/app.py",
             "console": "integratedTerminal",
-            "args": ["--production"]
+            "args": [
+                "--production"
+            ]
+        },
+        {
+            "name": "Pytest",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "pytest",
+            "console": "integratedTerminal",
+            "justMyCode": true
         }
     ]
 }

@@ -32,17 +32,17 @@ AI_MODEL_HIGH_QUALITY_OUT = 0.0
 
 match AI_SERVICE_TYPE:
     case AiServiceType.OPENAI:
-        AI_MODEL_LOW_COST = os.environ.get("OSN_OPENAI_MODEL_LOW_COST", os.environ.get("OSN_AI_MODEL_LOW_COST", "gpt-4o-mini"))
+        AI_MODEL_LOW_COST = os.environ.get("OSN_OPENAI_MODEL_LOW_COST", os.environ.get("OSN_AI_MODEL_LOW_COST", "gpt-4.1-mini"))
         AI_MODEL_LOW_COST_IN = float(os.environ.get("OSN_OPENAI_MODEL_LOW_COST_IN", os.environ.get("OSN_AI_MODEL_LOW_COST_IN", "0")))
         AI_MODEL_LOW_COST_OUT = float(os.environ.get("OSN_OPENAI_MODEL_LOW_COST_OUT", os.environ.get("OSN_AI_MODEL_LOW_COST_OUT", "0")))
-        AI_MODEL_HIGH_QUALITY = os.environ.get("OSN_OPENAI_MODEL_HIGH_QUALITY", os.environ.get("OSN_AI_MODEL_HIGH_QUALITY", "gpt-4o"))
+        AI_MODEL_HIGH_QUALITY = os.environ.get("OSN_OPENAI_MODEL_HIGH_QUALITY", os.environ.get("OSN_AI_MODEL_HIGH_QUALITY", "gpt-4.1"))
         AI_MODEL_HIGH_QUALITY_IN = float(os.environ.get("OSN_OPENAI_MODEL_HIGH_QUALITY_IN", os.environ.get("OSN_AI_MODEL_HIGH_QUALITY_IN", "0")))
         AI_MODEL_HIGH_QUALITY_OUT = float(os.environ.get("OSN_OPENAI_MODEL_HIGH_QUALITY_OUT", os.environ.get("OSN_AI_MODEL_HIGH_QUALITY_OUT", "0")))
     case AiServiceType.AZURE_OPENAI:
-        AI_MODEL_LOW_COST = os.environ.get("OSN_AZURE_OPENAI_MODEL_LOW_COST", os.environ.get("OSN_AI_MODEL_LOW_COST", "gpt-4o-mini"))
+        AI_MODEL_LOW_COST = os.environ.get("OSN_AZURE_OPENAI_MODEL_LOW_COST", os.environ.get("OSN_AI_MODEL_LOW_COST", "gpt-4.1-mini"))
         AI_MODEL_LOW_COST_IN = float(os.environ.get("OSN_AZURE_OPENAI_MODEL_LOW_COST_IN", os.environ.get("OSN_AI_MODEL_LOW_COST_IN", "0")))
         AI_MODEL_LOW_COST_OUT = float(os.environ.get("OSN_AZURE_OPENAI_MODEL_LOW_COST_OUT", os.environ.get("OSN_AI_MODEL_LOW_COST_OUT", "0")))
-        AI_MODEL_HIGH_QUALITY = os.environ.get("OSN_AZURE_OPENAI_MODEL_HIGH_QUALITY", os.environ.get("OSN_AI_MODEL_HIGH_QUALITY", "gpt-4o"))
+        AI_MODEL_HIGH_QUALITY = os.environ.get("OSN_AZURE_OPENAI_MODEL_HIGH_QUALITY", os.environ.get("OSN_AI_MODEL_HIGH_QUALITY", "gpt-4.1"))
         AI_MODEL_HIGH_QUALITY_IN = float(
             os.environ.get("OSN_AZURE_OPENAI_MODEL_HIGH_QUALITY_IN", os.environ.get("OSN_AI_MODEL_HIGH_QUALITY_IN", "0")))
         AI_MODEL_HIGH_QUALITY_OUT = float(

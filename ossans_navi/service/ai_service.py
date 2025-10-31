@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import dataclasses
 import itertools
@@ -23,9 +24,8 @@ from ossans_navi.config import AiServiceType
 from ossans_navi.service.ai_tokenize_service import AiTokenize, AiTokenizeGpt4o
 from ossans_navi.type import ossans_navi_types
 
+thread_local = threading.local()
 logger = logging.getLogger(__name__)
-
-_LOCK = threading.Lock()
 
 
 @dataclasses.dataclass
@@ -670,39 +670,52 @@ class AiService:
             case AiServiceType.GEMINI:
                 if not config.GEMINI_API_KEY:
                     raise ValueError("OSN_GEMINI_API_KEY is required when using Gemini service.")
-                self.client_gemini = genai.Client(api_key=config.GEMINI_API_KEY)
+                self.gemini_api_key = config.GEMINI_API_KEY
             case _:
                 raise NotImplementedError("Unknown AiServiceType")
 
-    def _chat_completions(
+    @property
+    def client_gemini(self) -> genai.Client:
+        if self.gemini_api_key is None:
+            raise RuntimeError("gemini_api_key is None")
+        if isinstance((v := thread_local.__dict__.get("client_gemini")), genai.Client):
+            return v
+        else:
+            thread_local.__dict__["client_gemini"] = (v := genai.Client(api_key=self.gemini_api_key))
+            return v
+
+    async def _chat_completions(
             self,
             model: AiModel,
             prompt: AiPrompt,
     ) -> AiResponse:
         if model.ai_service_type in (AiServiceType.OPENAI, AiServiceType.AZURE_OPENAI):
-            return self._chat_completions_openai(model, prompt)
+            return await self._chat_completions_openai(model, prompt)
         elif model.ai_service_type == AiServiceType.GEMINI:
-            return self._chat_completions_gemini(model, prompt)
+            return await self._chat_completions_gemini(model, prompt)
         else:
             raise NotImplementedError(f"Unknown AiServiceType: {model.ai_service_type}")
 
-    def _chat_completions_gemini(
+    async def _chat_completions_gemini(
             self,
             model: AiModel,
             prompt: AiPrompt,
     ) -> AiResponse:
+        logger.debug(f"start _chat_completions_gemini: {str(self.client_gemini)}")
         start_time = time.time()
         last_exception: Optional[Exception] = None
         response: Optional[types.GenerateContentResponse] = None
         try:
             for file in prompt.get_upload_files():
-                file.file = self.client_gemini.files.upload(
+                logger.debug(f"Uploading file: {file.title}")
+                file.file = await self.client_gemini.aio.files.upload(
                     file=file.to_bytes_io(),
                     config={
                         "mime_type": file.mimetype,
                         "display_name": file.title,
                     },
                 )
+                logger.debug(f"Uploaded file: {file.title}")
         except Exception as e:
             # ファイルのアップロード失敗はエラーとせずに処理を続行する
             logger.warning(f"Failed to upload files: {e}")
@@ -711,8 +724,9 @@ class AiService:
             for file in prompt.get_upload_files():
                 for _ in range(100):
                     if file.file and file.file.name and file.file.state == types.FileState.PROCESSING:
-                        time.sleep(2)
-                        file.file = self.client_gemini.files.get(name=file.file.name)
+                        await asyncio.sleep(2)
+                        file.file = await self.client_gemini.aio.files.get(name=file.file.name)
+                        logger.debug(f"Get file state: {file.file.state}")
         except Exception as e:
             # ファイルのアップロード失敗はエラーとせずに処理を続行する
             logger.warning(f"Failed to upload files: {e}")
@@ -725,25 +739,28 @@ class AiService:
                     logger.info(
                         f"request({model.name})(shrink)={json.dumps(shrink_message(prompt.to_gemini_rest()), ensure_ascii=False)}"
                     )
-                response = self.client_gemini.models.generate_content(
+                logger.debug("Generating content")
+                response = await self.client_gemini.aio.models.generate_content(
                     model=model.name,
                     config=prompt.to_gemini_config(),
                     contents=prompt.to_gemini_contents(),
                 )
+                logger.debug("Generated content")
                 break
             except Exception as e:
                 # しばらく待ってからリトライする
                 # choices>=2 の場合にエラーが発生するケースがあるのでリトライは choices=1 とする
                 prompt.choices = 1
-                logger.error(e)
+                logger.error(e, exc_info=True)
                 last_exception = e
-                time.sleep(30)
+                await asyncio.sleep(30)
 
         try:
             for file in prompt.get_upload_files():
                 # アップロードしたファイルを削除する
                 if file.file and file.file.name:
-                    self.client_gemini.files.delete(name=file.file.name)
+                    await self.client_gemini.aio.files.delete(name=file.file.name)
+                    logger.debug(f"Deleted file: {file.title}")
                     file.file = None
         except Exception as e:
             # ファイルの削除失敗はエラーとせずに処理を続行する
@@ -766,7 +783,7 @@ class AiService:
             raise last_exception or RuntimeError()
         return AiResponse.from_gemini_response(response, prompt.is_json)
 
-    def _chat_completions_openai(
+    async def _chat_completions_openai(
             self,
             model: AiModel,
             prompt: AiPrompt,
@@ -809,18 +826,18 @@ class AiService:
                 # RateLimit の場合はしばらく待ってからリトライする
                 logger.info(e)
                 last_exception = e
-                time.sleep(30)
+                await asyncio.sleep(30)
             except InternalServerError as e:
                 if e.message == "no healthy upstream":
                     # API の一時的なエラーの場合はわずかに待ってからリトライする
                     logger.info(e)
                     last_exception = e
-                    time.sleep(2)
+                    await asyncio.sleep(2)
                     continue
-                logger.error(e)
+                logger.error(e, exc_info=True)
                 raise e
             except Exception as e:
-                logger.error(e)
+                logger.error(e, exc_info=True)
                 raise e
 
         if response is None:
@@ -838,11 +855,11 @@ class AiService:
             raise last_exception or RuntimeError()
         return AiResponse.from_openai_response(response, prompt.is_json)
 
-    def request_classify(self, model: AiModel, prompt: AiPrompt) -> dict[str, str | list[str]]:
+    async def request_classify(self, model: AiModel, prompt: AiPrompt) -> dict[str, str | list[str]]:
         str_columns = ("user_intent", "user_intentions_type", "who_to_talk_to", "user_emotions",)
         list_columns = ("required_knowledge_types", "slack_emoji_names",)
         prompt.choices = 5
-        response = self._chat_completions(model, prompt)
+        response = await self._chat_completions(model, prompt)
         summary: defaultdict[str, defaultdict[str, int]] = defaultdict(lambda: defaultdict(lambda: 0))
         for message in response.choices:
             if isinstance(message.content, dict):
@@ -872,8 +889,8 @@ class AiService:
             )
         }
 
-    def request_image_description(self, model: AiModel, prompt: AiPrompt) -> dict[str, list[dict[str, str]]]:
-        response = self._chat_completions(model, prompt)
+    async def request_image_description(self, model: AiModel, prompt: AiPrompt) -> dict[str, list[dict[str, str]]]:
+        response = await self._chat_completions(model, prompt)
         message = response.choices[0]
         if not isinstance(message.content, dict):
             return {}
@@ -893,10 +910,10 @@ class AiService:
         else:
             return {}
 
-    def request_slack_search_words(self, model: AiModel, prompt: AiPrompt) -> list[str]:
+    async def request_slack_search_words(self, model: AiModel, prompt: AiPrompt) -> list[str]:
         # Gemini は n=2 で十分なバリエーションを生成してくれる
         prompt.choices = 2 if model.ai_service_type == AiServiceType.GEMINI else 5
-        response = self._chat_completions(model, prompt)
+        response = await self._chat_completions(model, prompt)
         slack_search_words: list[str] = list(set(
             itertools.chain.from_iterable(
                 [
@@ -934,10 +951,10 @@ class AiService:
             )
         ]
 
-    def request_refine_slack_searches(self, model: AiModel, prompt: AiPrompt) -> list[RefineResponse]:
+    async def request_refine_slack_searches(self, model: AiModel, prompt: AiPrompt) -> list[RefineResponse]:
         # Gemini は n=2 で十分な網羅性がある
         prompt.choices = 2 if model.ai_service_type == AiServiceType.GEMINI else 5
-        response = self._chat_completions(model, prompt)
+        response = await self._chat_completions(model, prompt)
         return AiService._analyze_refine_slack_searches_response(response)
 
     @staticmethod
@@ -947,11 +964,11 @@ class AiService:
             for message in response.choices if isinstance(message.content, str)
         ]
 
-    def request_lastshot(self, model: AiModel, prompt: AiPrompt, n: int = 1) -> list[ossans_navi_types.LastshotResponse]:
+    async def request_lastshot(self, model: AiModel, prompt: AiPrompt, n: int = 1) -> list[ossans_navi_types.LastshotResponse]:
         # Gemini は大きいプロンプトのパターンで choice>=2 が原因となるエラーケースがある、よって choice=1 とする
         prompt.choices = 1 if model.ai_service_type == AiServiceType.GEMINI else n
         for _ in range(2):
-            response = self._chat_completions(model, prompt)
+            response = await self._chat_completions(model, prompt)
             if len(result := AiService._analyze_lastshot_response(response)) > 0:
                 return result
         logger.error("Error empty choices, response=" + str(response))
@@ -975,9 +992,9 @@ class AiService:
             return None
         return result[0]
 
-    def request_quality_check(self, model: AiModel, prompt: AiPrompt) -> QualityCheckResponse:
+    async def request_quality_check(self, model: AiModel, prompt: AiPrompt) -> QualityCheckResponse:
         for _ in range(2):
-            response = self._chat_completions(model, prompt)
+            response = await self._chat_completions(model, prompt)
             if (result := AiService._analyze_quality_check_response(response)):
                 return result
         logger.error("Error empty choices, response=" + str(response))

@@ -437,9 +437,7 @@ class SlackService:
         )
         return text
 
-    def disable_mention_if_not_active(self, text) -> str:
-        if not isinstance(text, str):
-            return text
+    def disable_mention_if_not_active(self, text: str) -> str:
         return re.sub(
             r'<@([A-Z0-9]+)>',
             lambda v: v.group(0) if self.get_presence(v.group(1)) else ("@" + self.get_user(v.group(1)).username),
@@ -556,25 +554,57 @@ class SlackService:
                 logger.info(f"Already removed, channel={channel}, ts={ts}, name={name}")
 
     @staticmethod
-    def convert_markdown_to_mrkdwn(text: str):
-        is_codeblock = False
-        lines = []
-        for line in text.split("\n"):
-            if not is_codeblock:
-                if (matcher := re.match(r'^```(?:[a-z_]{,13})?(.*)$', line)):
-                    is_codeblock = True
-                    line = "```" + ("\n" + matcher.group(1) if matcher.group(1) else "")
-                else:
-                    line = re.sub(r'^([ 　]*)[*-] ', lambda v: f"{v.group(1)!s}• ", line)
-                    line = re.sub(r'^#{1,4} .+$', lambda v: f"*{v.group(0)!s}*", line)
-                    line = re.sub(r' ?\*\*([^*]+)\*\* ?', lambda v: f" *{v.group(1)!s}* ", line)
-                    line = re.sub(r' ?(?<!``)`([^`]+)`(?!``) ?', lambda v: f" `{v.group(1)!s}` ", line)
-                    line = re.sub(r'\[([^]]+)\]\((https?://[^)]+)\)', lambda x: f"<{x.group(2)!s}|{x.group(1)!s}>", line)
-            else:
-                if re.search(r'^```|```$', line):
-                    is_codeblock = False
-            lines.append(line)
-        return "\n".join(lines)
+    def convert_markdown_to_mrkdwn(text: str) -> str:
+        mrkdwn_lines: list[str] = []
+        markdown_lines = text.split("\n")
+
+        def text_markdown_to_mrkdwn(text: str) -> str:
+            text = re.sub(r' ?\*\*([^*]+)\*\* ?', lambda v: f" *{v.group(1)!s}* ", text)
+            text = re.sub(r' ?(?<!``)`([^`]+)`(?!``) ?', lambda v: f" `{v.group(1)!s}` ", text)
+            text = re.sub(r'\[([^]]+)\]\((https?://[^)]+)\)', lambda x: f"<{x.group(2)!s}|{x.group(1)!s}>", text)
+            return text
+
+        def next_line(pop: bool = True) -> Optional[str]:
+            return (markdown_lines.pop(0) if pop else markdown_lines[0]) if len(markdown_lines) > 0 else None
+
+        while (line := next_line()) is not None:
+            if (matcher := re.match(r'^```(?:[a-z_]{,13})?(.*)$', line)):
+                # コードブロック
+                mrkdwn_lines.extend(["```", *([matcher.group(1)] if matcher.group(1) else [])])
+                while (line := next_line()) is not None:
+                    mrkdwn_lines.append(line)
+                    if re.search(r'^```|```$', line):
+                        line = None
+                        break
+            elif re.match(r'^\s*\|([^|]+\|)+\s*$', line):
+                # テーブル、ただし次の行に | --- | --- | のような区切り行がある場合のみテーブルとみなす
+                columns = line.count('|') - 1
+                if (table_line := next_line(False)) is not None and re.match(r'^\s*\|(\s*:?-+:?\s*\|){' + str(columns) + r'}\s*$', table_line):
+                    # この時点でテーブルと確定、| A | B | のような行が続く限りテーブルとして扱う（カラム数が矛盾すると終了）
+                    _ = next_line()
+                    mrkdwn_lines.extend(
+                        [
+                            ("  " * min(3, i)) + "• " + text_markdown_to_mrkdwn(v).strip()
+                            for (i, v) in enumerate(line.split("|")[1:][:-1])
+                        ]
+                    )
+                    line = None
+                    while (table_line := next_line(False)) is not None:
+                        if not re.match(r'^\s*\|([^|]+\|){' + str(columns) + r'}\s*$', table_line):
+                            break
+                        _ = next_line()
+                        mrkdwn_lines.extend(
+                            [
+                                ("  " * min(3, i)) + "• " + text_markdown_to_mrkdwn(v).strip()
+                                for (i, v) in enumerate(table_line.split("|")[1:][:-1])
+                            ]
+                        )
+            if line is not None:
+                line = re.sub(r'^([ 　]*)[*-] ', lambda v: f"{v.group(1)!s}• ", line)
+                line = re.sub(r'^#{1,4} .+$', lambda v: f"*{v.group(0)!s}*", line)
+                line = text_markdown_to_mrkdwn(line)
+                mrkdwn_lines.append(line)
+        return "\n".join(mrkdwn_lines)
 
     def _refine_slack_message(
         self,

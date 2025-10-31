@@ -1,10 +1,11 @@
+import asyncio
 import json
 import logging
 import re
 import signal
 import sys
+import threading
 from concurrent.futures import ThreadPoolExecutor
-from threading import Event, current_thread
 from typing import Any, Callable, Final, Generator, Optional
 
 from slack_sdk import WebClient
@@ -17,12 +18,12 @@ from ossans_navi.service.slack_service import EventGuard, SlackService
 from ossans_navi.type.slack_type import SlackMessageEvent
 
 MAIN_EXECUTOR: Optional[ThreadPoolExecutor] = None
-REFINE_EXECUTOR: Optional[ThreadPoolExecutor] = None
 MAIN_EXECUTOR_WORKERS: Final[int] = 2
 EVENT_GUARD = EventGuard()
 
 slack_service = SlackService()
 ai_service = AiService()
+thread_local = threading.local()
 
 logger = logging.getLogger(__name__)
 
@@ -36,14 +37,14 @@ def handle_button_click(ack: Callable, body: dict[Any, Any], client: WebClient):
 
 @slack_service.app.event("message")
 def handle_message_events(event: dict[str, dict]):
-    if not MAIN_EXECUTOR or not REFINE_EXECUTOR:
-        logger.error("MAIN_EXECUTOR or REFINE_EXECUTOR is not initialized.")
+    if not MAIN_EXECUTOR:
+        logger.error("MAIN_EXECUTOR is not initialized.")
         return
     logger.info("event=" + json.dumps(event, ensure_ascii=False))
     message_event = SlackMessageEvent(event)
 
     def future_callback(v):
-        logger.info(f"Event finished: {message_event.id()} ({message_event.channel_id},{message_event.thread_ts},{message_event.ts})")
+        logger.info(f"Event finished: {message_event.id()} ({message_event.id_source})")
         # 応答まで至ったパターンはロックを取ってから finish が必要なのですでに終了済み、重複して終了しても問題なし
         # それ以外パターンはまだ finish してないのでここで finish が必要
         EVENT_GUARD.finish(message_event)
@@ -54,7 +55,7 @@ def handle_message_events(event: dict[str, dict]):
         if message_event.is_message_post():
             # メッセージの投稿イベントの場合
             EVENT_GUARD.queue(message_event)
-            logger.info(f"Event queued(message_post): {message_event.id()} ({message_event.channel_id},{message_event.thread_ts},{message_event.ts})")
+            logger.info(f"Event queued(message_post): {message_event.id()} ({message_event.id_source})")
         elif message_event.is_message_changed():
             # 更新イベントの場合
             if EVENT_GUARD.is_queueed_or_running(message_event):
@@ -62,7 +63,7 @@ def handle_message_events(event: dict[str, dict]):
                 # このパターンのためにロックが必要、ロックしてないと is_queueed_or_running 判定後に応答が終了する可能性もある
                 EVENT_GUARD.queue(message_event)
                 logger.info(
-                    f"Event queued(message_changed): {message_event.id()} ({message_event.channel_id},{message_event.thread_ts},{message_event.ts})"
+                    f"Event queued(message_changed): {message_event.id()} ({message_event.id_source})"
                 )
             else:
                 logger.info("This message_changed event is terminated because it is not QUEUED or RUNNING.")
@@ -80,22 +81,31 @@ def handle_message_events(event: dict[str, dict]):
         else:
             logger.info("This is not message_post or message_changed event, finished")
             return
-        future = MAIN_EXECUTOR.submit(do_ossans_navi_response_safe, message_event, REFINE_EXECUTOR)
+        future = MAIN_EXECUTOR.submit(do_ossans_navi_response_safe, message_event)
         future.add_done_callback(future_callback)
 
 
-def do_ossans_navi_response_safe(event: SlackMessageEvent, refine_executor: ThreadPoolExecutor) -> None:
+def do_ossans_navi_response_safe(event: SlackMessageEvent) -> None:
     # スレッド名を Main_0_{event.id()} の形式にする。すでにその形式なら event.id() 部分だけ置換
-    thread = current_thread()
+    thread = threading.current_thread()
     (thread_name, thread_index, _) = f"{thread.name}_0".split("_", 2)
     thread.name = f"{thread_name}_{thread_index}_{event.id()}"
 
+    # このスレッドにイベントループがまだない場合だけ作成
+    event_loop: asyncio.AbstractEventLoop
+    if "loop" not in thread_local.__dict__:
+        event_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(event_loop)
+        thread_local.__dict__["loop"] = event_loop
+    else:
+        event_loop = thread_local.__dict__["loop"]
+
     with EVENT_GUARD:
         if EVENT_GUARD.is_canceled(event):
-            logger.info(f"Event canceled: {event.id()} ({event.channel_id},{event.thread_ts},{event.ts})")
+            logger.info(f"Event canceled: {event.id()} ({event.id_source})")
             logger.info("Finished.")
             return
-        logger.info(f"Event started: {event.id()} ({event.channel_id},{event.thread_ts},{event.ts})")
+        logger.info(f"Event started: {event.id()} ({event.id_source})")
         EVENT_GUARD.start(event)
 
     models = AiModels.new()
@@ -120,17 +130,17 @@ def do_ossans_navi_response_safe(event: SlackMessageEvent, refine_executor: Thre
         )
 
         ossans_navi_service = OssansNaviService(
+            event_loop=event_loop,
             ai_service=ai_service,
             slack_service=slack_service,
             models=models,
             event=event,
-            refine_executor=refine_executor,
         )
 
         for _ in do_ossans_navi_response(ossans_navi_service, event, models):
             # yield のタイミングで処理が戻されるごとにイベントがキャンセルされていないか確認して、キャンセルされていれば終了する
             if EVENT_GUARD.is_canceled(event):
-                logger.info(f"Event canceled: {event.id()}({event.channel_id},{event.thread_ts},{event.ts})")
+                logger.info(f"Event canceled: {event.id()}({event.id_source})")
                 logger.info("Finished.")
                 break
         # キャンセルなどのパターンで終了した場合は、ここでリアクションを削除する
@@ -376,7 +386,7 @@ def do_ossans_navi_response(
         with EVENT_GUARD:
             # 同タイミングでキャンセルされた場合に応答しないため、ロックした状態で応答処理をする
             if EVENT_GUARD.is_canceled(event):
-                logger.info(f"Event canceled: {event.id()}({event.channel_id},{event.thread_ts},{event.ts})")
+                logger.info(f"Event canceled: {event.id()}({event.id_source})")
                 logger.info("Finished.")
                 return
             slack_service.chat_post_message(
@@ -416,12 +426,8 @@ if __name__ == "__main__":
     if "--unsafe" in args:
         config.SAFE_MODE = False
 
-    with (
-        ThreadPoolExecutor(max_workers=MAIN_EXECUTOR_WORKERS, thread_name_prefix="Main") as main_executor,
-        ThreadPoolExecutor(max_workers=config.REFINE_SLACK_SEARCHES_THREADS, thread_name_prefix="Refine") as refine_executor,
-    ):
+    with ThreadPoolExecutor(max_workers=MAIN_EXECUTOR_WORKERS, thread_name_prefix="Main") as main_executor:
         MAIN_EXECUTOR = main_executor
-        REFINE_EXECUTOR = refine_executor
         logger.info(
             f"Strat in {"development" if config.DEVELOPMENT_MODE else "production"},"
             + f" {"silent" if config.SILENT_MODE else "no-silent"}, {"safe" if config.SAFE_MODE else "unsafe"} mode"
@@ -433,7 +439,7 @@ if __name__ == "__main__":
         #   2. event.wait() で停止したスレッドを event.set() で起こす（メインスレッドの処理は全て終了）
         #   3. ThreadPoolExecutor が with 句を抜けるタイミングで溜まったキューが全て実行される
         #   4. 終了する
-        event = Event()
+        event = threading.Event()
 
         def shutdown_handler(graceful: bool):
             def handler(signal, frame):
