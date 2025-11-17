@@ -4,7 +4,6 @@ import dataclasses
 import itertools
 import json
 import logging
-import threading
 import time
 from collections import defaultdict
 from enum import Enum
@@ -23,8 +22,8 @@ from ossans_navi.common.logger import shrink_message
 from ossans_navi.config import AiServiceType
 from ossans_navi.service.ai_tokenize_service import AiTokenize, AiTokenizeGpt4o
 from ossans_navi.type import ossans_navi_types
+from ossans_navi.common import utils
 
-thread_local = threading.local()
 logger = logging.getLogger(__name__)
 
 
@@ -654,15 +653,19 @@ class QualityCheckResponse:
 
 class AiService:
     def __init__(self) -> None:
+        self.client_openai_instance: Optional[OpenAI | AzureOpenAI] = None
+        self.client_gemini_instance: Optional[genai.Client] = None
+
+    async def start(self):
         match config.AI_SERVICE_TYPE:
             case AiServiceType.OPENAI:
                 if not config.OPENAI_API_KEY:
                     raise ValueError("OSN_OPENAI_API_KEY is required when using OpenAI service.")
-                self.client_openai = OpenAI(api_key=config.OPENAI_API_KEY)
+                self.client_openai_instance = OpenAI(api_key=config.OPENAI_API_KEY)
             case AiServiceType.AZURE_OPENAI:
                 if not config.AZURE_OPENAI_API_KEY or not config.AZURE_OPENAI_ENDPOINT:
                     raise ValueError("OSN_AZURE_OPENAI_API_KEY and OSN_AZURE_OPENAI_ENDPOINT are required when using Azure OpenAI service.")
-                self.client_openai = AzureOpenAI(
+                self.client_openai_instance = AzureOpenAI(
                     api_key=config.AZURE_OPENAI_API_KEY,
                     api_version=config.AZURE_OPENAI_API_VERSION,
                     azure_endpoint=config.AZURE_OPENAI_ENDPOINT,
@@ -670,19 +673,21 @@ class AiService:
             case AiServiceType.GEMINI:
                 if not config.GEMINI_API_KEY:
                     raise ValueError("OSN_GEMINI_API_KEY is required when using Gemini service.")
-                self.gemini_api_key = config.GEMINI_API_KEY
+                self.client_gemini_instance = genai.Client(api_key=config.GEMINI_API_KEY)
             case _:
                 raise NotImplementedError("Unknown AiServiceType")
 
     @property
+    def client_openai(self) -> OpenAI | AzureOpenAI:
+        if self.client_openai_instance is None:
+            raise RuntimeError("AiService is not started.")
+        return self.client_openai_instance
+
+    @property
     def client_gemini(self) -> genai.Client:
-        if self.gemini_api_key is None:
-            raise RuntimeError("gemini_api_key is None")
-        if isinstance((v := thread_local.__dict__.get("client_gemini")), genai.Client):
-            return v
-        else:
-            thread_local.__dict__["client_gemini"] = (v := genai.Client(api_key=self.gemini_api_key))
-            return v
+        if self.client_gemini_instance is None:
+            raise RuntimeError("AiService is not started.")
+        return self.client_gemini_instance
 
     async def _chat_completions(
             self,
@@ -706,16 +711,24 @@ class AiService:
         last_exception: Optional[Exception] = None
         response: Optional[types.GenerateContentResponse] = None
         try:
-            for file in prompt.get_upload_files():
-                logger.debug(f"Uploading file: {file.title}")
-                file.file = await self.client_gemini.aio.files.upload(
-                    file=file.to_bytes_io(),
-                    config={
-                        "mime_type": file.mimetype,
-                        "display_name": file.title,
-                    },
+            if len(prompt.get_upload_files()) > 0:
+                logger.debug(f"Uploading files: {', '.join([file.title for file in prompt.get_upload_files()])}")
+                uploaded_files = await utils.asyncio_gather(
+                    *[
+                        self.client_gemini.aio.files.upload(
+                            file=file.to_bytes_io(),
+                            config={
+                                "mime_type": file.mimetype,
+                                "display_name": file.title,
+                            },
+                        )
+                        for file in prompt.get_upload_files()
+                    ],
+                    concurrency=2,
                 )
-                logger.debug(f"Uploaded file: {file.title}")
+                for (file, uploaded_file) in zip(prompt.get_upload_files(), uploaded_files):
+                    file.file = uploaded_file
+                logger.debug(f"Uploaded files: {', '.join([file.title for file in prompt.get_upload_files()])}")
         except Exception as e:
             # ファイルのアップロード失敗はエラーとせずに処理を続行する
             logger.warning(f"Failed to upload files: {e}")
@@ -725,8 +738,8 @@ class AiService:
                 for _ in range(100):
                     if file.file and file.file.name and file.file.state == types.FileState.PROCESSING:
                         await asyncio.sleep(2)
-                        file.file = await self.client_gemini.aio.files.get(name=file.file.name)
-                        logger.debug(f"Get file state: {file.file.state}")
+                        file.file = (v := await self.client_gemini.aio.files.get(name=file.file.name))
+                        logger.debug(f"Get file state: {v.state}")
         except Exception as e:
             # ファイルのアップロード失敗はエラーとせずに処理を続行する
             logger.warning(f"Failed to upload files: {e}")
@@ -756,12 +769,21 @@ class AiService:
                 await asyncio.sleep(30)
 
         try:
-            for file in prompt.get_upload_files():
+            if len([True for file in prompt.get_upload_files() if file.file and file.file.name]) > 0:
                 # アップロードしたファイルを削除する
-                if file.file and file.file.name:
-                    await self.client_gemini.aio.files.delete(name=file.file.name)
-                    logger.debug(f"Deleted file: {file.title}")
-                    file.file = None
+                logger.debug(f"Deleting files: {', '.join([file.title for file in prompt.get_upload_files() if file.file and file.file.name])}")
+                await utils.asyncio_gather(
+                    *[
+                        self.client_gemini.aio.files.delete(name=file.file.name)
+                        for file in prompt.get_upload_files()
+                        if file.file and file.file.name
+                    ],
+                    concurrency=5,
+                )
+                logger.debug(f"Deleted files: {', '.join([file.title for file in prompt.get_upload_files() if file.file and file.file.name])}")
+                for file in prompt.get_upload_files():
+                    if file.file and file.file.name:
+                        file.file = None
         except Exception as e:
             # ファイルの削除失敗はエラーとせずに処理を続行する
             logger.warning(f"Failed to delete files: {e}")

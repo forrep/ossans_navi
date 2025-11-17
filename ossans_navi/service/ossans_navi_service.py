@@ -4,7 +4,7 @@ import itertools
 import json
 import logging
 import re
-from collections.abc import Generator
+from collections.abc import AsyncGenerator
 from io import BytesIO
 from typing import Any, Optional, overload
 
@@ -30,22 +30,37 @@ class OssansNaviService:
 
     def __init__(
         self,
-        event_loop: asyncio.AbstractEventLoop,
         ai_service: AiService,
         slack_service: SlackService,
         models: AiModels,
         event: SlackMessageEvent,
+        config: ossans_navi_types.OssansNaviConfig,
     ) -> None:
-        self.event_loop = event_loop
         self.ai_service = ai_service
         self.slack_service = slack_service
         self.ai_prompt_service = AiPromptService(event, self.slack_service.get_assistant_names())
         self.models = models
         self.event = event
-        self.config = self.get_config()
+        self.config = config
         self.slack_searches = SlackSearches()
         self.slack_file_permalinks: dict[str, SlackFile] = {}
         """同一 permalink に紐づく SlackFile を一つのインスタンスにまとめるために permalink から SlackFile を取得する辞書"""
+
+    @classmethod
+    async def create(
+        cls,
+        ai_service: AiService,
+        slack_service: SlackService,
+        models: AiModels,
+        event: SlackMessageEvent,
+    ) -> "OssansNaviService":
+        return cls(
+            ai_service,
+            slack_service,
+            models,
+            event,
+            ossans_navi_types.OssansNaviConfig.from_dict(await slack_service.get_config_dict()),
+        )
 
     @staticmethod
     def json_dumps_converter(v) -> str:
@@ -291,10 +306,10 @@ class OssansNaviService:
             return messages
         raise TypeError(f"invalid type {type(messages)}")
 
-    def get_thread_messages(self) -> list[SlackMessageLite]:
+    async def get_thread_messages(self) -> list[SlackMessageLite]:
         # SlackMessageLite を取得した後に _integrate_duplicated_slack_file で含まれる SlackFile のインスタンスを1つにまとめる
         thread_messages = self._integrate_duplicated_slack_file(
-            self.slack_service.get_conversations_replies(self.event.channel_id, self.event.thread_ts)
+            await self.slack_service.get_conversations_replies(self.event.channel_id, self.event.thread_ts)
         )
         logger.info(
             "conversations_replies="
@@ -334,26 +349,20 @@ class OssansNaviService:
     def is_next_message_from_ossans_navi(self, thread_messages: list[SlackMessageLite]) -> bool:
         return len(thread_messages) >= 2 and thread_messages[-2].user.user_id in self.slack_service.my_bot_user_id
 
-    def classify(self, thread_messages: list[SlackMessageLite]) -> dict[str, str | list[str]]:
-        return self.event_loop.run_until_complete(
-            self.ai_service.request_classify(
-                self.models.low_cost,
-                self.get_ai_prompt(
-                    self.ai_prompt_service.classify_prompt(),
-                    thread_messages,
-                    schema=self.ai_prompt_service.CLASSIFY_SCHEMA,
-                )
+    async def classify(self, thread_messages: list[SlackMessageLite]) -> dict[str, str | list[str]]:
+        return await self.ai_service.request_classify(
+            self.models.low_cost,
+            self.get_ai_prompt(
+                self.ai_prompt_service.classify_prompt(),
+                thread_messages,
+                schema=AiPromptService.CLASSIFY_SCHEMA,
             )
         )
 
-    def store_config(self, config: ossans_navi_types.OssansNaviConfig, clear_cache: bool = True) -> None:
-        self.slack_service.store_config_dict(config.to_dict(), clear_cache)
+    async def store_config(self, config: ossans_navi_types.OssansNaviConfig, clear_cache: bool = True) -> None:
+        await self.slack_service.store_config_dict(config.to_dict(), clear_cache)
 
-    def get_config(self) -> ossans_navi_types.OssansNaviConfig:
-        config_dict = self.slack_service.get_config_dict()
-        return ossans_navi_types.OssansNaviConfig.from_dict(config_dict)
-
-    def special_command(self) -> bool:
+    async def special_command(self) -> bool:
         """
         OssansNavi の管理者が ossans_navi との DM に `config` だけを本文とするメッセージを送信すると OssansNavi の設定処理（special_command）を実行する
         special_command を実行した場合は True を返す、special_command に該当しなければ False を返すので、呼び出し元は通常のメッセージとして扱う
@@ -372,7 +381,7 @@ class OssansNaviService:
             #    ※Slackbot チャネルに何らかのメッセージが流れてきてキックされたイベントなので必ず2メッセージ目以降になっている
             # 4. special_command() で Slackbot チャネルへの投稿に反応して設定を保存する（ここで二重の保存処理が実行される）
             #    ※get_config() はキャッシュヒットすると2メッセージ目になっていても再保存処理が動作しないので、このメソッド内でも保存しておく必要がある
-            self.store_config(self.config, False)
+            await self.store_config(self.config, False)
             return False
         elif re.match(r'\s*config\s*', self.event.text):
             if (
@@ -389,7 +398,7 @@ class OssansNaviService:
                 # 管理者権限を持っていないので special_command を実行しないで終了
                 logger.info(f"permission denied. cannot execute special_command. event={self.event}")
                 return False
-            config_controller.index(self.slack_service, self.event.channel_id, self.event.thread_ts)
+            await config_controller.index(self.slack_service, self.event.channel_id, self.event.thread_ts)
             return True
         return False
 
@@ -408,7 +417,7 @@ class OssansNaviService:
                     for file in message.files:
                         file.is_analyzed = False
 
-    def analyze_image_description(self, thread_messages: list[SlackMessageLite]):
+    async def analyze_image_description(self, thread_messages: list[SlackMessageLite]):
         # キャッシュから読み込めるやつは読み込んでおく、ここで読み込まれた分は生成AIに渡されないからトークンの節約になる
         OssansNaviService.load_image_description_from_cache(thread_messages)
         messages_token = self.models.high_quality.tokenizer.messages_tokens(
@@ -449,20 +458,18 @@ class OssansNaviService:
             return
 
         # 添付画像を AI で解析実行
-        image_description = self.event_loop.run_until_complete(
-            self.ai_service.request_image_description(
-                self.models.low_cost,
-                self.get_ai_prompt(
-                    self.ai_prompt_service.image_description_prompt(),
-                    thread_messages,
-                    analyze_image_files=True,
-                    schema=Schema(
-                        type=Type.OBJECT,
-                        properties={
-                            message.permalink: self.ai_prompt_service.IMAGE_DESCRIPTION_SCHEMA for message in thread_messages
-                        },
-                        required=[message.permalink for message in thread_messages]
-                    )
+        image_description = await self.ai_service.request_image_description(
+            self.models.low_cost,
+            self.get_ai_prompt(
+                self.ai_prompt_service.image_description_prompt(),
+                thread_messages,
+                analyze_image_files=True,
+                schema=Schema(
+                    type=Type.OBJECT,
+                    properties={
+                        message.permalink: AiPromptService.IMAGE_DESCRIPTION_SCHEMA for message in thread_messages
+                    },
+                    required=[message.permalink for message in thread_messages]
                 )
             )
         )
@@ -473,7 +480,7 @@ class OssansNaviService:
         # キャッシュに追加した後で再度キャッシュから情報を読み込む
         OssansNaviService.load_image_description_from_cache(thread_messages)
 
-    def search(
+    async def search(
         self,
         terms_strs: list[str],
         is_additional: bool = False,
@@ -498,7 +505,7 @@ class OssansNaviService:
                 # つまり「ワードA AND ワードB」の検索結果を 10件取得済みならば 「ワードA AND ワードB AND ワードC」を検索する必要が無い
                 continue
 
-            result = self.slack_service.search(
+            result = await self.slack_service.search(
                 current_term,
                 self.event.user,
                 self.event.channel_id,
@@ -518,7 +525,7 @@ class OssansNaviService:
                 if result.is_too_meny_messages():
                     self.slack_searches.add(SlackService.duplicate_search_result(result, 1))
 
-    def do_slack_searches(self, thread_messages: list[SlackMessageLite]) -> Generator[None, None, None]:
+    async def do_slack_searches(self, thread_messages: list[SlackMessageLite]) -> AsyncGenerator[None, None]:
         # Slack ワークスペースを検索するワードを生成してもらう
         # function calling を利用しない理由は、適切にキーワードを生成してくれないケースがあったり、実行回数などコントロールしづらいため
         # 具体的には \n や空白文字が連続したり、「あああああ」みたいな意味不明なキーワードが生成されたり、指示しても1つのキーワードしか生成してくれないケースなど
@@ -528,20 +535,18 @@ class OssansNaviService:
             thread_messages,
             limit=3000,
             limit_last_message=6000,
-            schema=self.ai_prompt_service.SLACK_SEARCH_WORD_SCHEMA,
+            schema=AiPromptService.SLACK_SEARCH_WORD_SCHEMA,
         )
 
         for i in range(3):
             # 呼び出し元にイベントのキャンセル確認させるために定期的に yield で処理を戻す
             yield
 
-            slack_search_words = self.event_loop.run_until_complete(
-                self.ai_service.request_slack_search_words(self.models.high_quality, request_slack_search_words_prompt)
-            )
+            slack_search_words = await self.ai_service.request_slack_search_words(self.models.high_quality, request_slack_search_words_prompt)
 
             # Slack API でキーワード検索を実行して self.slack_searches に積み込む処理
             # slack_searches 内ではヒット件数（total_count）が少ない方がより絞り込めた良いキーワードと判断してヒット件数の昇順で並べる
-            self.search(slack_search_words)
+            await self.search(slack_search_words)
 
             if self.slack_searches.result_len() == 0:
                 # キーワード自体が生成されなかったケース、つまり検索が必要がない質問やメッセージに対する応答
@@ -577,7 +582,7 @@ class OssansNaviService:
             )
         yield
 
-    def refine_slack_searches(self, thread_messages: list[SlackMessageLite]) -> Generator[None, None, None]:
+    async def refine_slack_searches(self, thread_messages: list[SlackMessageLite]) -> AsyncGenerator[None, None]:
         """
         slack_searches の結果から有用な情報を抽出するフェーズ（refine_slack_searches）
         トークン数の上限があるので複数回に分けて実行して、大量の検索結果の中から必要な情報を絞り込む
@@ -601,13 +606,11 @@ class OssansNaviService:
         for depth in range(refine_slack_searches_depth):
             # 最後の refine かどうか？最後以外は新たな検索ワードを追加する処理などがある
             is_last_refine = depth + 1 == refine_slack_searches_depth
-            self.event_loop.run_until_complete(
-                asyncio.gather(
-                    *[
-                        self._refine_slack_searches_safe(thread_messages, base_messages_token, is_last_refine, depth, node)
-                        for node in range(refine_slack_searches_count)
-                    ]
-                )
+            await asyncio.gather(
+                *[
+                    self._refine_slack_searches_safe(thread_messages, base_messages_token, is_last_refine, depth, node)
+                    for node in range(refine_slack_searches_count)
+                ]
             )
             yield
 
@@ -656,7 +659,7 @@ class OssansNaviService:
                     # ヒットしたメッセージがすでにAI入力済みだった場合は次へ
                     continue
                 # スレッド情報などを取得する（Slack API実行のため多少時間がかかる）
-                self.load_slack_message(message)
+                await self.load_slack_message(message)
                 # 今回の検索結果を追加した場合のトークン数を試算する
                 tokens = self.models.low_cost.tokenizer.content_tokens(json.dumps(
                     [OssansNaviService.slack_message_to_ai_prompt(message) for message in [*candidate_messages, message]],
@@ -700,7 +703,7 @@ class OssansNaviService:
         refine_slack_searches_prompt = self.get_ai_prompt(
             self.ai_prompt_service.refine_slack_searches_prompt(),
             thread_messages,
-            schema=self.ai_prompt_service.REFINE_SLACK_SEARCHES_SCHEMA,
+            schema=AiPromptService.REFINE_SLACK_SEARCHES_SCHEMA,
             rag_info=AiPromptRagInfo(
                 [OssansNaviService.slack_message_to_ai_prompt(message) for message in SlackMessage.sort(current_messages)],
                 [v.words for v in self.slack_searches if not v.is_get_messages]
@@ -732,13 +735,13 @@ class OssansNaviService:
                 # 最後の refine ではない→ まだ検索結果を精査するフェーズが残っている
                 if len(refine_slack_searches_response.additional_search_words) > 0:
                     # 追加の検索ワードが提供された場合は検索する
-                    self.search(refine_slack_searches_response.additional_search_words, True)
+                    await self.search(refine_slack_searches_response.additional_search_words, True)
                 if len(refine_slack_searches_response.get_messages) > 0:
                     # 追加の取得メッセージが提供された場合は検索する
-                    self.search(refine_slack_searches_response.get_messages, True, True)
+                    await self.search(refine_slack_searches_response.get_messages, True, True)
         logger.debug(f"[{depth}][{node}] _refine_slack_searches: finished")
 
-    def lastshot(self, thread_messages: list[SlackMessageLite]) -> list[ossans_navi_types.LastshotResponse]:
+    async def lastshot(self, thread_messages: list[SlackMessageLite]) -> list[ossans_navi_types.LastshotResponse]:
         current_messages: list[SlackMessage] = []
         # 入力可能なトークン数を定義する、たくさん入れたら精度が上がるが費用も上がるのでほどほどのトークン数に制限する（話しかけられている時はトークン量を増やす）
         if self.event.is_mention or self.event.is_reply_to_ossans_navi():
@@ -777,42 +780,38 @@ class OssansNaviService:
             current_messages.append(content)
         logger.info(f"Lastshot input_count={len(current_messages)}")
 
-        return self.event_loop.run_until_complete(
-            self.ai_service.request_lastshot(
-                self.models.high_quality,
-                self.get_ai_prompt(
-                    self.ai_prompt_service.lastshot_prompt(len(current_messages) > 0),
-                    thread_messages,
-                    input_image_files=config.LASTSHOT_INPUT_IMAGE_FILES,
-                    input_video_audio_files=config.LOAD_VIDEO_AUDIO_FILES,
-                    limit=15000,
-                    limit_last_message=40000,
-                    rag_info=AiPromptRagInfo(
-                        OssansNaviService.slack_message_to_ai_prompt(
-                            SlackMessage.sort(current_messages), limit=15000, check_dup_files=True
-                        ),
-                        self.slack_searches.lastshot_terms
-                    )
-                ),
-                n
-            )
+        return await self.ai_service.request_lastshot(
+            self.models.high_quality,
+            self.get_ai_prompt(
+                self.ai_prompt_service.lastshot_prompt(len(current_messages) > 0),
+                thread_messages,
+                input_image_files=config.LASTSHOT_INPUT_IMAGE_FILES,
+                input_video_audio_files=config.LOAD_VIDEO_AUDIO_FILES,
+                limit=15000,
+                limit_last_message=40000,
+                rag_info=AiPromptRagInfo(
+                    OssansNaviService.slack_message_to_ai_prompt(
+                        SlackMessage.sort(current_messages), limit=15000, check_dup_files=True
+                    ),
+                    self.slack_searches.lastshot_terms
+                )
+            ),
+            n
         )
 
-    def quality_check(self, thread_messages: list[SlackMessageLite], response_message: str) -> QualityCheckResponse:
-        return self.event_loop.run_until_complete(
-            self.ai_service.request_quality_check(
-                self.models.low_cost,
-                self.get_ai_prompt(
-                    self.ai_prompt_service.quality_check_prompt(response_message),
-                    thread_messages,
-                    limit=2000,
-                    limit_last_message=10000,
-                    schema=self.ai_prompt_service.QUALITY_CHECK_SCHEMA,
-                ),
-            )
+    async def quality_check(self, thread_messages: list[SlackMessageLite], response_message: str) -> QualityCheckResponse:
+        return await self.ai_service.request_quality_check(
+            self.models.low_cost,
+            self.get_ai_prompt(
+                self.ai_prompt_service.quality_check_prompt(response_message),
+                thread_messages,
+                limit=2000,
+                limit_last_message=10000,
+                schema=AiPromptService.QUALITY_CHECK_SCHEMA,
+            ),
         )
 
-    def load_slack_file(
+    async def load_slack_file(
         self,
         file: SlackFile,
         user_client: bool = False,
@@ -830,9 +829,9 @@ class OssansNaviService:
                 # - load_vtt の指示がある
                 # - slack が vtt を生成している ※file.transcription_complete and file.vtt
                 # - file.text が空 ※file.text が空ではないならすでに vtt をロードしている
-                file.text = self.slack_service.load_file(file.vtt, user_client).decode("utf-8")
+                file.text = (await self.slack_service.load_file(file.vtt, user_client)).decode("utf-8")
             if load_file:
-                file.content = self.slack_service.load_file(file.url_private, user_client)
+                file.content = await self.slack_service.load_file(file.url_private, user_client)
                 if file.is_image:
                     bytes_io = BytesIO(file.content)
                     image: Image.Image | ImageFile.ImageFile = Image.open(bytes_io)
@@ -860,7 +859,7 @@ class OssansNaviService:
         except Exception as e:
             logger.info(f"Slack get_image failed: {str(e)}")
 
-    def load_slack_message(self, message: SlackMessage) -> None:
+    async def load_slack_message(self, message: SlackMessage) -> None:
         if message.is_initialized:
             # ロード済みなら処理せずに終了
             return
@@ -872,7 +871,7 @@ class OssansNaviService:
                 logger.debug(f"Do not get private conversations, channel_id={message.channel_id}, thread_ts={message.message.thread_ts}")
                 return
             messages = self._integrate_duplicated_slack_file(
-                self.slack_service.get_conversations_replies(message.channel_id, message.message.thread_ts, True)
+                await self.slack_service.get_conversations_replies(message.channel_id, message.message.thread_ts, True)
             )
             if len(messages) == 0:
                 # プライベートチャネルに対する読み取り権限がないなどの理由で空配列が返ってくるパターンがある
@@ -915,9 +914,9 @@ class OssansNaviService:
                     # 動画や音声ファイルは VTT をロードする
                     # 画像は読み込んでも利用しないので読み込まない
                     if file.is_text or file.is_canvas:
-                        self.load_slack_file(file, user_client=True, load_file=True, load_vtt=False)
+                        await self.load_slack_file(file, user_client=True, load_file=True, load_vtt=False)
                     elif file.is_video or file.is_audio:
-                        self.load_slack_file(file, user_client=True, load_file=False, load_vtt=True)
+                        await self.load_slack_file(file, user_client=True, load_file=False, load_vtt=True)
         except Exception as e:
             logger.error(e, exc_info=True)
 
@@ -925,22 +924,22 @@ class OssansNaviService:
         """処理の進捗を示すリアクションが付いているか？"""
         return bool(self.event.reactions_to_message)
 
-    def do_progress_reaction(self, reaction: str) -> None:
+    async def do_progress_reaction(self, reaction: str) -> None:
         """処理の進捗を示すリアクションを付ける、すでに付いているリアクションは削除する"""
         try:
             # 最初にリアクションを追加する
             # なぜなら先に削除すると Slack UI 上でリアクションの分だけ画面表示がずれて、追加時に再度ズレる。それを防ぐため
-            self.slack_service.add_reaction(self.event.channel_id, self.event.ts, reaction)
+            await self.slack_service.add_reaction(self.event.channel_id, self.event.ts, reaction)
         except Exception as e:
             # メッセージを編集すると先行イベントが同一リアクションをすでに行っていてエラーが発生するパターンがある、実際にはエラーではないので無視する
             logger.info(e, exc_info=True)
             pass
         # 処理中リアクションが付いている場合は削除
-        self.remove_progress_reaction()
+        await self.remove_progress_reaction()
         self.event.reactions_to_message.append(reaction)
 
-    def remove_progress_reaction(self) -> None:
+    async def remove_progress_reaction(self) -> None:
         """処理の進捗を示すリアクションを削除する"""
         if self.has_progress_reaction():
-            self.slack_service.remove_reaction(self.event.channel_id, self.event.ts, self.event.reactions_to_message)
+            await self.slack_service.remove_reaction(self.event.channel_id, self.event.ts, self.event.reactions_to_message)
             self.event.reactions_to_message.clear()

@@ -38,7 +38,7 @@ CONFIG_INDEX_BUTTON: list[dict[str, Any]] = [
 ]
 
 
-def routing(body: dict[Any, Any], slack_service: SlackService) -> None:
+async def routing(body: dict[Any, Any], slack_service: SlackService) -> None:
     if not isinstance(channel_id := body["channel"]["id"], str):
         logger.error("Invalid channel_id")
         return
@@ -48,12 +48,12 @@ def routing(body: dict[Any, Any], slack_service: SlackService) -> None:
     for action in body["actions"]:
         if isinstance(action, dict) and isinstance(action.get("action_id"), str) and isinstance(action.get("value", ""), str):
             if action["action_id"] == "config.index":
-                index(slack_service, channel_id, thread_ts)
+                await index(slack_service, channel_id, thread_ts)
             else:
-                do_action(slack_service, channel_id, thread_ts, action["action_id"], action.get("value"))
+                await do_action(slack_service, channel_id, thread_ts, action["action_id"], action.get("value"))
 
 
-def index(slack_service: SlackService, channel_id: str, thread_ts: str) -> None:
+async def index(slack_service: SlackService, channel_id: str, thread_ts: str) -> None:
     blocks: list[dict[str, Any]] = []
     for (category, label) in CONFIG_ITEMS.items():
         blocks.append(
@@ -90,14 +90,14 @@ def index(slack_service: SlackService, channel_id: str, thread_ts: str) -> None:
                 ]
             }
         )
-    slack_service.chat_post_message(
+    await slack_service.chat_post_message(
         channel=channel_id,
         thread_ts=thread_ts,
         blocks=blocks
     )
 
 
-def do_action(slack_service: SlackService, channel_id: str, thread_ts: str, action_id: str, value: Optional[str] = None) -> None:
+async def do_action(slack_service: SlackService, channel_id: str, thread_ts: str, action_id: str, value: Optional[str] = None) -> None:
     if (
         match := re.match(
             f"^({'|'.join([category for category in CONFIG_ITEMS])})\\.(list|add_input|add_search|add_execute|remove_execute)$",
@@ -109,10 +109,10 @@ def do_action(slack_service: SlackService, channel_id: str, thread_ts: str, acti
     category: str = match[1]
     action: str = match[2]
     value = (value.strip() if isinstance(value, str) else None)
-    current_config = get_config(slack_service)
+    current_config = await get_config(slack_service)
 
-    def chat_post_message(blocks: list) -> None:
-        slack_service.chat_post_message(
+    async def chat_post_message(blocks: list) -> None:
+        await slack_service.chat_post_message(
             channel=channel_id,
             thread_ts=thread_ts,
             blocks=[{"type": "divider"}, *blocks, *CONFIG_INDEX_BUTTON],
@@ -134,12 +134,12 @@ def do_action(slack_service: SlackService, channel_id: str, thread_ts: str, acti
                 **(
                     {
                         user.user_id: user
-                        for user in [slack_service.get_user(user_id) for user_id in user_ids]
+                        for user in [await slack_service.get_user(user_id) for user_id in user_ids]
                         if user.is_valid
                     }
                 ),
             }
-            chat_post_message([
+            await chat_post_message([
                 {
                     "type": "section",
                     "text": {
@@ -170,7 +170,7 @@ def do_action(slack_service: SlackService, channel_id: str, thread_ts: str, acti
                 ]
             ])
         elif action == "add_input":
-            chat_post_message([
+            await chat_post_message([
                 {
                     "dispatch_action": True,
                     "type": "input",
@@ -188,7 +188,7 @@ def do_action(slack_service: SlackService, channel_id: str, thread_ts: str, acti
         elif action == "add_search":
             if not value:
                 logger.error("Search value is empty")
-                chat_post_message([
+                await chat_post_message([
                     {
                         "type": "section",
                         "text": {
@@ -198,7 +198,7 @@ def do_action(slack_service: SlackService, channel_id: str, thread_ts: str, acti
                     }
                 ])
                 return
-            users = slack_service.users_list()
+            users = await slack_service.users_list()
             keyword = value.lower()
             users = [
                 user for user in users
@@ -213,7 +213,7 @@ def do_action(slack_service: SlackService, channel_id: str, thread_ts: str, acti
                     users = [user for user in users if user.is_bot]
                 case "admin_users":
                     users = [user for user in users if not user.is_bot and not user.is_guest]
-            chat_post_message([
+            await chat_post_message([
                 {
                     "type": "section",
                     "text": {
@@ -246,7 +246,7 @@ def do_action(slack_service: SlackService, channel_id: str, thread_ts: str, acti
         elif action == "add_execute":
             if not isinstance(value, str):
                 logger.error(f"Add {label}: value is invalid: {value}")
-                chat_post_message([
+                await chat_post_message([
                     {
                         "type": "section",
                         "text": {
@@ -257,8 +257,8 @@ def do_action(slack_service: SlackService, channel_id: str, thread_ts: str, acti
                 ])
                 return
             user_ids.append(value)
-            store_config(slack_service, current_config, True)
-            chat_post_message([
+            await store_config(slack_service, current_config, True)
+            await chat_post_message([
                 {
                     "type": "section",
                     "text": {
@@ -270,7 +270,7 @@ def do_action(slack_service: SlackService, channel_id: str, thread_ts: str, acti
         elif action == "remove_execute":
             if not isinstance(value, str):
                 logger.error(f"Remove {label}: value is invalid: {value}")
-                chat_post_message([
+                await chat_post_message([
                     {
                         "type": "section",
                         "text": {
@@ -282,7 +282,7 @@ def do_action(slack_service: SlackService, channel_id: str, thread_ts: str, acti
                 return
             if value not in user_ids:
                 logger.error(f"Remove {label}: value is not found: {value}")
-                chat_post_message([
+                await chat_post_message([
                     {
                         "type": "section",
                         "text": {
@@ -293,8 +293,8 @@ def do_action(slack_service: SlackService, channel_id: str, thread_ts: str, acti
                 ])
                 return
             user_ids.remove(value)
-            store_config(slack_service, current_config, True)
-            chat_post_message([
+            await store_config(slack_service, current_config, True)
+            await chat_post_message([
                 {
                     "type": "section",
                     "text": {
@@ -310,11 +310,11 @@ def do_action(slack_service: SlackService, channel_id: str, thread_ts: str, acti
             now_channels = {
                 channel.channel_id: channel
                 for channel in [
-                    slack_service.get_channel(channel_id, True) for channel_id in channel_ids
+                    await slack_service.get_channel(channel_id, True) for channel_id in channel_ids
                 ]
                 if channel.is_valid and channel.is_private
             }
-            chat_post_message([
+            await chat_post_message([
                 {
                     "type": "section",
                     "text": {
@@ -345,7 +345,7 @@ def do_action(slack_service: SlackService, channel_id: str, thread_ts: str, acti
                 ]
             ])
         elif action == "add_input":
-            chat_post_message([
+            await chat_post_message([
                 {
                     "dispatch_action": True,
                     "type": "input",
@@ -363,7 +363,7 @@ def do_action(slack_service: SlackService, channel_id: str, thread_ts: str, acti
         elif action == "add_execute":
             if not isinstance(value, str):
                 logger.error(f"Add {label}: value is invalid: {value}")
-                chat_post_message([
+                await chat_post_message([
                     {
                         "type": "section",
                         "text": {
@@ -373,10 +373,10 @@ def do_action(slack_service: SlackService, channel_id: str, thread_ts: str, acti
                     }
                 ])
                 return
-            target_channel = slack_service.get_channel(value, True)
+            target_channel = await slack_service.get_channel(value, True)
             if not target_channel.is_valid or not target_channel.is_private:
                 logger.error(f"Add {label}: value is invalid or is not private: {value}")
-                chat_post_message([
+                await chat_post_message([
                     {
                         "type": "section",
                         "text": {
@@ -387,8 +387,8 @@ def do_action(slack_service: SlackService, channel_id: str, thread_ts: str, acti
                 ])
                 return
             channel_ids.append(value)
-            store_config(slack_service, current_config, True)
-            chat_post_message([
+            await store_config(slack_service, current_config, True)
+            await chat_post_message([
                 {
                     "type": "section",
                     "text": {
@@ -400,7 +400,7 @@ def do_action(slack_service: SlackService, channel_id: str, thread_ts: str, acti
         elif action == "remove_execute":
             if not isinstance(value, str):
                 logger.error(f"Remove {label}: value is invalid: {value}")
-                chat_post_message([
+                await chat_post_message([
                     {
                         "type": "section",
                         "text": {
@@ -412,7 +412,7 @@ def do_action(slack_service: SlackService, channel_id: str, thread_ts: str, acti
                 return
             if value not in channel_ids:
                 logger.error(f"Remove {label}: value is not found: {value}")
-                chat_post_message([
+                await chat_post_message([
                     {
                         "type": "section",
                         "text": {
@@ -423,8 +423,8 @@ def do_action(slack_service: SlackService, channel_id: str, thread_ts: str, acti
                 ])
                 return
             channel_ids.remove(value)
-            store_config(slack_service, current_config, True)
-            chat_post_message([
+            await store_config(slack_service, current_config, True)
+            await chat_post_message([
                 {
                     "type": "section",
                     "text": {
@@ -435,10 +435,9 @@ def do_action(slack_service: SlackService, channel_id: str, thread_ts: str, acti
             ])
 
 
-def store_config(slack_service: SlackService, config: ossans_navi_types.OssansNaviConfig, clear_cache: bool = True) -> None:
-    slack_service.store_config_dict(config.to_dict(), clear_cache)
+async def store_config(slack_service: SlackService, config: ossans_navi_types.OssansNaviConfig, clear_cache: bool = True) -> None:
+    await slack_service.store_config_dict(config.to_dict(), clear_cache)
 
 
-def get_config(slack_service: SlackService) -> ossans_navi_types.OssansNaviConfig:
-    config_dict = slack_service.get_config_dict()
-    return ossans_navi_types.OssansNaviConfig.from_dict(config_dict)
+async def get_config(slack_service: SlackService) -> ossans_navi_types.OssansNaviConfig:
+    return ossans_navi_types.OssansNaviConfig.from_dict(await slack_service.get_config_dict())

@@ -52,6 +52,7 @@ def test_convert_markdown_to_mrkdwn_title():
     |-|-|-|-|-|
     |TestA-1|TestB-1|TestC-1|TestD-1|TestE-1|
     |TestA-2|`TestB`-2| **TestC**-2| TestD-2 |TestE-2|
+    |TestA-3|TestB-3|TestC-3| |TestE-3|
     """, 4).strip()
     assert SlackService.convert_markdown_to_mrkdwn(markdown_text) == dedent("""
     • list1
@@ -72,21 +73,26 @@ def test_convert_markdown_to_mrkdwn_title():
     some text `strong text` normal text
     some text `strong text` normal text
     link to <https://example.com/|example.com> here
-    • A
-      • B
-        • C
-          • D
-          • E
-    • TestA-1
-      • TestB-1
-        • TestC-1
-          • TestD-1
-          • TestE-1
-    • TestA-2
-      • `TestB` -2
-        • *TestC* -2
-          • TestD-2
-          • TestE-2
+    ┏ A
+    ┣ B
+    ┣ C
+    ┣ D
+    ┗ E
+    ┏ TestA-1
+    ┣ TestB-1
+    ┣ TestC-1
+    ┣ TestD-1
+    ┗ TestE-1
+    ┏ TestA-2
+    ┣ `TestB` -2
+    ┣ *TestC* -2
+    ┣ TestD-2
+    ┗ TestE-2
+    ┏ TestA-3
+    ┣ TestB-3
+    ┣ TestC-3
+    ┣ ━
+    ┗ TestE-3
     """, 4).strip()
 
 
@@ -162,8 +168,9 @@ def slack_service(monkeypatch: pytest.MonkeyPatch):
     return SlackService()
 
 
-def test_get_user(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
-    def users_info_dummy(self, user: str):
+@pytest.mark.asyncio
+async def test_get_user(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
+    async def users_info_dummy(self, user: str):
         if user == "U7CAL37X0":
             return SlackResponseDummy(
                 {
@@ -241,7 +248,7 @@ def test_get_user(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setattr(SlackWrapper, "users_info", users_info_dummy)
 
-    assert slack_service.get_user("U7CAL37X0") == SlackUser(
+    assert await slack_service.get_user("U7CAL37X0") == SlackUser(
         user_id='U7CAL37X0',
         name='山田 太郎',
         username='yamada',
@@ -253,7 +260,7 @@ def test_get_user(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
     )
 
     # users_info で user_not_found が返ってくるパターン
-    assert slack_service.get_user("U1XXXXXXX") == SlackUser(
+    assert await slack_service.get_user("U1XXXXXXX") == SlackUser(
         user_id='U1XXXXXXX',
         name='Unknown',
         username='Unknown',
@@ -265,7 +272,7 @@ def test_get_user(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
     )
 
     # users_info で user_not_visible が返ってくるパターン
-    assert slack_service.get_user("U2XXXXXXX") == SlackUser(
+    assert await slack_service.get_user("U2XXXXXXX") == SlackUser(
         user_id='U2XXXXXXX',
         name='Unknown',
         username='Unknown',
@@ -278,15 +285,15 @@ def test_get_user(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
 
     # users_info で request_timeout が返るパターン
     with pytest.raises(SlackApiError):
-        slack_service.get_user("U3XXXXXXX")
+        await slack_service.get_user("U3XXXXXXX")
 
     # users_info で ValueError() が返るパターン
     with pytest.raises(ValueError):
-        slack_service.get_user("RAISE_ERROR_TEST")
+        await slack_service.get_user("RAISE_ERROR_TEST")
 
     # users_info を None にしても cache から取得できる
     monkeypatch.setattr(SlackWrapper, "users_info", None)
-    assert slack_service.get_user("U7CAL37X0") == SlackUser(
+    assert await slack_service.get_user("U7CAL37X0") == SlackUser(
         user_id='U7CAL37X0',
         name='山田 太郎',
         username='yamada',
@@ -298,8 +305,9 @@ def test_get_user(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
     )
 
 
-def test_get_bot(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
-    def bots_info_dummy(self, bot: str):
+@pytest.mark.asyncio
+async def test_get_bot(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
+    async def bots_info_dummy(self, bot: str):
         if bot == "BCL3TC9NW":
             return SlackResponseDummy(
                 {
@@ -332,7 +340,7 @@ def test_get_bot(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setattr(SlackWrapper, "bots_info", bots_info_dummy)
 
-    assert slack_service.get_bot("BCL3TC9NW") == SlackUser(
+    assert await slack_service.get_bot("BCL3TC9NW") == SlackUser(
         user_id="BCL3TC9NW",
         name="Good || New TeamBuilder",
         username="Good || New TeamBuilder",
@@ -345,7 +353,7 @@ def test_get_bot(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
     )
 
     # bots_info で bot_not_found が返ってくるパターン
-    assert slack_service.get_bot("B1XXXXXXX") == SlackUser(
+    assert await slack_service.get_bot("B1XXXXXXX") == SlackUser(
         user_id='B1XXXXXXX',
         name='Unknown Bot',
         username='unknown_bot',
@@ -359,15 +367,15 @@ def test_get_bot(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
 
     # bots_info で request_timeout が返るパターン
     with pytest.raises(SlackApiError):
-        slack_service.get_bot("B2XXXXXXX")
+        await slack_service.get_bot("B2XXXXXXX")
 
     # bots_info で ValueError() が返るパターン
     with pytest.raises(ValueError):
-        slack_service.get_bot("RAISE_ERROR_TEST")
+        await slack_service.get_bot("RAISE_ERROR_TEST")
 
     # bots_info を None にしても cache から取得できる
     monkeypatch.setattr(SlackWrapper, "bots_info", None)
-    assert slack_service.get_bot("BCL3TC9NW") == SlackUser(
+    assert await slack_service.get_bot("BCL3TC9NW") == SlackUser(
         user_id="BCL3TC9NW",
         name="Good || New TeamBuilder",
         username="Good || New TeamBuilder",
@@ -380,8 +388,9 @@ def test_get_bot(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
     )
 
 
-def test_get_conversations_members(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
-    def conversations_members_dummy(self, channel: str, limit):
+@pytest.mark.asyncio
+async def test_get_conversations_members(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
+    async def conversations_members_dummy(self, channel: str, limit):
         if channel == "C7GGZ82UR":
             return SlackResponseDummy(
                 {
@@ -417,7 +426,7 @@ def test_get_conversations_members(slack_service: SlackService, monkeypatch: pyt
 
     monkeypatch.setattr(SlackWrapper, "conversations_members", conversations_members_dummy)
 
-    assert slack_service.get_conversations_members("C7GGZ82UR") == [
+    assert await slack_service.get_conversations_members("C7GGZ82UR") == [
         "U02L3BLC5",
         "U48KQ57L3",
         "U496LGCUR",
@@ -431,19 +440,19 @@ def test_get_conversations_members(slack_service: SlackService, monkeypatch: pyt
     ]
 
     # 存在しないチャネルの場合は空メンバーが返ってくる
-    assert slack_service.get_conversations_members("C1XXXXXXX") == []
+    assert await slack_service.get_conversations_members("C1XXXXXXX") == []
 
     # request_timeout が返るパターン
     with pytest.raises(SlackApiError):
-        slack_service.get_conversations_members("C2XXXXXXX")
+        await slack_service.get_conversations_members("C2XXXXXXX")
 
     # その他のエラーが発生した場合
     with pytest.raises(ValueError):
-        slack_service.get_conversations_members("RAISE_ERROR_TEST")
+        await slack_service.get_conversations_members("RAISE_ERROR_TEST")
 
     # conversations_members を None にしても cache から取得できる
     monkeypatch.setattr(SlackWrapper, "conversations_members", None)
-    assert slack_service.get_conversations_members("C7GGZ82UR") == [
+    assert await slack_service.get_conversations_members("C7GGZ82UR") == [
         "U02L3BLC5",
         "U48KQ57L3",
         "U496LGCUR",
@@ -457,8 +466,9 @@ def test_get_conversations_members(slack_service: SlackService, monkeypatch: pyt
     ]
 
 
-def test_get_presence(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
-    def users_getPresence_dummy(self, user: str):
+@pytest.mark.asyncio
+async def test_get_presence(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
+    async def users_getPresence_dummy(self, user: str):
         if user == "U7CAL37X0":
             return SlackResponseDummy(
                 {
@@ -492,24 +502,25 @@ def test_get_presence(slack_service: SlackService, monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr(SlackWrapper, "users_getPresence", users_getPresence_dummy)
 
-    assert slack_service.get_presence("U7CAL37X0")
+    assert await slack_service.get_presence("U7CAL37X0")
 
-    assert not slack_service.get_presence("U4XXXXXXX")
+    assert not await slack_service.get_presence("U4XXXXXXX")
 
-    assert not slack_service.get_presence("U1XXXXXXX")
+    assert not await slack_service.get_presence("U1XXXXXXX")
 
-    assert not slack_service.get_presence("U2XXXXXXX")
+    assert not await slack_service.get_presence("U2XXXXXXX")
 
     with pytest.raises(SlackApiError):
-        slack_service.get_presence("U3XXXXXXX")
+        await slack_service.get_presence("U3XXXXXXX")
 
     # ValueError() が返るパターン
     with pytest.raises(ValueError):
-        slack_service.get_presence("RAISE_ERROR_TEST")
+        await slack_service.get_presence("RAISE_ERROR_TEST")
 
 
-def test_get_channels(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
-    def conversations_list_dummy1(self, limit: int):
+@pytest.mark.asyncio
+async def test_get_channels(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
+    async def conversations_list_dummy1(self, limit: int):
         return SlackResponseDummy(
             {
                 "ok": True,
@@ -608,7 +619,7 @@ def test_get_channels(slack_service: SlackService, monkeypatch: pytest.MonkeyPat
             }
         )
 
-    def conversations_list_dummy2(self, limit: int):
+    async def conversations_list_dummy2(self, limit: int):
         raise SlackApiError("", {
             "ok": False,
             "error": "request_timeout"
@@ -616,10 +627,10 @@ def test_get_channels(slack_service: SlackService, monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr(SlackWrapper, "conversations_list", conversations_list_dummy2)
     with pytest.raises(SlackApiError):
-        slack_service.get_channels()
+        await slack_service.get_channels()
 
     monkeypatch.setattr(SlackWrapper, "conversations_list", conversations_list_dummy1)
-    assert slack_service.get_channels() == {
+    assert await slack_service.get_channels() == {
         "ts_team_2nd": {
             "name": "ts_team_2nd",
             "num_members": 13,
@@ -634,7 +645,7 @@ def test_get_channels(slack_service: SlackService, monkeypatch: pytest.MonkeyPat
 
     # キャッシュで取得可能
     monkeypatch.setattr(SlackWrapper, "conversations_list", conversations_list_dummy2)
-    assert slack_service.get_channels() == {
+    assert await slack_service.get_channels() == {
         "ts_team_2nd": {
             "name": "ts_team_2nd",
             "num_members": 13,
@@ -648,8 +659,9 @@ def test_get_channels(slack_service: SlackService, monkeypatch: pytest.MonkeyPat
     }
 
 
-def test_get_channel(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
-    def conversations_info_dummy(self, channel: str):
+@pytest.mark.asyncio
+async def test_get_channel(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
+    async def conversations_info_dummy(self, channel: str):
         if channel == "C7GGZ82UR":
             return SlackResponseDummy(
                 {
@@ -709,7 +721,7 @@ def test_get_channel(slack_service: SlackService, monkeypatch: pytest.MonkeyPatc
 
     monkeypatch.setattr(SlackWrapper, "conversations_info", conversations_info_dummy)
 
-    assert slack_service.get_channel("C7GGZ82UR") == SlackChannel(
+    assert await slack_service.get_channel("C7GGZ82UR") == SlackChannel(
         channel_id="C7GGZ82UR",
         name="本社3階",
         topic="3Fのメンバーだけに告知したい場合はこちら",
@@ -721,7 +733,7 @@ def test_get_channel(slack_service: SlackService, monkeypatch: pytest.MonkeyPatc
         is_valid=True,
     )
 
-    assert slack_service.get_channel("C1XXXXXXX") == SlackChannel(
+    assert await slack_service.get_channel("C1XXXXXXX") == SlackChannel(
         channel_id="C1XXXXXXX",
         name="Unknown",
         topic="",
@@ -737,7 +749,7 @@ def test_get_channel(slack_service: SlackService, monkeypatch: pytest.MonkeyPatc
     # ・・・互換性の検証のため、今は例外を送出せずに既存の動作である空データを返す仕様なので代わりのテストを実施
     # with pytest.raises(SlackApiError):
     #     slack_service.get_channel("C2XXXXXXX")
-    assert slack_service.get_channel("C2XXXXXXX") == SlackChannel(
+    assert await slack_service.get_channel("C2XXXXXXX") == SlackChannel(
         channel_id="C2XXXXXXX",
         name="Unknown",
         topic="",

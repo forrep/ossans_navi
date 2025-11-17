@@ -1,42 +1,45 @@
+import asyncio
 import functools
 import logging
 import os
 import time
 from io import IOBase
-from threading import RLock
-from typing import Any, Callable, Dict, List, Optional, Sequence, TypeVar, Union
+from typing import Any, Awaitable, Callable, Dict, List, Optional, ParamSpec, Sequence, TypeVar, Union
 
-from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 from slack_sdk.models.attachments import Attachment
 from slack_sdk.models.blocks import Block
 from slack_sdk.models.metadata import Metadata
+from slack_sdk.web.async_client import AsyncWebClient
+from slack_sdk.web.async_slack_response import AsyncSlackResponse
 from slack_sdk.web.slack_response import SlackResponse
 
-F = TypeVar('F', bound=Callable[..., SlackResponse])
+T = TypeVar('T')
+P = ParamSpec('P')
 
 logger = logging.getLogger(__name__)
 
 
 def api_wrapper(
     *,
-    pager: Optional[Callable[[SlackResponse, dict], bool]] = None,
-    concat: Optional[Callable[[SlackResponse, SlackResponse], SlackResponse]] = None,
-    limit: int = 100
-) -> Callable[[F], F]:
-    lock = RLock()
+    pager: Optional[Callable[[AsyncSlackResponse, dict], bool]] = None,
+    concat: Optional[Callable[[AsyncSlackResponse, AsyncSlackResponse], AsyncSlackResponse]] = None,
+    limit: int = 100,
+    concurrency: int = 2,
+) -> Callable[[Callable[P, Awaitable[AsyncSlackResponse]]], Callable[P, Awaitable[AsyncSlackResponse]]]:
+    semaphore = asyncio.Semaphore(concurrency)
 
-    def _api_wrapper(f: F) -> F:
-        @functools.wraps(f)
-        def _wrapper(*args, **kwargs) -> SlackResponse:
-            response: Optional[SlackResponse] = None
+    def _api_wrapper(func: Callable[P, Awaitable[AsyncSlackResponse]]) -> Callable[P, Awaitable[AsyncSlackResponse]]:
+        @functools.wraps(func)
+        async def _wrapper(*args, **kwargs) -> AsyncSlackResponse:
+            response: Optional[AsyncSlackResponse] = None
             page = 0
             while limit > page:
                 for _ in range(20):
                     try:
-                        with lock:
-                            # 各メソッドは1並列に制限してAPIコールする、多重で呼び出すと Slack 側に負荷がかかるため
-                            current_response = f(*args, **kwargs)
+                        async with semaphore:
+                            # 各APIメソッドごとに並列数を制限する、Slack 側の制限をなるべく超えないために
+                            current_response = await func(*args, **kwargs)
                         if concat and response:
                             response = concat(response, current_response)
                         else:
@@ -64,7 +67,7 @@ def api_wrapper(
     return _api_wrapper
 
 
-def cursor_pager(response: SlackResponse, kwargs: dict) -> bool:
+def cursor_pager(response: AsyncSlackResponse, kwargs: dict) -> bool:
     response_metadata: dict[str, str] = response.get("response_metadata", {})
     if len(next_cursor := response_metadata.get("next_cursor", "")) == 0:
         return True
@@ -73,8 +76,8 @@ def cursor_pager(response: SlackResponse, kwargs: dict) -> bool:
         return False
 
 
-def concat_response(name: str) -> Callable[[SlackResponse, SlackResponse], SlackResponse]:
-    def _concat_response(response1: SlackResponse, response2: SlackResponse) -> SlackResponse:
+def concat_response(name: str) -> Callable[[AsyncSlackResponse, AsyncSlackResponse], AsyncSlackResponse]:
+    def _concat_response(response1: AsyncSlackResponse, response2: AsyncSlackResponse) -> AsyncSlackResponse:
         if (
             isinstance((v1 := response1.get(name)), list)
             and isinstance((v2 := response2.get(name)), list)
@@ -87,32 +90,32 @@ def concat_response(name: str) -> Callable[[SlackResponse, SlackResponse], Slack
 class SlackWrapper:
     def __init__(self, token: str) -> None:
         self.token = token
-        self.client = WebClient(token=token)
+        self.client = AsyncWebClient(token=token)
 
     @api_wrapper()
-    def auth_test(self) -> SlackResponse:
-        return self.client.auth_test()
+    async def auth_test(self) -> AsyncSlackResponse:
+        return await self.client.auth_test()
 
     @api_wrapper()
-    def users_info(
+    async def users_info(
         self,
         *,
         user: str,
         include_locale: Optional[bool] = None,
-    ) -> SlackResponse:
-        return self.client.users_info(user=user, include_locale=include_locale)
+    ) -> AsyncSlackResponse:
+        return await self.client.users_info(user=user, include_locale=include_locale)
 
     @api_wrapper()
-    def bots_info(
+    async def bots_info(
         self,
         *,
         bot: Optional[str] = None,
         team_id: Optional[str] = None
-    ) -> SlackResponse:
-        return self.client.bots_info(bot=bot, team_id=team_id)
+    ) -> AsyncSlackResponse:
+        return await self.client.bots_info(bot=bot, team_id=team_id)
 
     @api_wrapper()
-    def conversations_history(
+    async def conversations_history(
         self,
         *,
         channel: str,
@@ -122,8 +125,8 @@ class SlackWrapper:
         latest: Optional[str] = None,
         limit: Optional[int] = None,
         oldest: Optional[str] = None,
-    ) -> SlackResponse:
-        return self.client.conversations_history(
+    ) -> AsyncSlackResponse:
+        return await self.client.conversations_history(
             channel=channel,
             cursor=cursor,
             inclusive=inclusive,
@@ -134,7 +137,7 @@ class SlackWrapper:
         )
 
     @api_wrapper(pager=cursor_pager, concat=concat_response(name="channels"), limit=999)
-    def conversations_list(
+    async def conversations_list(
         self,
         *,
         cursor: Optional[str] = None,
@@ -142,35 +145,35 @@ class SlackWrapper:
         limit: Optional[int] = None,
         team_id: Optional[str] = None,
         types: Optional[Union[str, Sequence[str]]] = None,
-    ) -> SlackResponse:
-        return self.client.conversations_list(cursor=cursor, exclude_archived=exclude_archived, limit=limit, team_id=team_id, types=types)
+    ) -> AsyncSlackResponse:
+        return await self.client.conversations_list(cursor=cursor, exclude_archived=exclude_archived, limit=limit, team_id=team_id, types=types)
 
     @api_wrapper()
-    def conversations_info(
+    async def conversations_info(
         self,
         *,
         channel: str,
         include_locale: Optional[bool] = None,
         include_num_members: Optional[bool] = None,
-    ) -> SlackResponse:
-        return self.client.conversations_info(
+    ) -> AsyncSlackResponse:
+        return await self.client.conversations_info(
             channel=channel,
             include_locale=include_locale,
             include_num_members=include_num_members,
         )
 
     @api_wrapper(pager=cursor_pager, concat=concat_response(name="members"), limit=999)
-    def conversations_members(
+    async def conversations_members(
         self,
         *,
         channel: str,
         cursor: Optional[str] = None,
         limit: Optional[int] = None,
-    ) -> SlackResponse:
-        return self.client.conversations_members(channel=channel, cursor=cursor, limit=limit)
+    ) -> AsyncSlackResponse:
+        return await self.client.conversations_members(channel=channel, cursor=cursor, limit=limit)
 
     @api_wrapper()
-    def conversations_replies(
+    async def conversations_replies(
         self,
         *,
         channel: str,
@@ -181,8 +184,8 @@ class SlackWrapper:
         latest: Optional[str] = None,
         limit: Optional[int] = None,
         oldest: Optional[str] = None
-    ) -> SlackResponse:
-        return self.client.conversations_replies(
+    ) -> AsyncSlackResponse:
+        return await self.client.conversations_replies(
             channel=channel,
             ts=ts,
             cursor=cursor,
@@ -194,11 +197,11 @@ class SlackWrapper:
         )
 
     @api_wrapper()
-    def users_getPresence(self, *, user: str) -> SlackResponse:
-        return self.client.users_getPresence(user=user)
+    async def users_getPresence(self, *, user: str) -> AsyncSlackResponse:
+        return await self.client.users_getPresence(user=user)
 
     @api_wrapper()
-    def search_messages(
+    async def search_messages(
         self,
         *,
         query: str,
@@ -209,8 +212,8 @@ class SlackWrapper:
         sort: Optional[str] = None,
         sort_dir: Optional[str] = None,
         team_id: Optional[str] = None
-    ) -> SlackResponse:
-        return self.client.search_messages(
+    ) -> AsyncSlackResponse:
+        return await self.client.search_messages(
             query=query,
             count=count,
             cursor=cursor,
@@ -222,35 +225,35 @@ class SlackWrapper:
         )
 
     @api_wrapper()
-    def reactions_add(
+    async def reactions_add(
         self,
         *,
         channel: str,
         name: str,
         timestamp: str,
-    ) -> SlackResponse:
-        return self.client.reactions_add(
+    ) -> AsyncSlackResponse:
+        return await self.client.reactions_add(
             channel=channel,
             name=name,
             timestamp=timestamp,
         )
 
     @api_wrapper()
-    def reactions_remove(
+    async def reactions_remove(
         self,
         *,
         channel: str,
         name: str,
         timestamp: str,
-    ) -> SlackResponse:
-        return self.client.reactions_remove(
+    ) -> AsyncSlackResponse:
+        return await self.client.reactions_remove(
             channel=channel,
             name=name,
             timestamp=timestamp,
         )
 
     @api_wrapper()
-    def chat_postMessage(
+    async def chat_postMessage(
         self,
         *,
         channel: str,
@@ -270,8 +273,8 @@ class SlackWrapper:
         username: Optional[str] = None,
         parse: Optional[str] = None,  # none, full
         metadata: Optional[Union[Dict, Metadata]] = None
-    ) -> SlackResponse:
-        return self.client.chat_postMessage(
+    ) -> AsyncSlackResponse:
+        return await self.client.chat_postMessage(
             channel=channel,
             text=text,
             as_user=as_user,
@@ -292,21 +295,21 @@ class SlackWrapper:
         )
 
     @api_wrapper()
-    def conversations_open(
+    async def conversations_open(
         self,
         *,
         channel: Optional[str] = None,
         return_im: Optional[bool] = None,
         users: Optional[Union[str, Sequence[str]]] = None,
-    ) -> SlackResponse:
-        return self.client.conversations_open(
+    ) -> AsyncSlackResponse:
+        return await self.client.conversations_open(
             channel=channel,
             return_im=return_im,
             users=users,
         )
 
     @api_wrapper()
-    def files_upload_v2(
+    async def files_upload_v2(
         self,
         *,
         # for sending a single file
@@ -323,8 +326,8 @@ class SlackWrapper:
         initial_comment: Optional[str] = None,
         thread_ts: Optional[str] = None,
         request_file_info: bool = True,  # since v3.23, this flag is no longer necessary
-    ) -> SlackResponse:
-        return self.client.files_upload_v2(
+    ) -> AsyncSlackResponse:
+        return await self.client.files_upload_v2(
             filename=filename,
             file=file,
             content=content,
@@ -340,15 +343,15 @@ class SlackWrapper:
         )
 
     @api_wrapper(pager=cursor_pager, concat=concat_response(name="members"), limit=999)
-    def users_list(
+    async def users_list(
         self,
         *,
         cursor: Optional[str] = None,
         include_locale: Optional[bool] = None,
         limit: Optional[int] = None,
         team_id: Optional[str] = None,
-    ) -> SlackResponse:
-        return self.client.users_list(
+    ) -> AsyncSlackResponse:
+        return await self.client.users_list(
             cursor=cursor,
             include_locale=include_locale,
             limit=limit,

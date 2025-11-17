@@ -4,9 +4,8 @@ import logging
 import re
 import signal
 import sys
-import threading
-from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Callable, Final, Generator, Optional
+from collections.abc import AsyncGenerator
+from typing import Any, Callable
 
 from slack_sdk import WebClient
 
@@ -17,107 +16,88 @@ from ossans_navi.service.ossans_navi_service import OssansNaviService
 from ossans_navi.service.slack_service import EventGuard, SlackService
 from ossans_navi.type.slack_type import SlackMessageEvent
 
-MAIN_EXECUTOR: Optional[ThreadPoolExecutor] = None
-MAIN_EXECUTOR_WORKERS: Final[int] = 2
 EVENT_GUARD = EventGuard()
+SEMAPHORE = asyncio.Semaphore(2)
 
 slack_service = SlackService()
 ai_service = AiService()
-thread_local = threading.local()
 
 logger = logging.getLogger(__name__)
 
 
 @slack_service.app.action(re.compile(r".*"))
-def handle_button_click(ack: Callable, body: dict[Any, Any], client: WebClient):
-    ack()
+async def handle_button_click(ack: Callable, body: dict[Any, Any], client: WebClient):
+    await ack()
     logger.info(f"{json.dumps(body, ensure_ascii=False)}")
-    config_controller.routing(body, slack_service)
+    await config_controller.routing(body, slack_service)
 
 
 @slack_service.app.event("message")
-def handle_message_events(event: dict[str, dict]):
-    if not MAIN_EXECUTOR:
-        logger.error("MAIN_EXECUTOR is not initialized.")
-        return
+async def handle_message_events(event: dict[str, dict]):
     logger.info("event=" + json.dumps(event, ensure_ascii=False))
     message_event = SlackMessageEvent(event)
 
-    def future_callback(v):
-        logger.info(f"Event finished: {message_event.id()} ({message_event.id_source})")
-        # 応答まで至ったパターンはロックを取ってから finish が必要なのですでに終了済み、重複して終了しても問題なし
-        # それ以外パターンはまだ finish してないのでここで finish が必要
-        EVENT_GUARD.finish(message_event)
-
-    # ロックを取得してから処理キューに入れる処理
-    # ロックしないと応答が二重になるケースが発生する
-    with EVENT_GUARD:
-        if message_event.is_message_post():
-            # メッセージの投稿イベントの場合
+    # 処理キュー(EVENT_GUARD)を操作する、途中に他の非同期処理を挟まないようにする
+    if message_event.is_message_post():
+        # メッセージの投稿イベントの場合
+        EVENT_GUARD.queue(message_event)
+        logger.info(f"Event queued(message_post): {message_event.id()} ({message_event.id_source})")
+    elif message_event.is_message_changed():
+        # 更新イベントの場合
+        if EVENT_GUARD.is_queueed_or_running(message_event):
+            # 更新イベントは、元メッセージが QUEUED か RUNNING の場合（つまりまだ応答してない）場合に限ってキューに追加する
+            # このパターンのためにロックが必要、ロックしてないと is_queueed_or_running 判定後に応答が終了する可能性もある
             EVENT_GUARD.queue(message_event)
-            logger.info(f"Event queued(message_post): {message_event.id()} ({message_event.id_source})")
-        elif message_event.is_message_changed():
-            # 更新イベントの場合
-            if EVENT_GUARD.is_queueed_or_running(message_event):
-                # 更新イベントは、元メッセージが QUEUED か RUNNING の場合（つまりまだ応答してない）場合に限ってキューに追加する
-                # このパターンのためにロックが必要、ロックしてないと is_queueed_or_running 判定後に応答が終了する可能性もある
-                EVENT_GUARD.queue(message_event)
-                logger.info(
-                    f"Event queued(message_changed): {message_event.id()} ({message_event.id_source})"
-                )
-            else:
-                logger.info("This message_changed event is terminated because it is not QUEUED or RUNNING.")
-                return
-        elif message_event.is_message_deleted():
-            # 削除イベントの場合
-            if EVENT_GUARD.is_queueed_or_running(message_event):
-                # 削除された場合は、元メッセージに応答する必要がなくなる
-                # 削除イベントは、該当メッセージが QUEUED か RUNNING の場合（つまりまだ応答してない）場合、そのキューをキャンセルする
-                EVENT_GUARD.cancel(message_event)
-                return
-            else:
-                logger.info("This message_deleted event is terminated because it is not QUEUED or RUNNING.")
-                return
+            logger.info(
+                f"Event queued(message_changed): {message_event.id()} ({message_event.id_source})"
+            )
         else:
-            logger.info("This is not message_post or message_changed event, finished")
+            logger.info("This message_changed event is terminated because it is not QUEUED or RUNNING.")
             return
-        future = MAIN_EXECUTOR.submit(do_ossans_navi_response_safe, message_event)
-        future.add_done_callback(future_callback)
-
-
-def do_ossans_navi_response_safe(event: SlackMessageEvent) -> None:
-    # スレッド名を Main_0_{event.id()} の形式にする。すでにその形式なら event.id() 部分だけ置換
-    thread = threading.current_thread()
-    (thread_name, thread_index, _) = f"{thread.name}_0".split("_", 2)
-    thread.name = f"{thread_name}_{thread_index}_{event.id()}"
-
-    # このスレッドにイベントループがまだない場合だけ作成
-    event_loop: asyncio.AbstractEventLoop
-    if "loop" not in thread_local.__dict__:
-        event_loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(event_loop)
-        thread_local.__dict__["loop"] = event_loop
+    elif message_event.is_message_deleted():
+        # 削除イベントの場合
+        if EVENT_GUARD.is_queueed_or_running(message_event):
+            # 削除された場合は、元メッセージに応答する必要がなくなる
+            # 削除イベントは、該当メッセージが QUEUED か RUNNING の場合（つまりまだ応答してない）場合、そのキューをキャンセルする
+            EVENT_GUARD.cancel(message_event)
+            return
+        else:
+            logger.info("This message_deleted event is terminated because it is not QUEUED or RUNNING.")
+            return
     else:
-        event_loop = thread_local.__dict__["loop"]
+        logger.info("This is not message_post or message_changed event, finished")
+        return
+    # ここまで他の非同期処理を挟まないようにする
 
-    with EVENT_GUARD:
-        if EVENT_GUARD.is_canceled(event):
-            logger.info(f"Event canceled: {event.id()} ({event.id_source})")
-            logger.info("Finished.")
-            return
-        logger.info(f"Event started: {event.id()} ({event.id_source})")
-        EVENT_GUARD.start(event)
+    async with SEMAPHORE:
+        await do_ossans_navi_response_safe(message_event)
+
+    logger.info(f"Event finished: {message_event.id()} ({message_event.id_source})")
+    # 応答まで至ったパターンはロックを取ってから finish が必要なのですでに終了済み、重複して終了しても問題なし
+    # それ以外パターンはまだ finish してないのでここで finish が必要
+    EVENT_GUARD.finish(message_event)
+
+
+async def do_ossans_navi_response_safe(event: SlackMessageEvent) -> None:
+    # 処理キュー(EVENT_GUARD)を操作する、途中に他の非同期処理を挟まないようにする
+    if EVENT_GUARD.is_canceled(event):
+        logger.info(f"Event canceled: {event.id()} ({event.id_source})")
+        logger.info("Finished.")
+        return
+    logger.info(f"Event started: {event.id()} ({event.id_source})")
+    EVENT_GUARD.start(event)
+    # ここまで他の非同期処理を挟まないようにする
 
     models = AiModels.new()
     try:
         # event の構築作業
         event.canceled_events.extend(EVENT_GUARD.get_canceled_events(event))
         if event.is_user:
-            event.user = slack_service.get_user(event.user_id)
+            event.user = await slack_service.get_user(event.user_id)
         else:
-            event.user = slack_service.get_bot(event.bot_id)
-        event.channel = slack_service.get_channel(event.channel_id)
-        mentions = [slack_service.get_user(user_id) for user_id in event.mentions]
+            event.user = await slack_service.get_bot(event.bot_id)
+        event.channel = await slack_service.get_channel(event.channel_id)
+        mentions = [await slack_service.get_user(user_id) for user_id in event.mentions]
         if event.is_dm() or len([user for user in mentions if user.user_id in slack_service.my_bot_user_id]) > 0:
             # DM でのやりとり、またはメンションされている場合を「メンション」と扱う
             event.is_mention = True
@@ -129,28 +109,27 @@ def do_ossans_navi_response_safe(event: SlackMessageEvent) -> None:
             + f"is_mention={event.is_mention}, is_dm={event.is_dm()}, is_talk_to_other={event.is_talk_to_other}"
         )
 
-        ossans_navi_service = OssansNaviService(
-            event_loop=event_loop,
+        ossans_navi_service = await OssansNaviService.create(
             ai_service=ai_service,
             slack_service=slack_service,
             models=models,
             event=event,
         )
 
-        for _ in do_ossans_navi_response(ossans_navi_service, event, models):
+        async for _ in do_ossans_navi_response(ossans_navi_service, event, models):
             # yield のタイミングで処理が戻されるごとにイベントがキャンセルされていないか確認して、キャンセルされていれば終了する
             if EVENT_GUARD.is_canceled(event):
                 logger.info(f"Event canceled: {event.id()}({event.id_source})")
                 logger.info("Finished.")
                 break
         # キャンセルなどのパターンで終了した場合は、ここでリアクションを削除する
-        ossans_navi_service.remove_progress_reaction()
+        await ossans_navi_service.remove_progress_reaction()
     except Exception as e:
         logger.error("do_ossans_navi_response return error")
         logger.error(e, exc_info=True)
         if event.is_mention:
             try:
-                slack_service.chat_post_message(
+                await slack_service.chat_post_message(
                     channel=event.channel_id,
                     thread_ts=event.thread_ts,
                     text=f"```{str(e)}```",
@@ -165,18 +144,18 @@ def do_ossans_navi_response_safe(event: SlackMessageEvent) -> None:
             logger.info(f"    tokens_out = {model.tokens_out}")
 
 
-def do_ossans_navi_response(
+async def do_ossans_navi_response(
     ossans_navi_service: OssansNaviService,
     event: SlackMessageEvent,
     models: AiModels,
-) -> Generator[None, None, None]:
-    if event.is_dm() and ossans_navi_service.special_command():
+) -> AsyncGenerator[None, None]:
+    if event.is_dm() and await ossans_navi_service.special_command():
         # DM の場合は special_command() を実行、そして True が返ってきたら special_command を実行しているので通常のメッセージ処理は終了する
         return
 
     if event.is_mention:
         # 応答が確定している場合は処理中を示すリアクションを付けて UX を向上させる
-        ossans_navi_service.do_progress_reaction(config.PROGRESS_REACTION_THINKING)
+        await ossans_navi_service.do_progress_reaction(config.PROGRESS_REACTION_THINKING)
 
     # yield で呼び出し元に戻すとイベントのキャンセルチェックをして、キャンセルされていれば終了する
     yield
@@ -223,10 +202,10 @@ def do_ossans_navi_response(
 
     # DM の topic から設定を取得する
     if event.is_user:
-        event.settings = slack_service.get_dm_info_with_ossans_navi(event.user.user_id)
+        event.settings = await slack_service.get_dm_info_with_ossans_navi(event.user.user_id)
 
     # スレッドでやりとりされた履歴メッセージを取得
-    thread_messages = ossans_navi_service.get_thread_messages()
+    thread_messages = await ossans_navi_service.get_thread_messages()
     # スレッドの会話内に OssansNavi からの返信があるかどうか？（そのスレッドに参加しているかどうか）
     event.is_joined = ossans_navi_service.is_joined(thread_messages)
     # スレッド上の会話で、OssansNavi のメッセージの直後に送信されたメッセージか？（OssansNavi のメッセージへの返信だと思われるか）
@@ -275,13 +254,13 @@ def do_ossans_navi_response(
             elif file.is_video or file.is_audio:
                 # 映像・音声は条件付きで lastshot に入力する
                 # vtt が存在する場合は、このタイミングで読み込む、classify が vtt 情報を参照できる
-                ossans_navi_service.load_slack_file(file, user_client=False, load_file=False, load_vtt=True, initialized=False)
+                await ossans_navi_service.load_slack_file(file, user_client=False, load_file=False, load_vtt=True, initialized=False)
                 if is_latest_message and event.is_mention and config.LOAD_VIDEO_AUDIO_FILES:
                     # lastshot で入力する条件が上記の通り、その場合は「後で入力するよ」フラグを立てる
                     event.has_image_video_audio = True
 
     # メッセージの仕分けを行う、質問かどうか判別する
-    event.classification = ossans_navi_service.classify(thread_messages)
+    event.classification = await ossans_navi_service.classify(thread_messages)
     logger.info(f"classify intent          {event.user_intent}")
     logger.info(f"classify intent_type     {event.user_intentions_type}")
     logger.info(f"classify who_to_talk_to  {event.who_to_talk_to}")
@@ -293,7 +272,7 @@ def do_ossans_navi_response(
         # 質問・相談ではなく、メンションされていない場合はここで終了
         if event.is_reply_to_ossans_navi():
             # OssansNavi へ話かけているならリアクションで返す
-            slack_service.add_reaction(event.channel_id, event.ts, event.slack_emoji_names)
+            await slack_service.add_reaction(event.channel_id, event.ts, event.slack_emoji_names)
             logger.info("Finished with reaction.")
         return
 
@@ -309,46 +288,46 @@ def do_ossans_navi_response(
         for file in message.files:
             if file.is_text or file.is_canvas or file.is_image:
                 # テキストファイル、キャンバス、画像ファイルはロードする
-                ossans_navi_service.load_slack_file(file, user_client=False, load_file=True, load_vtt=False)
+                await ossans_navi_service.load_slack_file(file, user_client=False, load_file=True, load_vtt=False)
             elif file.is_video or file.is_audio:
                 if is_latest_message and event.is_mention and config.LOAD_VIDEO_AUDIO_FILES:
                     # 動画や音声ファイルは負荷とコストが高いので以下の条件に適合する場合のみロードする
                     #   - 最新メッセージに添付されている
                     #   - OssansNavi がメンションされている
                     #   - 動画や音声ファイルのロードが有効になっている
-                    ossans_navi_service.load_slack_file(file, user_client=False, load_file=True, load_vtt=True)
+                    await ossans_navi_service.load_slack_file(file, user_client=False, load_file=True, load_vtt=True)
 
     # 添付画像がある場合は画像の説明を取得する
-    ossans_navi_service.analyze_image_description(thread_messages)
+    await ossans_navi_service.analyze_image_description(thread_messages)
 
     if event.is_need_additional_information:
         if ossans_navi_service.has_progress_reaction():
             # 処理中リアクションが付いている場合はリアクションを更新する
-            ossans_navi_service.do_progress_reaction(config.PROGRESS_REACTION_SEARCH)
+            await ossans_navi_service.do_progress_reaction(config.PROGRESS_REACTION_SEARCH)
         # Slack ワークスペースを検索するワードを生成してもらう
         # get_slack_searches() は Generator で処理単位ごとに yield している
         # なぜならば、呼び出し側で EVENT_GUARD.is_canceled() をチェックするタイミングを用意するためで、ループごとに確認してキャンセルされていれば終了する
-        for _ in ossans_navi_service.do_slack_searches(thread_messages=thread_messages):
+        async for _ in ossans_navi_service.do_slack_searches(thread_messages=thread_messages):
             # 定期的にイベントがキャンセルされていないか確認して、キャンセルされていれば終了する
             yield
 
         if ossans_navi_service.has_progress_reaction():
             # 処理中リアクションが付いている場合はリアクションを更新する
-            ossans_navi_service.do_progress_reaction(config.PROGRESS_REACTION_REFINE)
+            await ossans_navi_service.do_progress_reaction(config.PROGRESS_REACTION_REFINE)
         # slack_searches の結果から有用な情報を抽出するフェーズ（refine_slack_searches）
         # トークン数の上限があるので複数回に分けて実行して、大量の検索結果の中から必要な情報を絞り込む
         # RAG で入力する情報以外のトークン数を求めておく（システムプロンプトなど）、RAG で入力可能な情報を計算する為に使う
-        for _ in ossans_navi_service.refine_slack_searches(thread_messages=thread_messages):
+        async for _ in ossans_navi_service.refine_slack_searches(thread_messages=thread_messages):
             # 定期的にイベントがキャンセルされていないか確認して、キャンセルされていれば終了する
             yield
 
     if ossans_navi_service.has_progress_reaction():
         # 処理中リアクションが付いている場合はリアクションを更新する
-        ossans_navi_service.do_progress_reaction(config.PROGRESS_REACTION_LASTSHOT)
+        await ossans_navi_service.do_progress_reaction(config.PROGRESS_REACTION_LASTSHOT)
 
     # 集まった情報を元に返答を生成するフェーズ（lastshot）
     # GPT-4o で最終的な答えを生成する（GPT-4o mini で精査した情報を利用）
-    lastshot_responses = ossans_navi_service.lastshot(thread_messages=thread_messages)
+    lastshot_responses = await ossans_navi_service.lastshot(thread_messages=thread_messages)
 
     logger.info(f"{lastshot_responses=}")
     if len(lastshot_responses) == 0:
@@ -369,7 +348,7 @@ def do_ossans_navi_response(
     elif event.is_need_response():
         # 応答が必要とされるメッセージには、以下の条件に合致する場合のみ応答する
         # まず応答品質の判定をして、その結果に応じて応答するか決定する
-        quality_check_response = ossans_navi_service.quality_check(thread_messages, lastshot_response.text)
+        quality_check_response = await ossans_navi_service.quality_check(thread_messages, lastshot_response.text)
         if quality_check_response.user_intent is not None and quality_check_response.response_quality:
             # ユーザーに意図があり、かつ応答クオリティが高いと判断している場合は応答する
             do_response = True
@@ -382,25 +361,25 @@ def do_ossans_navi_response(
 
     if do_response:
         # 処理中リアクションが付いている場合は削除する
-        ossans_navi_service.remove_progress_reaction()
-        with EVENT_GUARD:
+        await ossans_navi_service.remove_progress_reaction()
+        async with EVENT_GUARD:
             # 同タイミングでキャンセルされた場合に応答しないため、ロックした状態で応答処理をする
             if EVENT_GUARD.is_canceled(event):
                 logger.info(f"Event canceled: {event.id()}({event.id_source})")
                 logger.info("Finished.")
                 return
-            slack_service.chat_post_message(
+            await slack_service.chat_post_message(
                 channel=event.channel_id,
                 thread_ts=event.thread_ts,
                 text=(
-                    slack_service.disable_mention_if_not_active(
+                    await slack_service.disable_mention_if_not_active(
                         SlackService.convert_markdown_to_mrkdwn(lastshot_response.text)
                     )
                 ),
                 images=lastshot_response.images,
             )
             if config.RESPONSE_LOGGING_CHANNEL:
-                slack_service.chat_post_message(
+                await slack_service.chat_post_message(
                     config.RESPONSE_LOGGING_CHANNEL,
                     json.dumps({
                         "cost": models.get_total_cost(),
@@ -416,8 +395,7 @@ def do_ossans_navi_response(
     logger.info("Finished normally.")
 
 
-# アプリを起動します
-if __name__ == "__main__":
+async def main():
     args = sys.argv[1:]
     if "--production" in args:
         config.DEVELOPMENT_MODE = False
@@ -426,32 +404,43 @@ if __name__ == "__main__":
     if "--unsafe" in args:
         config.SAFE_MODE = False
 
-    with ThreadPoolExecutor(max_workers=MAIN_EXECUTOR_WORKERS, thread_name_prefix="Main") as main_executor:
-        MAIN_EXECUTOR = main_executor
-        logger.info(
-            f"Strat in {"development" if config.DEVELOPMENT_MODE else "production"},"
-            + f" {"silent" if config.SILENT_MODE else "no-silent"}, {"safe" if config.SAFE_MODE else "unsafe"} mode"
-        )
-        slack_service.start()
+    logger.info(
+        f"Strat in {"development" if config.DEVELOPMENT_MODE else "production"},"
+        + f" {"silent" if config.SILENT_MODE else "no-silent"}, {"safe" if config.SAFE_MODE else "unsafe"} mode"
+    )
+    await asyncio.gather(
+        ai_service.start(),
+        slack_service.start(),
+    )
 
-        # TERMシグナルにトラップして graceful shutdown を実行、以下のフローで終了する
-        #   1. Slack サーバから WebSocket を切断して新規メッセージの受信を停止
-        #   2. event.wait() で停止したスレッドを event.set() で起こす（メインスレッドの処理は全て終了）
-        #   3. ThreadPoolExecutor が with 句を抜けるタイミングで溜まったキューが全て実行される
-        #   4. 終了する
-        event = threading.Event()
+    # TERM/INTシグナルにトラップして (graceful) shutdown を実行、以下のフローで終了する
+    #   1. Slack サーバから WebSocket を切断して新規メッセージの受信を停止
+    #   2. event.wait() で停止したスレッドを event.set() で起こす（メインスレッドの処理は全て終了）
+    #   3. ThreadPoolExecutor が with 句を抜けるタイミングで溜まったキューが全て実行される
+    #   4. 終了する
+    event = asyncio.Event()
+    graceful = True
 
-        def shutdown_handler(graceful: bool):
-            def handler(signal, frame):
-                print("Stopping Slack app...")
-                slack_service.stop()
-                print("Slack app stopped.")
-                if not graceful:
-                    EVENT_GUARD.terminate()
-                    print("Events Terminated.")
-                event.set()
-            return handler
+    def shutdown_handler(graceful_param: bool):
+        def handler(signal, frame):
+            nonlocal graceful
+            graceful = graceful_param
+            print("Stopping Slack app...")
+            event.set()
+        return handler
 
-        signal.signal(signal.SIGTERM, shutdown_handler(True))
-        signal.signal(signal.SIGINT, shutdown_handler(False))
-        event.wait()
+    signal.signal(signal.SIGTERM, shutdown_handler(True))
+    signal.signal(signal.SIGINT, shutdown_handler(False))
+    await event.wait()
+
+    # アプリの終了
+    await slack_service.stop()
+    print("Slack app stopped.")
+    if not graceful:
+        EVENT_GUARD.terminate()
+        print("Events Terminated.")
+
+
+# アプリを起動します
+if __name__ == "__main__":
+    asyncio.run(main())
