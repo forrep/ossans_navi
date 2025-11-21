@@ -222,7 +222,7 @@ class SlackService:
         self.my_bot_user = await self.get_user(response_bot.user_id)
         self.workspace_url = response_bot.url
         self.slackbot_channel_id = await self.conversations_open("USLACKBOT")
-        self.aiohttp_session_instance = aiohttp.ClientSession()
+        self.aiohttp_session_instance = aiohttp.ClientSession(trust_env=True)
         # 起動したトークンに紐づくアプリ名をロギングする、間違って本番トークンで起動してしまわないように
         logger.info(f"App start with: {response_app.app_name}")
         await self.socket_mode_handler.connect_async()
