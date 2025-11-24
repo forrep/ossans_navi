@@ -10,6 +10,7 @@ from typing import Any, Callable
 from slack_sdk import WebClient
 
 from ossans_navi import config
+from ossans_navi.common import async_utils
 from ossans_navi.controller import config_controller
 from ossans_navi.service.ai_service import AiModels, AiService
 from ossans_navi.service.ossans_navi_service import OssansNaviService
@@ -92,12 +93,11 @@ async def do_ossans_navi_response_safe(event: SlackMessageEvent) -> None:
     try:
         # event の構築作業
         event.canceled_events.extend(EVENT_GUARD.get_canceled_events(event))
-        if event.is_user:
-            event.user = await slack_service.get_user(event.user_id)
-        else:
-            event.user = await slack_service.get_bot(event.bot_id)
-        event.channel = await slack_service.get_channel(event.channel_id)
-        mentions = [await slack_service.get_user(user_id) for user_id in event.mentions]
+        (event.user, event.channel) = await asyncio.gather(
+            (slack_service.get_user(event.user_id) if event.is_user else slack_service.get_bot(event.bot_id)),
+            slack_service.get_channel(event.channel_id),
+        )
+        mentions = await async_utils.asyncio_gather(*[slack_service.get_user(user_id) for user_id in event.mentions], concurrency=3)
         if event.is_dm() or len([user for user in mentions if user.user_id in slack_service.my_bot_user_id]) > 0:
             # DM でのやりとり、またはメンションされている場合を「メンション」と扱う
             event.is_mention = True
@@ -245,19 +245,21 @@ async def do_ossans_navi_response(
     #   - 映像・音声: LOAD_VIDEO_AUDIO_FILES が有効な場合は lastshot で入力する、LOAD_VIDEO_AUDIO_FILES が無効な場合は入力しない、vtt は常に入力する
     # 例えば「添付した音声を要約して」という依頼に対して classify や do_slack_searches で音声を入力していないと検索によって無理に探そうとしてしまう
     # そのため「音声は後のフェーズで入力するから入力された前提で応答して」というシステムプロンプトを追加する必要がある
-    for (i, message) in enumerate(thread_messages):
-        is_latest_message = i == len(thread_messages) - 1
-        for file in message.files:
-            if file.is_image:
-                # 画像が存在する場合は常に解析対象となる
-                event.has_image_video_audio = True
-            elif file.is_video or file.is_audio:
-                # 映像・音声は条件付きで lastshot に入力する
-                # vtt が存在する場合は、このタイミングで読み込む、classify が vtt 情報を参照できる
-                await ossans_navi_service.load_slack_file(file, user_client=False, load_file=False, load_vtt=True, initialized=False)
-                if is_latest_message and event.is_mention and config.LOAD_VIDEO_AUDIO_FILES:
-                    # lastshot で入力する条件が上記の通り、その場合は「後で入力するよ」フラグを立てる
+    async with asyncio.TaskGroup() as tg:
+        for (i, message) in enumerate(thread_messages):
+            is_latest_message = i == len(thread_messages) - 1
+            for file in message.files:
+                if file.is_image:
+                    # 画像が存在する場合は常に解析対象となる
                     event.has_image_video_audio = True
+                elif file.is_video or file.is_audio:
+                    # 映像・音声は条件付きで lastshot に入力する
+                    # vtt が存在する場合は、このタイミングで読み込む、classify が vtt 情報を参照できる
+                    # タスクグループで一斉に読み込む
+                    tg.create_task(ossans_navi_service.load_slack_file(file, user_client=False, load_file=False, load_vtt=True, initialized=False))
+                    if is_latest_message and event.is_mention and config.LOAD_VIDEO_AUDIO_FILES:
+                        # lastshot で入力する条件が上記の通り、その場合は「後で入力するよ」フラグを立てる
+                        event.has_image_video_audio = True
 
     # メッセージの仕分けを行う、質問かどうか判別する
     event.classification = await ossans_navi_service.classify(thread_messages)
@@ -425,7 +427,7 @@ async def main():
         def handler(signal, frame):
             nonlocal graceful
             graceful = graceful_param
-            print("Stopping Slack app...")
+            logger.info("Stopping Slack app...")
             event.set()
         return handler
 
@@ -435,10 +437,19 @@ async def main():
 
     # アプリの終了
     await slack_service.stop()
-    print("Slack app stopped.")
-    if not graceful:
-        EVENT_GUARD.terminate()
-        print("Events Terminated.")
+    logger.info("Slack app stopped.")
+    if graceful:
+        current_task = asyncio.current_task()
+        pending = [t for t in asyncio.all_tasks() if t is not current_task]
+        if pending:
+            logger.info("Wait for current task to complete")
+            try:
+                await asyncio.wait_for(asyncio.gather(*pending), timeout=600)
+                logger.info("All current tasks completed")
+            except asyncio.TimeoutError:
+                logger.info("Timeout waiting for current tasks to complete")
+                EVENT_GUARD.terminate()
+                logger.info("Events Terminated.")
 
 
 # アプリを起動します

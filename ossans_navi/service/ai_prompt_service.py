@@ -23,12 +23,6 @@ class AiPromptService:
             "assistant_names": assistant_names,
         }
 
-    CLASSIFY_SCHEMA = ai_prompt_assets.CLASSIFY_SCHEMA
-    IMAGE_DESCRIPTION_SCHEMA = ai_prompt_assets.IMAGE_DESCRIPTION_SCHEMA
-    SLACK_SEARCH_WORD_SCHEMA = ai_prompt_assets.SLACK_SEARCH_WORD_SCHEMA
-    REFINE_SLACK_SEARCHES_SCHEMA = ai_prompt_assets.REFINE_SLACK_SEARCHES_SCHEMA
-    QUALITY_CHECK_SCHEMA = ai_prompt_assets.QUALITY_CHECK_SCHEMA
-
     def classify_prompt(self) -> str:
         return self._prompt(
             ai_prompt_assets.CLASSIFY_PROMPT,
@@ -51,6 +45,9 @@ class AiPromptService:
     def refine_slack_searches_prompt(self) -> str:
         return self._prompt(ai_prompt_assets.REFINE_SLACK_SEARCHES_PROMPT)
 
+    def url_context_prompt(self) -> str:
+        return self._prompt(ai_prompt_assets.URL_CONTEXT_PROMPT)
+
     def lastshot_prompt(self, has_rag_info: bool) -> str:
         return self._prompt(ai_prompt_assets.LASTSHOT_PROMPT, {"has_rag_info": has_rag_info})
 
@@ -71,6 +68,7 @@ class AiPromptService:
                     "is_mention": self.event.is_mention,
                     "is_open_channel": self.event.is_open_channel(),
                     "has_image_video_audio": self.event.has_image_video_audio,
+                    "user_intent": self.event.user_intent,
                 },
                 **(extra or {}),
             }

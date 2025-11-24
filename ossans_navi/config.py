@@ -80,6 +80,8 @@ REFINE_SLACK_SEARCHES_DEPTH_WITH_MENTION = 2
 REFINE_SLACK_SEARCHES_COUNT_NO_MENTION = 3
 REFINE_SLACK_SEARCHES_DEPTH_NO_MENTION = 2
 
+MAX_OUTPUT_TOKENS = 12288
+
 if AI_SERVICE_TYPE == AiServiceType.GEMINI:
     # Gemini の場合は API利用料金が安いのとコンテキストサイズが大きいので入力トークン数を増量
     # 入力する会話コンテキスト（スレッド）の最大トークン数
@@ -96,6 +98,11 @@ if AI_SERVICE_TYPE == AiServiceType.GEMINI:
     LOAD_VIDEO_AUDIO_FILES = True
     # 映像ファイルの FPS、FPS=0.5 で 2秒ごとに1フレーム消費、1フレームあたり 258トークン消費
     VIDEO_FPS = 0.5
+    # 外部URLの取得をするか
+    if AI_MODEL_LOW_COST.startswith("gemini-2.5-flash"):
+        LOAD_URL_CONTEXT = True
+    else:
+        LOAD_URL_CONTEXT = False
 else:
     # 入力する会話コンテキスト（スレッド）の最大トークン数
     MAX_THREAD_TOKENS = 12000
@@ -111,6 +118,8 @@ else:
     LOAD_VIDEO_AUDIO_FILES = False
     # 映像ファイルの FPS、現時点では Gemini のみのサポート
     VIDEO_FPS = 0.5
+    # 外部URLの取得をするか
+    LOAD_URL_CONTEXT = False
 
 # 開発モードのデフォルト値（起動時に --production が渡されると上書きされて本番モードになる）
 DEVELOPMENT_MODE = True

@@ -16,7 +16,7 @@ from slack_sdk.errors import SlackApiError
 from slack_sdk.web.slack_response import SlackResponse
 
 from ossans_navi import config
-from ossans_navi.common import utils
+from ossans_navi.common import async_utils
 from ossans_navi.common.cache import LRUCache
 from ossans_navi.service.slack_wrapper import SlackWrapper
 from ossans_navi.type import ossans_navi_types
@@ -176,9 +176,9 @@ class SlackService:
         user_token: Optional[str] = None,
         bot_token: Optional[str] = None
     ) -> None:
-        self.app_token = app_token or config.SLACK_APP_TOKEN
-        self.user_token = user_token or config.SLACK_USER_TOKEN
-        self.bot_token = bot_token or config.SLACK_BOT_TOKEN
+        self.app_token = app_token if app_token else config.SLACK_APP_TOKEN
+        self.user_token = user_token if user_token else config.SLACK_USER_TOKEN
+        self.bot_token = bot_token if bot_token else config.SLACK_BOT_TOKEN
         self.app = AsyncApp(token=self.bot_token, logger=logging.getLogger("slack_bolt"))
         self.socket_mode_handler_instance: Optional[AsyncSocketModeHandler] = None
         self.app_client = SlackWrapper(token=self.app_token)
@@ -446,19 +446,19 @@ class SlackService:
         async def replacer_channel(v: re.Match[str]) -> str:
             return f"#{(await self.get_channel(v.group(1), True)).name}{v.group(2) if v.group(2) else " "}"
 
-        text = await utils.re_sub_async(r'<#([A-Z0-9]+)(?:\|[^>]*?)?>(\s)?', replacer_channel, text)
+        text = await async_utils.re_sub(r'<#([A-Z0-9]+)(?:\|[^>]*?)?>(\s)?', replacer_channel, text)
 
         async def replacer_user(v: re.Match[str]) -> str:
             return (await self.get_user(v.group(1))).name + "さん"
 
-        text = await utils.re_sub_async(r'<@([A-Z0-9]+)(?:\|[^>]+?)?>( *さん)?', replacer_user, text)
+        text = await async_utils.re_sub(r'<@([A-Z0-9]+)(?:\|[^>]+?)?>( *さん)?', replacer_user, text)
         return text
 
     async def disable_mention_if_not_active(self, text: str) -> str:
         async def replacer(v: re.Match[str]) -> str:
             return v.group(0) if self.get_presence(v.group(1)) else ("@" + (await self.get_user(v.group(1))).username)
 
-        return await utils.re_sub_async(r'<@([A-Z0-9]+)>', replacer, text)
+        return await async_utils.re_sub(r'<@([A-Z0-9]+)>', replacer, text)
 
     async def get_conversations_replies(self, channel: str, thread_ts: str, user_client: bool = False) -> list[SlackMessageLite]:
         client: SlackWrapper = self.user_client if user_client else self.bot_client
@@ -728,7 +728,6 @@ class SlackService:
         viewable_private_channels: list[str],
         trusted_bots: list[str],
         is_additional: bool,
-        is_get_messages: bool
     ) -> SlackSearch:
         try:
             results = SlackSearchMessagesResponse(
@@ -770,7 +769,6 @@ class SlackService:
             ),
             is_full=results.messages.total == results.messages.pagination.last,
             is_additional=is_additional,
-            is_get_messages=is_get_messages,
         )
 
     @staticmethod
@@ -785,7 +783,6 @@ class SlackService:
             messages=filtered_contents,
             is_full=result.is_full,
             is_additional=result.is_additional,
-            is_get_messages=result.is_get_messages,
         )
 
     async def conversations_open(self, user_id: str) -> str:

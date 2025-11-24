@@ -13,7 +13,7 @@ from typing import Any, Iterable, Optional, overload
 
 from google import genai
 from google.genai import types
-from openai import AzureOpenAI, InternalServerError, OpenAI, RateLimitError
+from openai import InternalServerError, RateLimitError, AsyncAzureOpenAI, AsyncOpenAI
 from openai.types.chat import (ChatCompletion, ChatCompletionContentPartParam, ChatCompletionMessageParam, ChatCompletionMessageToolCallParam,
                                ChatCompletionToolParam, completion_create_params)
 
@@ -22,7 +22,7 @@ from ossans_navi.common.logger import shrink_message
 from ossans_navi.config import AiServiceType
 from ossans_navi.service.ai_tokenize_service import AiTokenize, AiTokenizeGpt4o
 from ossans_navi.type import ossans_navi_types
-from ossans_navi.common import utils
+from ossans_navi.common import async_utils
 
 logger = logging.getLogger(__name__)
 
@@ -408,6 +408,7 @@ class AiPrompt:
     schema: Optional[types.Schema] = dataclasses.field(default=None)
     choices: int = dataclasses.field(default=1)
     rag_info: Optional[AiPromptRagInfo] = dataclasses.field(default=None)
+    tools_url_context: bool = dataclasses.field(default=False)
 
     @property
     def is_json(self) -> bool:
@@ -502,33 +503,41 @@ class AiPrompt:
         return {
             "system_instruction": {"parts": [{"text": self.system}]},
             "candidate_count": self.choices,
+            "max_output_tokens": config.MAX_OUTPUT_TOKENS,
             "response_mime_type": "application/json" if self.is_json else None,
             "response_schema": self.schema.model_dump(exclude_unset=True, exclude_defaults=True) if self.is_json and self.schema else None,
             "tool_config": {
                 "function_calling_config": {"mode": types.FunctionCallingConfigMode.NONE},
             },
             "tools": [
-                {
-                    "function_declarations": [
+                *(
+                    [
                         {
-                            "name": "get_last_message_detail",
-                            "description": "Get detailed information about the message.",
-                        },
-                        {
-                            "name": "get_related_information",
-                            "description": "Get Related information found in this slack group.",
-                            "parameters": {
-                                "type": types.Type.OBJECT,
-                                "properties": {
-                                    "terms": {
-                                        "type": types.Type.ARRAY,
-                                        "items": {"type": types.Type.STRING},
+                            "function_declarations": [
+                                {
+                                    "name": "get_last_message_detail",
+                                    "description": "Get detailed information about the message.",
+                                },
+                                {
+                                    "name": "get_related_information",
+                                    "description": "Get Related information found in this slack group.",
+                                    "parameters": {
+                                        "type": types.Type.OBJECT,
+                                        "properties": {
+                                            "terms": {
+                                                "type": types.Type.ARRAY,
+                                                "items": {"type": types.Type.STRING},
+                                            }
+                                        }
                                     }
                                 }
-                            }
+                            ]
                         }
-                    ]
-                }
+                    ] if not self.tools_url_context else []
+                ),
+                *(
+                    [{"url_context": {}}] if self.tools_url_context else []
+                )
             ],
         }
 
@@ -640,8 +649,6 @@ class AiResponse:
 @dataclasses.dataclass
 class RefineResponse:
     permalinks: list[str]
-    get_next_messages: list[str]
-    get_messages: list[str]
     additional_search_words: list[str]
 
 
@@ -653,7 +660,7 @@ class QualityCheckResponse:
 
 class AiService:
     def __init__(self) -> None:
-        self.client_openai_instance: Optional[OpenAI | AzureOpenAI] = None
+        self.client_openai_instance: Optional[AsyncOpenAI | AsyncAzureOpenAI] = None
         self.client_gemini_instance: Optional[genai.Client] = None
 
     async def start(self):
@@ -661,11 +668,11 @@ class AiService:
             case AiServiceType.OPENAI:
                 if not config.OPENAI_API_KEY:
                     raise ValueError("OSN_OPENAI_API_KEY is required when using OpenAI service.")
-                self.client_openai_instance = OpenAI(api_key=config.OPENAI_API_KEY)
+                self.client_openai_instance = AsyncOpenAI(api_key=config.OPENAI_API_KEY)
             case AiServiceType.AZURE_OPENAI:
                 if not config.AZURE_OPENAI_API_KEY or not config.AZURE_OPENAI_ENDPOINT:
                     raise ValueError("OSN_AZURE_OPENAI_API_KEY and OSN_AZURE_OPENAI_ENDPOINT are required when using Azure OpenAI service.")
-                self.client_openai_instance = AzureOpenAI(
+                self.client_openai_instance = AsyncAzureOpenAI(
                     api_key=config.AZURE_OPENAI_API_KEY,
                     api_version=config.AZURE_OPENAI_API_VERSION,
                     azure_endpoint=config.AZURE_OPENAI_ENDPOINT,
@@ -678,7 +685,7 @@ class AiService:
                 raise NotImplementedError("Unknown AiServiceType")
 
     @property
-    def client_openai(self) -> OpenAI | AzureOpenAI:
+    def client_openai(self) -> AsyncOpenAI | AsyncAzureOpenAI:
         if self.client_openai_instance is None:
             raise RuntimeError("AiService is not started.")
         return self.client_openai_instance
@@ -690,9 +697,9 @@ class AiService:
         return self.client_gemini_instance
 
     async def _chat_completions(
-            self,
-            model: AiModel,
-            prompt: AiPrompt,
+        self,
+        model: AiModel,
+        prompt: AiPrompt,
     ) -> AiResponse:
         if model.ai_service_type in (AiServiceType.OPENAI, AiServiceType.AZURE_OPENAI):
             return await self._chat_completions_openai(model, prompt)
@@ -702,9 +709,9 @@ class AiService:
             raise NotImplementedError(f"Unknown AiServiceType: {model.ai_service_type}")
 
     async def _chat_completions_gemini(
-            self,
-            model: AiModel,
-            prompt: AiPrompt,
+        self,
+        model: AiModel,
+        prompt: AiPrompt,
     ) -> AiResponse:
         logger.debug(f"start _chat_completions_gemini: {str(self.client_gemini)}")
         start_time = time.time()
@@ -713,7 +720,7 @@ class AiService:
         try:
             if len(prompt.get_upload_files()) > 0:
                 logger.debug(f"Uploading files: {', '.join([file.title for file in prompt.get_upload_files()])}")
-                uploaded_files = await utils.asyncio_gather(
+                uploaded_files = await async_utils.asyncio_gather(
                     *[
                         self.client_gemini.aio.files.upload(
                             file=file.to_bytes_io(),
@@ -772,7 +779,7 @@ class AiService:
             if len([True for file in prompt.get_upload_files() if file.file and file.file.name]) > 0:
                 # アップロードしたファイルを削除する
                 logger.debug(f"Deleting files: {', '.join([file.title for file in prompt.get_upload_files() if file.file and file.file.name])}")
-                await utils.asyncio_gather(
+                await async_utils.asyncio_gather(
                     *[
                         self.client_gemini.aio.files.delete(name=file.file.name)
                         for file in prompt.get_upload_files()
@@ -834,7 +841,7 @@ class AiService:
         response = None
         for _ in range(10):
             try:
-                response = self.client_openai.chat.completions.create(
+                response = await self.client_openai.chat.completions.create(
                     model=model.name,
                     response_format=response_format,
                     messages=messages,
@@ -932,15 +939,25 @@ class AiService:
         else:
             return {}
 
-    async def request_slack_search_words(self, model: AiModel, prompt: AiPrompt) -> list[str]:
+    async def request_slack_search_words(self, model: AiModel, prompt: AiPrompt) -> tuple[list[str], list[str]]:
         # Gemini は n=2 で十分なバリエーションを生成してくれる
         prompt.choices = 2 if model.ai_service_type == AiServiceType.GEMINI else 5
         response = await self._chat_completions(model, prompt)
-        slack_search_words: list[str] = list(set(
+        slack_search_words = list(set(
             itertools.chain.from_iterable(
                 [
-                    [slack_search_words for slack_search_words in message.content['slack_search_words']]
-                    for message in response.choices if 'slack_search_words' in message.content if isinstance(message.content, dict)
+                    [v for v in slack_search_words if isinstance(v, str)]
+                    for message in response.choices
+                    if isinstance(message.content, dict) and isinstance((slack_search_words := message.content.get('slack_search_words')), list)
+                ]
+            )
+        ))
+        external_urls = list(set(
+            itertools.chain.from_iterable(
+                [
+                    [v for v in external_urls if isinstance(v, str)]
+                    for message in response.choices
+                    if isinstance(message.content, dict) and isinstance((external_urls := message.content.get('external_urls')), list)
                 ]
             )
         ))
@@ -953,22 +970,18 @@ class AiService:
                 )
             )
         )
-        return slack_search_words
+        return (slack_search_words, external_urls)
 
     @staticmethod
     def _analyze_refine_slack_searches_response(response: AiResponse) -> list[RefineResponse]:
         return [
             RefineResponse(
                 [v for v in message.content.get('permalinks', []) if isinstance(v, str)],
-                [v for v in message.content.get('get_next_messages', []) if isinstance(v, str)],
-                [v for v in message.content.get('get_messages', []) if isinstance(v, str)],
                 [v for v in message.content.get('additional_search_words', []) if isinstance(v, str)],
             )
             for message in response.choices if (
                 isinstance(message.content, dict)
                 and isinstance(message.content.get('permalinks', []), list)
-                and isinstance(message.content.get('get_next_messages', []), list)
-                and isinstance(message.content.get('get_messages', []), list)
                 and isinstance(message.content.get('additional_search_words', []), list)
             )
         ]
@@ -979,6 +992,15 @@ class AiService:
         response = await self._chat_completions(model, prompt)
         return AiService._analyze_refine_slack_searches_response(response)
 
+    async def request_url_context(self, model: AiModel, prompt: AiPrompt) -> str:
+        prompt.tools_url_context = True
+        response = await self._chat_completions(model, prompt)
+        if len(response.choices) == 0:
+            return ""
+        if not isinstance((v := response.choices[0].content), str):
+            return ""
+        return v
+
     @staticmethod
     def _analyze_lastshot_response(response: AiResponse) -> list[ossans_navi_types.LastshotResponse]:
         return [
@@ -986,9 +1008,7 @@ class AiService:
             for message in response.choices if isinstance(message.content, str)
         ]
 
-    async def request_lastshot(self, model: AiModel, prompt: AiPrompt, n: int = 1) -> list[ossans_navi_types.LastshotResponse]:
-        # Gemini は大きいプロンプトのパターンで choice>=2 が原因となるエラーケースがある、よって choice=1 とする
-        prompt.choices = 1 if model.ai_service_type == AiServiceType.GEMINI else n
+    async def request_lastshot(self, model: AiModel, prompt: AiPrompt) -> list[ossans_navi_types.LastshotResponse]:
         for _ in range(2):
             response = await self._chat_completions(model, prompt)
             if len(result := AiService._analyze_lastshot_response(response)) > 0:

@@ -1,11 +1,12 @@
 import asyncio
 import re
+from asyncio.futures import Future
 from typing import Awaitable, Callable, Pattern, TypeVar
 
 T = TypeVar('T')
 
 
-async def re_sub_async(
+async def re_sub(
     pattern: str | Pattern[str],
     repl: Callable[[re.Match[str]], Awaitable[str]],
     string: str,
@@ -75,8 +76,13 @@ async def re_sub_async(
     return result
 
 
+async def gather_wrapper(coros_or_futures: Future[T] | Awaitable[T], semaphore: asyncio.Semaphore) -> T:
+    async with semaphore:
+        return await coros_or_futures
+
+
 async def asyncio_gather(
-    *coros_or_futures: Awaitable[T],
+    *coros_or_futures: Future[T] | Awaitable[T],
     concurrency: int = 1
 ) -> list[T]:
     """
@@ -84,11 +90,7 @@ async def asyncio_gather(
     """
     semaphore = asyncio.Semaphore(concurrency)
 
-    async def wrapper(coro: Awaitable[T]) -> T:
-        async with semaphore:
-            return await coro
-
     return await asyncio.gather(
-        *(wrapper(c) for c in coros_or_futures),
+        *(gather_wrapper(c, semaphore) for c in coros_or_futures),
         return_exceptions=False,
     )
