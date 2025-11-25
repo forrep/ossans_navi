@@ -45,10 +45,22 @@ class EventGuard:
     def __init__(self) -> None:
         self.data: dict[str, dict[str, EventGuard.EventGuardData]] = {}
         self.lock = asyncio.Lock()
+        self.event_hashes: list[str] = []
 
     @staticmethod
     def _thread_key(event: SlackMessageEvent) -> str:
         return f"{event.channel_id},{event.thread_ts}"
+
+    def is_duplicate(self, event: SlackMessageEvent) -> bool:
+        event_hash = event.hash
+        try:
+            if event_hash in self.event_hashes:
+                return True
+            else:
+                return False
+        finally:
+            self.event_hashes.append(event_hash)
+            self.event_hashes = self.event_hashes[-20:]
 
     def queue(self, event: SlackMessageEvent) -> None:
         thread_key = EventGuard._thread_key(event)
@@ -149,14 +161,17 @@ class EventGuard:
     def __str__(self) -> str:
         return str(
             {
-                thread_key: {
-                    event_ts: {
-                        "status": data.status.name,
-                        "event_id": data.event.id(),
-                        "canceled_events": [event.id() for event in data.canceled_events]
-                    } for (event_ts, data) in val.items()
-                }
-                for (thread_key, val) in self.data.items()
+                "data": {
+                    thread_key: {
+                        event_ts: {
+                            "status": data.status.name,
+                            "event_id": data.event.id(),
+                            "canceled_events": [event.id() for event in data.canceled_events]
+                        } for (event_ts, data) in val.items()
+                    }
+                    for (thread_key, val) in self.data.items()
+                },
+                "event_hashes": self.event_hashes,
             }
         )
 

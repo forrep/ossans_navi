@@ -87,7 +87,11 @@ if AI_SERVICE_TYPE == AiServiceType.GEMINI:
     # 入力する会話コンテキスト（スレッド）の最大トークン数
     MAX_THREAD_TOKENS = 36000
     # refine_slack_searches の1回あたり許容するトークン数
-    REFINE_SLACK_SEARCHES_TOKEN = 30000
+    REFINE_SLACK_SEARCHES_TOKEN = 24000
+    # refine_slack_searches の実行回数と実行深度（メンションあり）
+    REFINE_SLACK_SEARCHES_COUNT_WITH_MENTION = 6
+    # refine_slack_searches の実行回数と実行深度（メンションなし）
+    REFINE_SLACK_SEARCHES_COUNT_NO_MENTION = 4
     # lastshot で許容するトークン数
     LASTSHOT_TOKEN_WITH_MENTION = 80000
     # lastshot で許容するトークン数（メンションなし）

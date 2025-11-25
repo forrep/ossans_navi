@@ -641,7 +641,7 @@ class OssansNaviService:
         logger.info(f"{base_messages_token=}")
         # メンションされた場合か、OssansNavi のメッセージの次のメッセージの場合はちゃんと調べる、それ以外は手を抜いて調べる
         if self.event.is_mention or self.event.is_reply_to_ossans_navi():
-            refine_slack_searches_count = config.REFINE_SLACK_SEARCHES_COUNT_WITH_MENTION = 4
+            refine_slack_searches_count = config.REFINE_SLACK_SEARCHES_COUNT_WITH_MENTION
             refine_slack_searches_depth = config.REFINE_SLACK_SEARCHES_DEPTH_WITH_MENTION
         else:
             refine_slack_searches_count = config.REFINE_SLACK_SEARCHES_COUNT_NO_MENTION

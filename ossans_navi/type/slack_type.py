@@ -3,6 +3,7 @@ import dataclasses
 import datetime
 import hashlib
 import itertools
+import json
 import re
 from typing import Any, Optional
 
@@ -693,6 +694,10 @@ class SlackMessageEvent:
 
     def id(self) -> str:
         return hashlib.sha256(f"{self.channel_id},{self.thread_ts},{self.ts},{self.event_ts}".encode('utf8')).hexdigest()[:16]
+
+    @property
+    def hash(self) -> str:
+        return hashlib.sha256(json.dumps(self.source, ensure_ascii=False).encode('utf8')).hexdigest()
 
 
 class SlackBaseResponse(BaseModel):

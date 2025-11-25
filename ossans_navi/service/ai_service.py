@@ -234,7 +234,7 @@ class AiPromptMessage:
                         "id": f"call_{function_id.call_id}",
                         "type": "function",
                         "function": {
-                            "name": "get_last_message_detail",
+                            "name": "get_previous_message_detail",
                             "arguments": "",
                         },
                     }
@@ -336,7 +336,7 @@ class AiPromptMessage:
                 parts.append(
                     {
                         "function_call": {
-                            "name": "get_last_message_detail",
+                            "name": "get_previous_message_detail",
                             "args": {},
                         }
                     }
@@ -363,7 +363,7 @@ class AiPromptMessage:
                 parts.append(
                     {
                         "function_response": {
-                            "name": "get_last_message_detail",
+                            "name": "get_previous_message_detail",
                             "response": self.content.detail,
                         }
                     }
@@ -477,7 +477,7 @@ class AiPrompt:
             {
                 "type": "function",
                 "function": {
-                    "name": "get_last_message_detail",
+                    "name": "get_previous_message_detail",
                     "description": "Get detailed information about the message.",
                 },
             },
@@ -515,7 +515,7 @@ class AiPrompt:
                         {
                             "function_declarations": [
                                 {
-                                    "name": "get_last_message_detail",
+                                    "name": "get_previous_message_detail",
                                     "description": "Get detailed information about the message.",
                                 },
                                 {

@@ -39,6 +39,9 @@ async def handle_message_events(event: dict[str, dict]):
     message_event = SlackMessageEvent(event)
 
     # 処理キュー(EVENT_GUARD)を操作する、途中に他の非同期処理を挟まないようにする
+    if EVENT_GUARD.is_duplicate(message_event):
+        logger.info("Duplicate event detected, finished.")
+        return
     if message_event.is_message_post():
         # メッセージの投稿イベントの場合
         EVENT_GUARD.queue(message_event)
