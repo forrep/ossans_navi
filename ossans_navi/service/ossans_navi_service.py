@@ -781,35 +781,36 @@ class OssansNaviService:
         logger.debug(f"[{depth}][{node}] _refine_slack_searches: finished")
 
     async def url_context(self, urls: list[str]) -> None:
-        already_added_urls = self.search_results.url_context_urls
-        self.search_results.add(
-            [
-                UrlContext(url=url, content=content)
-                for (url, content) in zip(
-                    urls,
-                    await async_utils.asyncio_gather(
-                        *[
-                            self.ai_service.request_url_context(
-                                self.models.low_cost,
-                                AiPrompt(
-                                    system=self.ai_prompt_service.url_context_prompt(),
-                                    messages=[
-                                        AiPromptMessage(
-                                            role=AiPromptRole.USER,
-                                            content=AiPromptContent(data=url),
+        if self.models.gemini_25_flash_lite:
+            if (url_context_urls := [url for url in urls if url not in self.search_results.url_context_urls]):
+                logger.debug(f"url_context: urls={url_context_urls}")
+                self.search_results.add(
+                    [
+                        UrlContext(url=url, content=content)
+                        for (url, content) in zip(
+                            urls,
+                            await async_utils.asyncio_gather(
+                                *[
+                                    self.ai_service.request_url_context(
+                                        self.models.gemini_25_flash_lite,
+                                        AiPrompt(
+                                            system=self.ai_prompt_service.url_context_prompt(),
+                                            messages=[
+                                                AiPromptMessage(
+                                                    role=AiPromptRole.USER,
+                                                    content=AiPromptContent(data=url),
+                                                )
+                                            ],
                                         )
-                                    ],
-                                )
+                                    )
+                                    for url in url_context_urls
+                                ],
+                                concurrency=5
                             )
-                            for url in urls
-                            if url not in already_added_urls
-                        ],
-                        concurrency=5
-                    )
+                        )
+                        if len(url) > 0 and len(content) > 0
+                    ]
                 )
-                if len(url) > 0 and len(content) > 0
-            ]
-        )
 
     async def lastshot(self, thread_messages: list[SlackMessageLite]) -> list[ossans_navi_types.LastshotResponse]:
         current_messages: list[SlackMessage] = []

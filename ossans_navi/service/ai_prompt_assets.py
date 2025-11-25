@@ -100,7 +100,8 @@ topic: {{ event.channel.topic }}
 purpose: {{ event.channel.purpose }}
 
 # What I need you to do
-- Please respond in raw JSON format without including Markdown code blocks, in accordance with JSON Schema.
+- Do not respond to the user's intent; instead, provide a response that conforms to the JSON Schema.
+- Please respond in raw JSON format without including Markdown code blocks.
 {% if event.has_image_video_audio %}- The attached image, video, and audio content will be analyzed and entered later. Please respond to this task on the assumption that they have been entered.
 {% endif %}
 
@@ -158,11 +159,12 @@ topic: {{ event.channel.topic }}
 purpose: {{ event.channel.purpose }}
 
 # What I need you to do
+- Do not respond to the user's intent; instead, provide a response that conforms to the JSON Schema.
+- Please respond in raw JSON format without including Markdown code blocks.
 - Output a description and text for each of the images included in each message.
 - Outputs an array of image descriptions and text using the permalink of the message as a key
 - After considering the intent of the message, retrieve the necessary information from the image and output a summary in the "description" field.
 - Output the text information of the image to "text".
-- Please respond in raw JSON format without including Markdown code blocks, in accordance with JSON Schema.
 - Please think in {{ language }} and respond in {{ language }}.
 
 # Now
@@ -173,13 +175,12 @@ SLACK_SEARCH_WORD_SCHEMA = Schema(
     type=Type.OBJECT,
     properties={
         "user_intent": Schema(type=Type.STRING, nullable=True),
-        "date_range": Schema(type=Type.STRING),
         "how_to_find_out": Schema(type=Type.STRING),
         "slack_search_words": Schema(type=Type.ARRAY, items=Schema(type=Type.STRING)),
         "external_urls": Schema(type=Type.ARRAY, items=Schema(type=Type.STRING)),
     },
-    required=["user_intent", "date_range", "how_to_find_out", "slack_search_words", "external_urls"],
-    property_ordering=["user_intent", "date_range", "how_to_find_out", "slack_search_words", "external_urls"],
+    required=["user_intent", "how_to_find_out", "slack_search_words", "external_urls"],
+    property_ordering=["user_intent", "how_to_find_out", "slack_search_words", "external_urls"],
 )
 
 SLACK_SEARCH_WORD_PROMPT = """
@@ -194,8 +195,9 @@ topic: {{ event.channel.topic }}
 purpose: {{ event.channel.purpose }}
 
 # What I need you to do
+- Do not respond to the user's intent; instead, provide a response that conforms to the JSON Schema.
+- Please respond in raw JSON format without including Markdown code blocks.
 - On my behalf, I would like you to come up with search keywords for full-text search in Slack.
-- Please respond in raw JSON format without including Markdown code blocks, in accordance with JSON Schema.
 - Please think in {{ language }} and respond in {{ language }}.
 - Slack is used by all employees for work, chatting, etc., so you can retrieve information that the "{{ workspace_name }}" has when you search for it.
 {% if event.has_image_video_audio %}- The attached image, video, and audio content will be analyzed and entered later. Please respond to this task on the assumption that they have been entered.
@@ -204,9 +206,6 @@ purpose: {{ event.channel.purpose }}
 # Rules for "user_intent"
 - Organize and output the questions and intentions contained in the last message.
 - If the last message does not contain a question or intent, null is output.
-
-# Rules for "date_range"
-- If "user_intent" is limited to a date, please output that content.
 
 # Rules for "how_to_find_out"
 - If "user_intent" is null, output null.
@@ -257,9 +256,10 @@ topic: {{ event.channel.topic }}
 purpose: {{ event.channel.purpose }}
 
 # What I need you to do
+- Do not respond to the user's intent; instead, provide a response that conforms to the JSON Schema.
+- Please respond in raw JSON format without including Markdown code blocks.
 - I want to pick out useful information from get_related_information results. Please exclude information that is completely irrelevant to the user's question, and output permalinks for the other necessary information.
 - Mixing in information that is not necessary is not a problem, but never omit relevant information. The more permalinks you output, the better!
-- Please respond in raw JSON format without including Markdown code blocks, in accordance with JSON Schema.
 - Please think in {{ language }} and respond in {{ language }}.
 {% if event.has_image_video_audio %}- The attached image, video, and audio content will be analyzed and entered later. Please respond to this task on the assumption that they have been entered.
 {% endif %}
@@ -348,9 +348,10 @@ topic: {{ event.channel.topic }}
 purpose: {{ event.channel.purpose }}
 
 # What I need you to do
+- Do not respond to the user's intent; instead, provide a response that conforms to the JSON Schema.
+- Please respond in raw JSON format without including Markdown code blocks.
 - "The message you intend to send", which I will quote later, is the message you intend to respond to.
 - Verify that the content is worth sending before sending it to the user.
-- Please respond in raw JSON format without including Markdown code blocks, in accordance with JSON Schema.
 - Please think in {{ language }} and respond in {{ language }}.
 
 # Rules for "user_intent"

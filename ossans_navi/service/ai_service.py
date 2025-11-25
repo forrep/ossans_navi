@@ -45,6 +45,7 @@ class AiModel:
 class AiModels:
     low_cost: AiModel = dataclasses.field(init=False)
     high_quality: AiModel = dataclasses.field(init=False)
+    gemini_25_flash_lite: AiModel = dataclasses.field(init=False)
 
     @staticmethod
     def new() -> 'AiModels':
@@ -97,6 +98,13 @@ class AiModels:
                     config.AI_MODEL_HIGH_QUALITY_OUT,
                     AiTokenizeGpt4o
                 )
+                models.gemini_25_flash_lite = AiModel(
+                    "gemini-2.5-flash-lite",
+                    config.AI_SERVICE_TYPE,
+                    0.10,
+                    0.40,
+                    AiTokenizeGpt4o
+                )
             case _:
                 raise NotImplementedError("Unknown Service.")
         return models
@@ -107,7 +115,7 @@ class AiModels:
             for model in [
                 getattr(self, model_name) for model_name in vars(self).keys()
             ]
-            if isinstance(model, AiModel)
+            if isinstance(model, AiModel) and model.get_total_cost() > 0.0
         ]
 
     def get_total_cost(self) -> float:
@@ -556,7 +564,7 @@ class AiPrompt:
         gemini_config = self.to_gemini_config()
         return {
             "generation_config": {
-                k: v for (k, v) in gemini_config.items() if k in ("candidate_count", "response_mime_type", "response_schema")
+                k: v for (k, v) in gemini_config.items() if k in ("candidate_count", "response_mime_type", "response_schema", "max_output_tokens",)
             },
             **(
                 {
@@ -804,6 +812,8 @@ class AiService:
         if response.usage_metadata:
             if isinstance(response.usage_metadata.prompt_token_count, int):
                 model.tokens_in += response.usage_metadata.prompt_token_count
+            if isinstance(response.usage_metadata.tool_use_prompt_token_count, int):
+                model.tokens_in += response.usage_metadata.tool_use_prompt_token_count
             if isinstance(response.usage_metadata.candidates_token_count, int):
                 model.tokens_out += response.usage_metadata.candidates_token_count
         if not response.candidates:

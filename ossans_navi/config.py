@@ -103,10 +103,7 @@ if AI_SERVICE_TYPE == AiServiceType.GEMINI:
     # 映像ファイルの FPS、FPS=0.5 で 2秒ごとに1フレーム消費、1フレームあたり 258トークン消費
     VIDEO_FPS = 0.5
     # 外部URLの取得をするか
-    if AI_MODEL_LOW_COST.startswith("gemini-2.5-flash"):
-        LOAD_URL_CONTEXT = True
-    else:
-        LOAD_URL_CONTEXT = False
+    LOAD_URL_CONTEXT = True
 else:
     # 入力する会話コンテキスト（スレッド）の最大トークン数
     MAX_THREAD_TOKENS = 12000

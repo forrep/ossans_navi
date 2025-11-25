@@ -141,8 +141,8 @@ async def do_ossans_navi_response_safe(event: SlackMessageEvent) -> None:
                 logger.error(e, exc_info=True)
     finally:
         logger.info(f"Usage Report (Total Cost: {models.get_total_cost():.4f})")
-        for (model_type, model) in [("LOW_COST", models.low_cost), ("HIGH_QUALITY", models.high_quality)]:
-            logger.info(f"  {model_type}: {model.name} (Cost: {model.get_total_cost():.4f})")
+        for model in models.models():
+            logger.info(f"  {model.name} (Cost: {model.get_total_cost():.4f})")
             logger.info(f"    tokens_in  = {model.tokens_in}")
             logger.info(f"    tokens_out = {model.tokens_out}")
 
