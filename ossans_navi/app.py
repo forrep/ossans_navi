@@ -5,7 +5,7 @@ import re
 import signal
 import sys
 from collections.abc import AsyncGenerator
-from typing import Any, Callable
+from typing import Any, Callable, Coroutine
 
 from slack_sdk import WebClient
 
@@ -34,7 +34,8 @@ async def handle_button_click(ack: Callable, body: dict[Any, Any], client: WebCl
 
 
 @slack_service.app.event("message")
-async def handle_message_events(event: dict[str, dict]):
+async def handle_message_events(ack: Callable[[], Coroutine[Any, Any, None]], event: dict[str, dict]):
+    await ack()
     logger.info("event=" + json.dumps(event, ensure_ascii=False))
     message_event = SlackMessageEvent(event)
 
