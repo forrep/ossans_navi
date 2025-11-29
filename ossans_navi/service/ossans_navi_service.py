@@ -18,8 +18,9 @@ from ossans_navi.common.cache import LRUCache
 from ossans_navi.controller import config_controller
 from ossans_navi.service import ai_prompt_assets
 from ossans_navi.service.ai_prompt_service import AiPromptService
-from ossans_navi.service.ai_service import (AiModels, AiPrompt, AiPromptContent, AiPromptMessage, AiPromptRagInfo, AiPromptRole, AiPromptUploadFile,
-                                            AiService, QualityCheckResponse)
+from ossans_navi.service.ai_service import (AiPrompt, AiPromptContent, AiPromptMessage, AiPromptRagInfo, AiPromptRole, AiPromptUploadFile, AiService,
+                                            QualityCheckResponse)
+from ossans_navi.service.ai_tokenize_service import AiTokenizor
 from ossans_navi.service.slack_service import SlackService
 from ossans_navi.type import ossans_navi_types
 from ossans_navi.type.ossans_navi_types import SearchResults, UrlContext
@@ -33,16 +34,13 @@ class OssansNaviService:
 
     def __init__(
         self,
-        ai_service: AiService,
         slack_service: SlackService,
-        models: AiModels,
         event: SlackMessageEvent,
         config: ossans_navi_types.OssansNaviConfig,
     ) -> None:
-        self.ai_service = ai_service
+        self.ai_service = AiService()
         self.slack_service = slack_service
         self.ai_prompt_service = AiPromptService(event, self.slack_service.get_assistant_names())
-        self.models = models
         self.event = event
         self.config = config
         self.search_results = SearchResults()
@@ -52,15 +50,11 @@ class OssansNaviService:
     @classmethod
     async def create(
         cls,
-        ai_service: AiService,
         slack_service: SlackService,
-        models: AiModels,
         event: SlackMessageEvent,
     ) -> "OssansNaviService":
         return cls(
-            ai_service,
             slack_service,
-            models,
             event,
             ossans_navi_types.OssansNaviConfig.from_dict(await slack_service.get_config_dict()),
         )
@@ -350,7 +344,7 @@ class OssansNaviService:
         while (
             len(thread_messages) >= 3
             and (
-                self.models.low_cost.tokenizer.messages_tokens(
+                AiTokenizor.messages_tokens(
                     self.get_ai_prompt("", thread_messages).to_openai_messages()
                 ) > config.MAX_THREAD_TOKENS
             )
@@ -381,7 +375,7 @@ class OssansNaviService:
 
     async def classify(self, thread_messages: list[SlackMessageLite]) -> dict[str, str | list[str]]:
         return await self.ai_service.request_classify(
-            self.models.low_cost,
+            self.ai_service.models_usage.low_cost,
             self.get_ai_prompt(
                 self.ai_prompt_service.classify_prompt(),
                 thread_messages,
@@ -450,7 +444,7 @@ class OssansNaviService:
     async def analyze_image_description(self, thread_messages: list[SlackMessageLite]):
         # キャッシュから読み込めるやつは読み込んでおく、ここで読み込まれた分は生成AIに渡されないからトークンの節約になる
         OssansNaviService.load_image_description_from_cache(thread_messages)
-        messages_token = self.models.high_quality.tokenizer.messages_tokens(
+        messages_token = AiTokenizor.messages_tokens(
             self.get_ai_prompt(
                 self.ai_prompt_service.image_description_prompt(),
                 thread_messages,
@@ -461,7 +455,7 @@ class OssansNaviService:
                 messages_token
                 + sum(
                     [
-                        self.models.high_quality.tokenizer.image_tokens(file.width, file.height)
+                        AiTokenizor.image_tokens(file.width, file.height)
                         for file in itertools.chain.from_iterable(
                             [message.files for message in thread_messages]
                         ) if file.is_image and not file.is_analyzed
@@ -489,7 +483,7 @@ class OssansNaviService:
 
         # 添付画像を AI で解析実行
         image_description = await self.ai_service.request_image_description(
-            self.models.low_cost,
+            self.ai_service.models_usage.low_cost,
             self.get_ai_prompt(
                 self.ai_prompt_service.image_description_prompt(),
                 thread_messages,
@@ -571,7 +565,7 @@ class OssansNaviService:
             yield
 
             (slack_search_words, external_urls) = await self.ai_service.request_slack_search_words(
-                self.models.high_quality,
+                self.ai_service.models_usage.high_quality,
                 request_slack_search_words_prompt
             )
 
@@ -631,7 +625,7 @@ class OssansNaviService:
         トークン数の上限があるので複数回に分けて実行して、大量の検索結果の中から必要な情報を絞り込む
         RAG で入力する情報以外のトークン数を求めておく（システムプロンプトなど）、RAG で入力可能な情報を計算する為に使う
         """
-        base_messages_token = self.models.low_cost.tokenizer.messages_tokens(
+        base_messages_token = AiTokenizor.messages_tokens(
             self.get_ai_prompt(
                 self.ai_prompt_service.refine_slack_searches_prompt(),
                 thread_messages,
@@ -704,7 +698,7 @@ class OssansNaviService:
                 # スレッド情報などを取得する（Slack API実行のため多少時間がかかる）
                 await self.load_slack_message(message)
                 # 今回の検索結果を追加した場合のトークン数を試算する
-                tokens = self.models.low_cost.tokenizer.content_tokens(json.dumps(
+                tokens = AiTokenizor.content_tokens(json.dumps(
                     [OssansNaviService.slack_message_to_ai_prompt(message) for message in [*candidate_messages, message]],
                     ensure_ascii=False,
                     separators=(',', ':')
@@ -727,7 +721,7 @@ class OssansNaviService:
                     if message.root_message:
                         self.search_results.use(message.root_message.permalink)
             # 今回入力するトークン数を slack_searches_tokens_remain から引いておく
-            tokens_remain -= self.models.low_cost.tokenizer.content_tokens(json.dumps(
+            tokens_remain -= AiTokenizor.content_tokens(json.dumps(
                 [OssansNaviService.slack_message_to_ai_prompt(message) for message in candidate_messages],
                 ensure_ascii=False,
                 separators=(',', ':')
@@ -756,7 +750,7 @@ class OssansNaviService:
         # AI への問い合わせ部分だけ並列で処理する
         logger.debug(f"[{depth}][{node}] _refine_slack_searches: calling AI service")
         refine_slack_searches_responses = await self.ai_service.request_refine_slack_searches(
-            self.models.low_cost,
+            self.ai_service.models_usage.low_cost,
             refine_slack_searches_prompt
         )
         logger.info(f"[{depth}][{node}] {refine_slack_searches_responses=}")
@@ -781,7 +775,7 @@ class OssansNaviService:
         logger.debug(f"[{depth}][{node}] _refine_slack_searches: finished")
 
     async def url_context(self, urls: list[str]) -> None:
-        if self.models.gemini_25_flash_lite:
+        if config.LOAD_URL_CONTEXT:
             if (url_context_urls := [url for url in urls if url not in self.search_results.url_context_urls]):
                 logger.debug(f"url_context: urls={url_context_urls}")
                 self.search_results.add(
@@ -792,7 +786,7 @@ class OssansNaviService:
                             await async_utils.asyncio_gather(
                                 *[
                                     self.ai_service.request_url_context(
-                                        self.models.gemini_25_flash_lite,
+                                        self.ai_service.models_usage.gemini_25_flash_lite,
                                         AiPrompt(
                                             system=self.ai_prompt_service.url_context_prompt(),
                                             messages=[
@@ -820,7 +814,7 @@ class OssansNaviService:
             tokens_remain = config.LASTSHOT_TOKEN_WITH_MENTION
         else:
             tokens_remain = config.LASTSHOT_TOKEN_NO_MENTION
-        tokens_remain -= self.models.high_quality.tokenizer.messages_tokens(
+        tokens_remain -= AiTokenizor.messages_tokens(
             self.get_ai_prompt(
                 self.ai_prompt_service.lastshot_prompt(False),
                 thread_messages,
@@ -833,7 +827,7 @@ class OssansNaviService:
         for (content, url_context) in itertools.zip_longest(self.search_results.lastshot_messages, self.search_results.url_context_results):
             tokens = 0
             if content is not None:
-                tokens += self.models.high_quality.tokenizer.content_tokens(
+                tokens += AiTokenizor.content_tokens(
                     json.dumps(
                         OssansNaviService.slack_message_to_ai_prompt(
                             content,
@@ -846,7 +840,7 @@ class OssansNaviService:
                     )
                 )
             if url_context is not None:
-                tokens += self.models.high_quality.tokenizer.content_tokens(
+                tokens += AiTokenizor.content_tokens(
                     json.dumps(
                         OssansNaviService.url_context_to_ai_prompt(url_context, limit=15000),
                         ensure_ascii=False,
@@ -864,7 +858,7 @@ class OssansNaviService:
         logger.info(f"Lastshot current_messages={len(current_messages)}, current_url_contexts={len(current_url_contexts)}")
 
         return await self.ai_service.request_lastshot(
-            self.models.high_quality,
+            self.ai_service.models_usage.high_quality,
             self.get_ai_prompt(
                 self.ai_prompt_service.lastshot_prompt(len(current_messages) > 0 or len(current_url_contexts) > 0),
                 thread_messages,
@@ -894,7 +888,7 @@ class OssansNaviService:
 
     async def quality_check(self, thread_messages: list[SlackMessageLite], response_message: str) -> QualityCheckResponse:
         return await self.ai_service.request_quality_check(
-            self.models.low_cost,
+            self.ai_service.models_usage.low_cost,
             self.get_ai_prompt(
                 self.ai_prompt_service.quality_check_prompt(response_message),
                 thread_messages,

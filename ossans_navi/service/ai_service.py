@@ -13,113 +13,86 @@ from typing import Any, Iterable, Optional, overload
 
 from google import genai
 from google.genai import types
-from openai import InternalServerError, RateLimitError, AsyncAzureOpenAI, AsyncOpenAI
+from openai import AsyncAzureOpenAI, AsyncOpenAI, InternalServerError, RateLimitError
 from openai.types.chat import (ChatCompletion, ChatCompletionContentPartParam, ChatCompletionMessageParam, ChatCompletionMessageToolCallParam,
                                ChatCompletionToolParam, completion_create_params)
 
 from ossans_navi import config
+from ossans_navi.common import async_utils
 from ossans_navi.common.logger import shrink_message
 from ossans_navi.config import AiServiceType
-from ossans_navi.service.ai_tokenize_service import AiTokenize, AiTokenizeGpt4o
 from ossans_navi.type import ossans_navi_types
-from ossans_navi.common import async_utils
 
 logger = logging.getLogger(__name__)
 
 
+class AiModelInfo(Enum):
+    GEMINI_20_FLASH = ("gemini-2.0-flash", AiServiceType.GEMINI, 0.10, 0.40)
+    GEMINI_25_FLASH = ("gemini-2.5-flash-preview-09-2025", AiServiceType.GEMINI, 0.30, 2.50)
+    GEMINI_25_FLASH_LITE = ("gemini-2.5-flash-lite-preview-09-2025", AiServiceType.GEMINI, 0.10, 0.40)
+    GEMINI_25_PRO = ("gemini-2.5-pro", AiServiceType.GEMINI, 1.25, 10.00)
+    GPT_41 = ("gpt-4.1", AiServiceType.OPENAI, 2.00, 8.00)
+    GPT_41_MINI = ("gpt-4.1-mini", AiServiceType.OPENAI, 1.10, 4.40)
+    AZURE_GPT_41 = ("gpt-4.1", AiServiceType.AZURE_OPENAI, 2.00, 8.00)
+    AZURE_GPT_41_MINI = ("gpt-4.1-mini", AiServiceType.AZURE_OPENAI, 1.10, 4.40)
+
+    def __init__(self, model_name: str, ai_service_type: AiServiceType, cost_in: float, cost_out: float):
+        self.model_name = model_name
+        self.ai_service_type = ai_service_type
+        self.cost_in = cost_in
+        """入力コスト（$ / 1,000,000 tokens）"""
+        self.cost_out = cost_out
+        """出力コスト（$ / 1,000,000 tokens）"""
+
+
 @dataclasses.dataclass
-class AiModel:
-    name: str
-    ai_service_type: AiServiceType
-    cost_in: float
-    cost_out: float
-    tokenizer: AiTokenize
+class AiModelUsage:
+    model: AiModelInfo
     tokens_in: int = dataclasses.field(default=0, init=False)
     tokens_out: int = dataclasses.field(default=0, init=False)
+
+    @property
+    def model_name(self) -> str:
+        return self.model.model_name
+
+    @property
+    def ai_service_type(self) -> AiServiceType:
+        return self.model.ai_service_type
+
+    @property
+    def cost_in(self) -> float:
+        return self.model.cost_in
+
+    @property
+    def cost_out(self) -> float:
+        return self.model.cost_out
 
     def get_total_cost(self) -> float:
         return self.cost_in * self.tokens_in / 1_000_000 + self.cost_out * self.tokens_out / 1_000_000
 
 
 @dataclasses.dataclass
-class AiModels:
-    low_cost: AiModel = dataclasses.field(init=False)
-    high_quality: AiModel = dataclasses.field(init=False)
-    gemini_25_flash_lite: AiModel = dataclasses.field(init=False)
+class AiModelsUsage:
+    low_cost: AiModelUsage = dataclasses.field(init=False)
+    high_quality: AiModelUsage = dataclasses.field(init=False)
+    gemini_25_flash_lite: AiModelUsage = dataclasses.field(init=False)
+    models: list[AiModelUsage] = dataclasses.field(default_factory=list, init=False)
 
     @staticmethod
-    def new() -> 'AiModels':
+    def new() -> 'AiModelsUsage':
         if config.AI_MODEL_LOW_COST is None or config.AI_MODEL_HIGH_QUALITY is None:
             raise ValueError("AI model configuration is incomplete.")
-        models = AiModels()
-        match config.AI_SERVICE_TYPE:
-            case AiServiceType.OPENAI:
-                models.low_cost = AiModel(
-                    config.AI_MODEL_LOW_COST,
-                    config.AI_SERVICE_TYPE,
-                    config.AI_MODEL_LOW_COST_IN,
-                    config.AI_MODEL_LOW_COST_OUT,
-                    AiTokenizeGpt4o
-                )
-                models.high_quality = AiModel(
-                    config.AI_MODEL_HIGH_QUALITY,
-                    config.AI_SERVICE_TYPE,
-                    config.AI_MODEL_HIGH_QUALITY_IN,
-                    config.AI_MODEL_HIGH_QUALITY_OUT,
-                    AiTokenizeGpt4o
-                )
-            case AiServiceType.AZURE_OPENAI:
-                models.low_cost = AiModel(
-                    config.AI_MODEL_LOW_COST,
-                    config.AI_SERVICE_TYPE,
-                    config.AI_MODEL_LOW_COST_IN,
-                    config.AI_MODEL_LOW_COST_OUT,
-                    AiTokenizeGpt4o
-                )
-                models.high_quality = AiModel(
-                    config.AI_MODEL_HIGH_QUALITY,
-                    config.AI_SERVICE_TYPE,
-                    config.AI_MODEL_HIGH_QUALITY_IN,
-                    config.AI_MODEL_HIGH_QUALITY_OUT,
-                    AiTokenizeGpt4o
-                )
-            case AiServiceType.GEMINI:
-                models.low_cost = AiModel(
-                    config.AI_MODEL_LOW_COST,
-                    config.AI_SERVICE_TYPE,
-                    config.AI_MODEL_LOW_COST_IN,
-                    config.AI_MODEL_LOW_COST_OUT,
-                    AiTokenizeGpt4o
-                )
-                models.high_quality = AiModel(
-                    config.AI_MODEL_HIGH_QUALITY,
-                    config.AI_SERVICE_TYPE,
-                    config.AI_MODEL_HIGH_QUALITY_IN,
-                    config.AI_MODEL_HIGH_QUALITY_OUT,
-                    AiTokenizeGpt4o
-                )
-                models.gemini_25_flash_lite = AiModel(
-                    "gemini-2.5-flash-lite",
-                    config.AI_SERVICE_TYPE,
-                    0.10,
-                    0.40,
-                    AiTokenizeGpt4o
-                )
-            case _:
-                raise NotImplementedError("Unknown Service.")
-        return models
-
-    def models(self) -> list[AiModel]:
-        return [
-            model
-            for model in [
-                getattr(self, model_name) for model_name in vars(self).keys()
-            ]
-            if isinstance(model, AiModel) and model.get_total_cost() > 0.0
-        ]
+        models_usage = AiModelsUsage()
+        models_usage.low_cost = AiModelUsage(AiModelInfo[config.AI_MODEL_LOW_COST])
+        models_usage.high_quality = AiModelUsage(AiModelInfo[config.AI_MODEL_HIGH_QUALITY])
+        models_usage.gemini_25_flash_lite = AiModelUsage(AiModelInfo.GEMINI_25_FLASH_LITE)
+        models_usage.models.append(models_usage.low_cost)
+        models_usage.models.append(models_usage.high_quality)
+        models_usage.models.append(models_usage.gemini_25_flash_lite)
+        return models_usage
 
     def get_total_cost(self) -> float:
-        return sum([model.get_total_cost() for model in self.models()])
+        return sum([model.get_total_cost() for model in self.models])
 
 
 class AiPromptRole(Enum):
@@ -667,46 +640,59 @@ class QualityCheckResponse:
 
 
 class AiService:
-    def __init__(self) -> None:
-        self.client_openai_instance: Optional[AsyncOpenAI | AsyncAzureOpenAI] = None
-        self.client_gemini_instance: Optional[genai.Client] = None
+    client_openai_instance: Optional[AsyncOpenAI] = None
+    client_azure_openai_instance: Optional[AsyncAzureOpenAI] = None
+    client_gemini_instance: Optional[genai.Client] = None
 
-    async def start(self):
+    def __init__(self):
+        self.models_usage = AiModelsUsage.new()
+
+    @classmethod
+    async def start(cls) -> None:
         match config.AI_SERVICE_TYPE:
             case AiServiceType.OPENAI:
                 if not config.OPENAI_API_KEY:
                     raise ValueError("OSN_OPENAI_API_KEY is required when using OpenAI service.")
-                self.client_openai_instance = AsyncOpenAI(api_key=config.OPENAI_API_KEY)
             case AiServiceType.AZURE_OPENAI:
                 if not config.AZURE_OPENAI_API_KEY or not config.AZURE_OPENAI_ENDPOINT:
                     raise ValueError("OSN_AZURE_OPENAI_API_KEY and OSN_AZURE_OPENAI_ENDPOINT are required when using Azure OpenAI service.")
-                self.client_openai_instance = AsyncAzureOpenAI(
-                    api_key=config.AZURE_OPENAI_API_KEY,
-                    api_version=config.AZURE_OPENAI_API_VERSION,
-                    azure_endpoint=config.AZURE_OPENAI_ENDPOINT,
-                )
             case AiServiceType.GEMINI:
                 if not config.GEMINI_API_KEY:
                     raise ValueError("OSN_GEMINI_API_KEY is required when using Gemini service.")
-                self.client_gemini_instance = genai.Client(api_key=config.GEMINI_API_KEY)
             case _:
                 raise NotImplementedError("Unknown AiServiceType")
+        if config.OPENAI_API_KEY:
+            AiService.client_openai_instance = AsyncOpenAI(api_key=config.OPENAI_API_KEY)
+        if config.AZURE_OPENAI_API_KEY and config.AZURE_OPENAI_ENDPOINT:
+            AiService.client_azure_openai_instance = AsyncAzureOpenAI(
+                api_key=config.AZURE_OPENAI_API_KEY,
+                api_version=config.AZURE_OPENAI_API_VERSION,
+                azure_endpoint=config.AZURE_OPENAI_ENDPOINT,
+            )
+        if config.GEMINI_API_KEY:
+            AiService.client_gemini_instance = genai.Client(api_key=config.GEMINI_API_KEY)
 
     @property
-    def client_openai(self) -> AsyncOpenAI | AsyncAzureOpenAI:
-        if self.client_openai_instance is None:
+    def client_openai(self) -> AsyncOpenAI:
+        if AiService.client_openai_instance is None:
             raise RuntimeError("AiService is not started.")
-        return self.client_openai_instance
+        return AiService.client_openai_instance
+
+    @property
+    def client_azure_openai(self) -> AsyncAzureOpenAI:
+        if AiService.client_azure_openai_instance is None:
+            raise RuntimeError("AiService is not started.")
+        return AiService.client_azure_openai_instance
 
     @property
     def client_gemini(self) -> genai.Client:
-        if self.client_gemini_instance is None:
+        if AiService.client_gemini_instance is None:
             raise RuntimeError("AiService is not started.")
-        return self.client_gemini_instance
+        return AiService.client_gemini_instance
 
     async def _chat_completions(
         self,
-        model: AiModel,
+        model: AiModelUsage,
         prompt: AiPrompt,
     ) -> AiResponse:
         if model.ai_service_type in (AiServiceType.OPENAI, AiServiceType.AZURE_OPENAI):
@@ -718,7 +704,7 @@ class AiService:
 
     async def _chat_completions_gemini(
         self,
-        model: AiModel,
+        model: AiModelUsage,
         prompt: AiPrompt,
     ) -> AiResponse:
         logger.debug(f"start _chat_completions_gemini: {str(self.client_gemini)}")
@@ -762,14 +748,14 @@ class AiService:
         for _ in range(10):
             try:
                 if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(f"request({model.name})={json.dumps(prompt.to_gemini_rest(), ensure_ascii=False)}")
+                    logger.debug(f"request({model.model_name})={json.dumps(prompt.to_gemini_rest(), ensure_ascii=False)}")
                 else:
                     logger.info(
-                        f"request({model.name})(shrink)={json.dumps(shrink_message(prompt.to_gemini_rest()), ensure_ascii=False)}"
+                        f"request({model.model_name})(shrink)={json.dumps(shrink_message(prompt.to_gemini_rest()), ensure_ascii=False)}"
                     )
                 logger.debug("Generating content")
                 response = await self.client_gemini.aio.models.generate_content(
-                    model=model.name,
+                    model=model.model_name,
                     config=prompt.to_gemini_config(),
                     contents=prompt.to_gemini_contents(),
                 )
@@ -824,15 +810,21 @@ class AiService:
 
     async def _chat_completions_openai(
             self,
-            model: AiModel,
+            model: AiModelUsage,
             prompt: AiPrompt,
     ) -> AiResponse:
+        if model.ai_service_type == AiServiceType.OPENAI:
+            client = self.client_openai
+        elif model.ai_service_type == AiServiceType.AZURE_OPENAI:
+            client = self.client_azure_openai
+        else:
+            raise NotImplementedError(f"Unknown AiServiceType: {model.ai_service_type}")
         messages: Iterable = prompt.to_openai_messages()
         response_format = prompt.to_openai_response_format()
         tools = prompt.to_openai_tools()
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(
-                f"request({model.name})={
+                f"request({model.model_name})={
                     json.dumps(
                         {
                             "response_format": response_format,
@@ -845,14 +837,14 @@ class AiService:
                 }"
             )
         else:
-            logger.info(f"request({model.name})(shrink)={json.dumps(shrink_message(messages), ensure_ascii=False)}")
+            logger.info(f"request({model.model_name})(shrink)={json.dumps(shrink_message(messages), ensure_ascii=False)}")
         start_time = time.time()
         last_exception: Optional[Exception] = None
         response = None
         for _ in range(10):
             try:
-                response = await self.client_openai.chat.completions.create(
-                    model=model.name,
+                response = await client.chat.completions.create(
+                    model=model.model_name,
                     response_format=response_format,
                     messages=messages,
                     n=1,  # 2025-06-05現在、OpenAI の API で n >= 2 を指定すると出力結果が途中で途切れる現象が発生するため n: 1 とする
@@ -894,7 +886,7 @@ class AiService:
             raise last_exception or RuntimeError()
         return AiResponse.from_openai_response(response, prompt.is_json)
 
-    async def request_classify(self, model: AiModel, prompt: AiPrompt) -> dict[str, str | list[str]]:
+    async def request_classify(self, model: AiModelUsage, prompt: AiPrompt) -> dict[str, str | list[str]]:
         str_columns = ("user_intent", "user_intentions_type", "who_to_talk_to", "user_emotions",)
         list_columns = ("required_knowledge_types", "slack_emoji_names",)
         prompt.choices = 5
@@ -928,7 +920,7 @@ class AiService:
             )
         }
 
-    async def request_image_description(self, model: AiModel, prompt: AiPrompt) -> dict[str, list[dict[str, str]]]:
+    async def request_image_description(self, model: AiModelUsage, prompt: AiPrompt) -> dict[str, list[dict[str, str]]]:
         response = await self._chat_completions(model, prompt)
         message = response.choices[0]
         if not isinstance(message.content, dict):
@@ -949,7 +941,7 @@ class AiService:
         else:
             return {}
 
-    async def request_slack_search_words(self, model: AiModel, prompt: AiPrompt) -> tuple[list[str], list[str]]:
+    async def request_slack_search_words(self, model: AiModelUsage, prompt: AiPrompt) -> tuple[list[str], list[str]]:
         # Gemini は n=2 で十分なバリエーションを生成してくれる
         prompt.choices = 2 if model.ai_service_type == AiServiceType.GEMINI else 5
         response = await self._chat_completions(model, prompt)
@@ -996,13 +988,13 @@ class AiService:
             )
         ]
 
-    async def request_refine_slack_searches(self, model: AiModel, prompt: AiPrompt) -> list[RefineResponse]:
+    async def request_refine_slack_searches(self, model: AiModelUsage, prompt: AiPrompt) -> list[RefineResponse]:
         # Gemini は n=2 で十分な網羅性がある
         prompt.choices = 2 if model.ai_service_type == AiServiceType.GEMINI else 5
         response = await self._chat_completions(model, prompt)
         return AiService._analyze_refine_slack_searches_response(response)
 
-    async def request_url_context(self, model: AiModel, prompt: AiPrompt) -> str:
+    async def request_url_context(self, model: AiModelUsage, prompt: AiPrompt) -> str:
         prompt.tools_url_context = True
         response = await self._chat_completions(model, prompt)
         if len(response.choices) == 0:
@@ -1018,7 +1010,7 @@ class AiService:
             for message in response.choices if isinstance(message.content, str)
         ]
 
-    async def request_lastshot(self, model: AiModel, prompt: AiPrompt) -> list[ossans_navi_types.LastshotResponse]:
+    async def request_lastshot(self, model: AiModelUsage, prompt: AiPrompt) -> list[ossans_navi_types.LastshotResponse]:
         for _ in range(2):
             response = await self._chat_completions(model, prompt)
             if len(result := AiService._analyze_lastshot_response(response)) > 0:
@@ -1044,7 +1036,7 @@ class AiService:
             return None
         return result[0]
 
-    async def request_quality_check(self, model: AiModel, prompt: AiPrompt) -> QualityCheckResponse:
+    async def request_quality_check(self, model: AiModelUsage, prompt: AiPrompt) -> QualityCheckResponse:
         for _ in range(2):
             response = await self._chat_completions(model, prompt)
             if (result := AiService._analyze_quality_check_response(response)):

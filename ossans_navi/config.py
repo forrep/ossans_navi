@@ -24,36 +24,28 @@ AZURE_OPENAI_ENDPOINT = os.environ.get("OSN_AZURE_OPENAI_ENDPOINT")
 AZURE_OPENAI_API_VERSION = "2024-10-21"
 GEMINI_API_KEY = os.environ.get("OSN_GEMINI_API_KEY")
 AI_MODEL_LOW_COST = None
-AI_MODEL_LOW_COST_IN = 0.0
-AI_MODEL_LOW_COST_OUT = 0.0
 AI_MODEL_HIGH_QUALITY = None
-AI_MODEL_HIGH_QUALITY_IN = 0.0
-AI_MODEL_HIGH_QUALITY_OUT = 0.0
 
+# AiModelInfo の名前を指定
+# 候補:
+#   - GEMINI_20_FLASH
+#   - GEMINI_25_FLASH
+#   - GEMINI_25_FLASH_LITE
+#   - GEMINI_25_PRO
+#   - GPT_41
+#   - GPT_41_MINI
+#   - AZURE_GPT_41
+#   - AZURE_GPT_41_MINI
 match AI_SERVICE_TYPE:
     case AiServiceType.OPENAI:
-        AI_MODEL_LOW_COST = os.environ.get("OSN_OPENAI_MODEL_LOW_COST", os.environ.get("OSN_AI_MODEL_LOW_COST", "gpt-4.1-mini"))
-        AI_MODEL_LOW_COST_IN = float(os.environ.get("OSN_OPENAI_MODEL_LOW_COST_IN", os.environ.get("OSN_AI_MODEL_LOW_COST_IN", "0")))
-        AI_MODEL_LOW_COST_OUT = float(os.environ.get("OSN_OPENAI_MODEL_LOW_COST_OUT", os.environ.get("OSN_AI_MODEL_LOW_COST_OUT", "0")))
-        AI_MODEL_HIGH_QUALITY = os.environ.get("OSN_OPENAI_MODEL_HIGH_QUALITY", os.environ.get("OSN_AI_MODEL_HIGH_QUALITY", "gpt-4.1"))
-        AI_MODEL_HIGH_QUALITY_IN = float(os.environ.get("OSN_OPENAI_MODEL_HIGH_QUALITY_IN", os.environ.get("OSN_AI_MODEL_HIGH_QUALITY_IN", "0")))
-        AI_MODEL_HIGH_QUALITY_OUT = float(os.environ.get("OSN_OPENAI_MODEL_HIGH_QUALITY_OUT", os.environ.get("OSN_AI_MODEL_HIGH_QUALITY_OUT", "0")))
+        AI_MODEL_LOW_COST = os.environ.get("OSN_OPENAI_MODEL_LOW_COST", os.environ.get("OSN_AI_MODEL_LOW_COST", "GPT_41_MINI"))
+        AI_MODEL_HIGH_QUALITY = os.environ.get("OSN_OPENAI_MODEL_HIGH_QUALITY", os.environ.get("OSN_AI_MODEL_HIGH_QUALITY", "GPT_41"))
     case AiServiceType.AZURE_OPENAI:
-        AI_MODEL_LOW_COST = os.environ.get("OSN_AZURE_OPENAI_MODEL_LOW_COST", os.environ.get("OSN_AI_MODEL_LOW_COST", "gpt-4.1-mini"))
-        AI_MODEL_LOW_COST_IN = float(os.environ.get("OSN_AZURE_OPENAI_MODEL_LOW_COST_IN", os.environ.get("OSN_AI_MODEL_LOW_COST_IN", "0")))
-        AI_MODEL_LOW_COST_OUT = float(os.environ.get("OSN_AZURE_OPENAI_MODEL_LOW_COST_OUT", os.environ.get("OSN_AI_MODEL_LOW_COST_OUT", "0")))
-        AI_MODEL_HIGH_QUALITY = os.environ.get("OSN_AZURE_OPENAI_MODEL_HIGH_QUALITY", os.environ.get("OSN_AI_MODEL_HIGH_QUALITY", "gpt-4.1"))
-        AI_MODEL_HIGH_QUALITY_IN = float(
-            os.environ.get("OSN_AZURE_OPENAI_MODEL_HIGH_QUALITY_IN", os.environ.get("OSN_AI_MODEL_HIGH_QUALITY_IN", "0")))
-        AI_MODEL_HIGH_QUALITY_OUT = float(
-            os.environ.get("OSN_AZURE_OPENAI_MODEL_HIGH_QUALITY_OUT", os.environ.get("OSN_AI_MODEL_HIGH_QUALITY_OUT", "0")))
+        AI_MODEL_LOW_COST = os.environ.get("OSN_AZURE_OPENAI_MODEL_LOW_COST", os.environ.get("OSN_AI_MODEL_LOW_COST", "AZURE_GPT_41_MINI"))
+        AI_MODEL_HIGH_QUALITY = os.environ.get("OSN_AZURE_OPENAI_MODEL_HIGH_QUALITY", os.environ.get("OSN_AI_MODEL_HIGH_QUALITY", "AZURE_GPT_41"))
     case AiServiceType.GEMINI:
-        AI_MODEL_LOW_COST = os.environ.get("OSN_GEMINI_MODEL_LOW_COST", os.environ.get("OSN_AI_MODEL_LOW_COST", "gemini-2.0-flash"))
-        AI_MODEL_LOW_COST_IN = float(os.environ.get("OSN_GEMINI_MODEL_LOW_COST_IN", os.environ.get("OSN_AI_MODEL_LOW_COST_IN", "0")))
-        AI_MODEL_LOW_COST_OUT = float(os.environ.get("OSN_GEMINI_MODEL_LOW_COST_OUT", os.environ.get("OSN_AI_MODEL_LOW_COST_OUT", "0")))
-        AI_MODEL_HIGH_QUALITY = os.environ.get("OSN_GEMINI_MODEL_HIGH_QUALITY", os.environ.get("OSN_AI_MODEL_HIGH_QUALITY", "gemini-2.5-flash"))
-        AI_MODEL_HIGH_QUALITY_IN = float(os.environ.get("OSN_GEMINI_MODEL_HIGH_QUALITY_IN", os.environ.get("OSN_AI_MODEL_HIGH_QUALITY_IN", "0")))
-        AI_MODEL_HIGH_QUALITY_OUT = float(os.environ.get("OSN_GEMINI_MODEL_HIGH_QUALITY_OUT", os.environ.get("OSN_AI_MODEL_HIGH_QUALITY_OUT", "0")))
+        AI_MODEL_LOW_COST = os.environ.get("OSN_GEMINI_MODEL_LOW_COST", os.environ.get("OSN_AI_MODEL_LOW_COST", "GEMINI_20_FLASH"))
+        AI_MODEL_HIGH_QUALITY = os.environ.get("OSN_GEMINI_MODEL_HIGH_QUALITY", os.environ.get("OSN_AI_MODEL_HIGH_QUALITY", "GEMINI_25_FLASH"))
     case _:
         raise ValueError(f"Unknown AI service type: {AI_SERVICE_TYPE}")
 
@@ -102,8 +94,6 @@ if AI_SERVICE_TYPE == AiServiceType.GEMINI:
     LOAD_VIDEO_AUDIO_FILES = True
     # 映像ファイルの FPS、FPS=0.5 で 2秒ごとに1フレーム消費、1フレームあたり 258トークン消費
     VIDEO_FPS = 0.5
-    # 外部URLの取得をするか
-    LOAD_URL_CONTEXT = True
 else:
     # 入力する会話コンテキスト（スレッド）の最大トークン数
     MAX_THREAD_TOKENS = 12000
@@ -119,8 +109,9 @@ else:
     LOAD_VIDEO_AUDIO_FILES = False
     # 映像ファイルの FPS、現時点では Gemini のみのサポート
     VIDEO_FPS = 0.5
-    # 外部URLの取得をするか
-    LOAD_URL_CONTEXT = False
+
+# 外部URLの取得をするか
+LOAD_URL_CONTEXT = GEMINI_API_KEY is not None
 
 # 開発モードのデフォルト値（起動時に --production が渡されると上書きされて本番モードになる）
 DEVELOPMENT_MODE = True

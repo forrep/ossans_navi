@@ -19,7 +19,7 @@ class AiTokenize(Protocol):
         ...
 
 
-class AiTokenizeGpt4o:
+class AiTokenizor:
     _LOCK = threading.Lock()
 
     @staticmethod
@@ -31,13 +31,13 @@ class AiTokenizeGpt4o:
 
     @staticmethod
     def content_tokens(content: str) -> int:
-        with AiTokenizeGpt4o._LOCK:
+        with AiTokenizor._LOCK:
             return len(tiktoken.encoding_for_model("gpt-4o").encode(content))
 
     @staticmethod
     def messages_tokens(messages: Iterable[Mapping[str, Any]]) -> int:
         enc = tiktoken.encoding_for_model("gpt-4o")
-        with AiTokenizeGpt4o._LOCK:
+        with AiTokenizor._LOCK:
             summed = 0
             for message in messages:
                 contents = message.get("content")

@@ -32,9 +32,7 @@
             "args": [],
             "env": {
                 "OSN_AI_SERVICE_TYPE": "gemini",
-                "OSN_MODEL_HIGH_QUALITY": "gemini-3-pro-preview",
-                "OSN_MODEL_HIGH_QUALITY_IN": "2.00",
-                "OSN_MODEL_HIGH_QUALITY_OUT": "12.00"
+                "OSN_AI_MODEL_HIGH_QUALITY": "GEMINI_25_PRO",
             }
         },
         {
@@ -46,12 +44,8 @@
             "args": [],
             "env": {
                 "OSN_AI_SERVICE_TYPE": "azure_openai",
-                "OSN_AI_MODEL_LOW_COST": "gpt-4.1-mini",
-                "OSN_AI_MODEL_LOW_COST_IN": "0.40",
-                "OSN_AI_MODEL_LOW_COST_OUT": "1.60",
-                "OSN_AI_MODEL_HIGH_QUALITY": "gpt-4.1",
-                "OSN_AI_MODEL_HIGH_QUALITY_IN": "2.00",
-                "OSN_AI_MODEL_HIGH_QUALITY_OUT": "8.00"
+                "OSN_AI_MODEL_LOW_COST": "AZURE_GPT_41_MINI",
+                "OSN_AI_MODEL_HIGH_QUALITY": "AZURE_GPT_41"
 
             }
         },

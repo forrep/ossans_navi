@@ -60,7 +60,7 @@ class EventGuard:
                 return False
         finally:
             self.event_hashes.append(event_hash)
-            self.event_hashes = self.event_hashes[-20:]
+            self.event_hashes = self.event_hashes[-100:]
 
     def queue(self, event: SlackMessageEvent) -> None:
         thread_key = EventGuard._thread_key(event)

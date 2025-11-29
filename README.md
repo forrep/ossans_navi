@@ -70,16 +70,10 @@ OSN_SLACK_USER_TOKEN=xoxp-...
 # 利用するLLMの種類（gemini, openai, azure_openai） Geminiの例
 OSN_AI_SERVICE_TYPE=gemini
 OSN_GEMINI_API_KEY=AIz...
-# 低コストモデルの名称（デフォルト: gemini-2.0-flash）
-OSN_AI_MODEL_LOW_COST=gemini-2.0-flash
-# 低コストモデルの入出力コスト（1,000,000 tokens あたり） ※省略可 ※任意の通貨単位を設定可
-OSN_AI_MODEL_LOW_COST_IN=0.10
-OSN_AI_MODEL_LOW_COST_OUT=0.40
-# 高クオリティモデルの名称（デフォルト: gemini-2.5-flash）
-OSN_AI_MODEL_HIGH_QUALITY=gemini-2.5-flash
-# 高クオリティモデルの入出力コスト（1,000,000 tokens あたり） ※省略可 ※任意の通貨単位を設定可
-OSN_AI_MODEL_HIGH_QUALITY_IN=0.30
-OSN_AI_MODEL_HIGH_QUALITY_OUT=2.5
+# 低コストモデルの名称（デフォルト: GEMINI_20_FLASH）
+OSN_AI_MODEL_LOW_COST=GEMINI_20_FLASH
+# 高クオリティモデルの名称（デフォルト: GEMINI_25_FLASH）
+OSN_AI_MODEL_HIGH_QUALITY=GEMINI_25_FLASH
 
 # -- アプリの設定 --
 # Slack ワークスペースの名称、典型的には社名等を指定、システムプロンプトで入力されて OssansNavi が自身の稼働する環境を認識するために利用
@@ -101,12 +95,8 @@ OSN_LOG_LEVEL=INFO
 # -- OpenAI の設定 --
 OSN_AI_SERVICE_TYPE=openai
 OSN_OPENAI_API_KEY=684...
-# OSN_AI_MODEL_LOW_COST=gpt-4o-mini
-# OSN_AI_MODEL_LOW_COST_IN=0.15
-# OSN_AI_MODEL_LOW_COST_OUT=0.60
-# OSN_AI_MODEL_HIGH_QUALITY=gpt-4o
-# OSN_AI_MODEL_HIGH_QUALITY_IN=2.50
-# OSN_AI_MODEL_HIGH_QUALITY_OUT=10.0
+# OSN_AI_MODEL_LOW_COST=GPT_41_MINI
+# OSN_AI_MODEL_HIGH_QUALITY=GPT_41
 ```
 
 #### Azure OpenAI 設定例
@@ -116,12 +106,8 @@ OSN_AI_SERVICE_TYPE=azure_openai
 OSN_AZURE_OPENAI_API_KEY=684...
 # Azure OpenAI EndPoint ドメイン
 OSN_AZURE_OPENAI_ENDPOINT=https://*.openai.azure.com/
-# OSN_AI_MODEL_LOW_COST=gpt-4o-mini
-# OSN_AI_MODEL_LOW_COST_IN=0.15
-# OSN_AI_MODEL_LOW_COST_OUT=0.60
-# OSN_AI_MODEL_HIGH_QUALITY=gpt-4o
-# OSN_AI_MODEL_HIGH_QUALITY_IN=2.50
-# OSN_AI_MODEL_HIGH_QUALITY_OUT=10.0
+# OSN_AI_MODEL_LOW_COST=AZURE_GPT_41_MINI
+# OSN_AI_MODEL_HIGH_QUALITY=AZURE_GPT_41
 ```
 
 ### 4. バックエンドアプリの起動

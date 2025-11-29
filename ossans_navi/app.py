@@ -12,7 +12,7 @@ from slack_sdk import WebClient
 from ossans_navi import config
 from ossans_navi.common import async_utils
 from ossans_navi.controller import config_controller
-from ossans_navi.service.ai_service import AiModels, AiService
+from ossans_navi.service.ai_service import AiModelsUsage, AiService
 from ossans_navi.service.ossans_navi_service import OssansNaviService
 from ossans_navi.service.slack_service import EventGuard, SlackService
 from ossans_navi.type.slack_type import SlackMessageEvent
@@ -21,7 +21,6 @@ EVENT_GUARD = EventGuard()
 SEMAPHORE = asyncio.Semaphore(2)
 
 slack_service = SlackService()
-ai_service = AiService()
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +92,6 @@ async def do_ossans_navi_response_safe(event: SlackMessageEvent) -> None:
     EVENT_GUARD.start(event)
     # ここまで他の非同期処理を挟まないようにする
 
-    models = AiModels.new()
     try:
         # event の構築作業
         event.canceled_events.extend(EVENT_GUARD.get_canceled_events(event))
@@ -114,13 +112,11 @@ async def do_ossans_navi_response_safe(event: SlackMessageEvent) -> None:
         )
 
         ossans_navi_service = await OssansNaviService.create(
-            ai_service=ai_service,
             slack_service=slack_service,
-            models=models,
             event=event,
         )
 
-        async for _ in do_ossans_navi_response(ossans_navi_service, event, models):
+        async for _ in do_ossans_navi_response(ossans_navi_service, event):
             # yield のタイミングで処理が戻されるごとにイベントがキャンセルされていないか確認して、キャンセルされていれば終了する
             if EVENT_GUARD.is_canceled(event):
                 logger.info(f"Event canceled: {event.id()}({event.id_source})")
@@ -141,17 +137,17 @@ async def do_ossans_navi_response_safe(event: SlackMessageEvent) -> None:
             except Exception as e:
                 logger.error(e, exc_info=True)
     finally:
-        logger.info(f"Usage Report (Total Cost: {models.get_total_cost():.4f})")
-        for model in models.models():
-            logger.info(f"  {model.name} (Cost: {model.get_total_cost():.4f})")
-            logger.info(f"    tokens_in  = {model.tokens_in}")
-            logger.info(f"    tokens_out = {model.tokens_out}")
+        if ossans_navi_service:
+            logger.info(f"Usage Report (Total Cost: {ossans_navi_service.ai_service.models_usage.get_total_cost():.4f})")
+            for model in [v for v in ossans_navi_service.ai_service.models_usage.models if v.get_total_cost() > 0.0]:
+                logger.info(f"  {model.model_name} (Cost: {model.get_total_cost():.4f})")
+                logger.info(f"    tokens_in  = {model.tokens_in}")
+                logger.info(f"    tokens_out = {model.tokens_out}")
 
 
 async def do_ossans_navi_response(
     ossans_navi_service: OssansNaviService,
     event: SlackMessageEvent,
-    models: AiModels,
 ) -> AsyncGenerator[None, None]:
     if event.is_dm() and await ossans_navi_service.special_command():
         # DM の場合は special_command() を実行、そして True が返ってきたら special_command を実行しているので通常のメッセージ処理は終了する
@@ -388,7 +384,7 @@ async def do_ossans_navi_response(
                 await slack_service.chat_post_message(
                     config.RESPONSE_LOGGING_CHANNEL,
                     json.dumps({
-                        "cost": models.get_total_cost(),
+                        "cost": ossans_navi_service.ai_service.models_usage.get_total_cost(),
                         "channel": event.channel_id,
                         "thread_ts": event.thread_ts,
                     }, ensure_ascii=False)
@@ -414,8 +410,13 @@ async def main():
         f"Strat in {"development" if config.DEVELOPMENT_MODE else "production"},"
         + f" {"silent" if config.SILENT_MODE else "no-silent"}, {"safe" if config.SAFE_MODE else "unsafe"} mode"
     )
+
+    # AiModelsUsage.new() することで環境変数に設定したモデル名が正しいことを検証する
+    _ = AiModelsUsage.new()
+
+    # 非同期実行が必要な初期化処理を実行
     await asyncio.gather(
-        ai_service.start(),
+        AiService.start(),
         slack_service.start(),
     )
 
