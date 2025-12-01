@@ -6,7 +6,7 @@ import json
 import logging
 import time
 from collections import defaultdict
-from enum import Enum
+from enum import Enum, auto
 from io import BytesIO
 from operator import itemgetter
 from typing import Any, Iterable, Optional, overload
@@ -20,10 +20,15 @@ from openai.types.chat import (ChatCompletion, ChatCompletionContentPartParam, C
 from ossans_navi import config
 from ossans_navi.common import async_utils
 from ossans_navi.common.logger import shrink_message
-from ossans_navi.config import AiServiceType
 from ossans_navi.type import ossans_navi_types
 
 logger = logging.getLogger(__name__)
+
+
+class AiServiceType(Enum):
+    OPENAI = auto()
+    AZURE_OPENAI = auto()
+    GEMINI = auto()
 
 
 class AiModelInfo(Enum):
@@ -270,42 +275,42 @@ class AiPromptMessage:
             # AiPromptRole.ASSISTANT ではない場合のみ画像・映像・音声を読み込む
             # モデルが画像生成機能を持たない現時点では、AiPromptRole.ASSISTANT に画像データが付随するケースは電文を偽造しない限りない
             # そのため現時点では画像を送信しても処理対象にならない、そのため送らない
-            parts.extend(
-                [
-                    {
-                        "file_data": {
-                            "mime_type": image.file.mime_type,
-                            "file_uri": image.file.uri,
+            for image in self.content.images:
+                if image.file is not None:
+                    parts.append({"text": f"Attachment(below): {image.title}"})
+                    parts.append(
+                        {
+                            "file_data": {
+                                "mime_type": image.file.mime_type,
+                                "file_uri": image.file.uri,
+                            }
                         }
-                    }
-                    for image in self.content.images if image.file is not None
-                ]
-            )
-            parts.extend(
-                [
-                    {
-                        "file_data": {
-                            "mime_type": video.file.mime_type,
-                            "file_uri": video.file.uri,
-                        },
-                        "video_metadata": {
-                            "fps": config.VIDEO_FPS,
+                    )
+            for video in self.content.videos:
+                if video.file is not None:
+                    parts.append({"text": f"Attachment(below): {video.title}"})
+                    parts.append(
+                        {
+                            "file_data": {
+                                "mime_type": video.file.mime_type,
+                                "file_uri": video.file.uri,
+                            },
+                            "video_metadata": {
+                                "fps": config.VIDEO_FPS,
+                            }
                         }
-                    }
-                    for video in self.content.videos if video.file is not None
-                ]
-            )
-            parts.extend(
-                [
-                    {
-                        "file_data": {
-                            "mime_type": audio.file.mime_type,
-                            "file_uri": audio.file.uri,
-                        },
-                    }
-                    for audio in self.content.audios if audio.file is not None
-                ]
-            )
+                    )
+            for audio in self.content.audios:
+                if audio.file is not None:
+                    parts.append({"text": f"Attachment(below): {audio.title}"})
+                    parts.append(
+                        {
+                            "file_data": {
+                                "mime_type": audio.file.mime_type,
+                                "file_uri": audio.file.uri,
+                            },
+                        }
+                    )
         contents.append({
             "role": "model" if self.role == AiPromptRole.ASSISTANT else self.role.value,
             "parts": parts,
@@ -649,7 +654,7 @@ class AiService:
 
     @classmethod
     async def start(cls) -> None:
-        match config.AI_SERVICE_TYPE:
+        match AiServiceType[config.AI_SERVICE_TYPE_NAME]:
             case AiServiceType.OPENAI:
                 if not config.OPENAI_API_KEY:
                     raise ValueError("OSN_OPENAI_API_KEY is required when using OpenAI service.")

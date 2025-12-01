@@ -1,23 +1,18 @@
 import os
-from enum import Enum
 
 # HTTPプロキシ設定
 if "OSN_HTTPS_PROXY" in os.environ:
     os.environ["HTTPS_PROXY"] = os.environ["OSN_HTTPS_PROXY"]
-
-
-class AiServiceType(Enum):
-    OPENAI = "openai"
-    AZURE_OPENAI = "azure_openai"
-    GEMINI = "gemini"
-
 
 # 必須設定項目が設定されているかのチェックと取得
 SLACK_APP_TOKEN = os.environ["OSN_SLACK_APP_TOKEN"]
 SLACK_BOT_TOKEN = os.environ["OSN_SLACK_BOT_TOKEN"]
 SLACK_USER_TOKEN = os.environ["OSN_SLACK_USER_TOKEN"]
 
-AI_SERVICE_TYPE = AiServiceType(os.environ.get("OSN_AI_SERVICE_TYPE", "gemini"))
+if isinstance((v := os.environ.get("OSN_AI_SERVICE_TYPE")), str):
+    AI_SERVICE_TYPE_NAME = v.upper()
+else:
+    AI_SERVICE_TYPE_NAME = "GEMINI"
 OPENAI_API_KEY = os.environ.get("OSN_OPENAI_API_KEY")
 AZURE_OPENAI_API_KEY = os.environ.get("OSN_AZURE_OPENAI_API_KEY")
 AZURE_OPENAI_ENDPOINT = os.environ.get("OSN_AZURE_OPENAI_ENDPOINT")
@@ -36,18 +31,18 @@ AI_MODEL_HIGH_QUALITY = None
 #   - GPT_41_MINI
 #   - AZURE_GPT_41
 #   - AZURE_GPT_41_MINI
-match AI_SERVICE_TYPE:
-    case AiServiceType.OPENAI:
-        AI_MODEL_LOW_COST = os.environ.get("OSN_OPENAI_MODEL_LOW_COST", os.environ.get("OSN_AI_MODEL_LOW_COST", "GPT_41_MINI"))
-        AI_MODEL_HIGH_QUALITY = os.environ.get("OSN_OPENAI_MODEL_HIGH_QUALITY", os.environ.get("OSN_AI_MODEL_HIGH_QUALITY", "GPT_41"))
-    case AiServiceType.AZURE_OPENAI:
-        AI_MODEL_LOW_COST = os.environ.get("OSN_AZURE_OPENAI_MODEL_LOW_COST", os.environ.get("OSN_AI_MODEL_LOW_COST", "AZURE_GPT_41_MINI"))
-        AI_MODEL_HIGH_QUALITY = os.environ.get("OSN_AZURE_OPENAI_MODEL_HIGH_QUALITY", os.environ.get("OSN_AI_MODEL_HIGH_QUALITY", "AZURE_GPT_41"))
-    case AiServiceType.GEMINI:
-        AI_MODEL_LOW_COST = os.environ.get("OSN_GEMINI_MODEL_LOW_COST", os.environ.get("OSN_AI_MODEL_LOW_COST", "GEMINI_20_FLASH"))
-        AI_MODEL_HIGH_QUALITY = os.environ.get("OSN_GEMINI_MODEL_HIGH_QUALITY", os.environ.get("OSN_AI_MODEL_HIGH_QUALITY", "GEMINI_25_FLASH"))
+match AI_SERVICE_TYPE_NAME:
+    case "OPENAI":
+        AI_MODEL_LOW_COST = os.environ.get("OSN_AI_MODEL_LOW_COST", "GPT_41_MINI")
+        AI_MODEL_HIGH_QUALITY = os.environ.get("OSN_AI_MODEL_HIGH_QUALITY", "GPT_41")
+    case "AZURE_OPENAI":
+        AI_MODEL_LOW_COST = os.environ.get("OSN_AI_MODEL_LOW_COST", "AZURE_GPT_41_MINI")
+        AI_MODEL_HIGH_QUALITY = os.environ.get("OSN_AI_MODEL_HIGH_QUALITY", "AZURE_GPT_41")
+    case "GEMINI":
+        AI_MODEL_LOW_COST = os.environ.get("OSN_AI_MODEL_LOW_COST", "GEMINI_20_FLASH")
+        AI_MODEL_HIGH_QUALITY = os.environ.get("OSN_AI_MODEL_HIGH_QUALITY", "GEMINI_25_FLASH")
     case _:
-        raise ValueError(f"Unknown AI service type: {AI_SERVICE_TYPE}")
+        raise ValueError(f"Unknown AI service type: {AI_SERVICE_TYPE_NAME}")
 
 WORKSPACE_NAME = v if (v := os.environ.get("OSN_WORKSPACE_NAME")) else "company"
 ASSISTANT_NAMES = v.split(r',') if (v := os.environ.get("OSN_ASSISTANT_NAMES")) else ["assistant"]
@@ -74,7 +69,7 @@ REFINE_SLACK_SEARCHES_DEPTH_NO_MENTION = 2
 
 MAX_OUTPUT_TOKENS = 12288
 
-if AI_SERVICE_TYPE == AiServiceType.GEMINI:
+if AI_SERVICE_TYPE_NAME == "GEMINI":
     # Gemini の場合は API利用料金が安いのとコンテキストサイズが大きいので入力トークン数を増量
     # 入力する会話コンテキスト（スレッド）の最大トークン数
     MAX_THREAD_TOKENS = 36000
