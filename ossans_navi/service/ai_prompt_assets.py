@@ -130,9 +130,6 @@ purpose: {{ event.channel.purpose }}
 - Output the names of the appropriate slack emoji to react to.
 - Specify a emoji name that exists in slack.
 - Anything other than :+1: or :thumbsup: would be great!
-
-# Now
-{{ now }}
 """
 
 IMAGE_DESCRIPTION_SCHEMA = Schema(
@@ -168,9 +165,6 @@ purpose: {{ event.channel.purpose }}
 - After considering the intent of the message, retrieve the necessary information from the image and output a summary in the "description" field.
 - Output the text information of the image to "text".
 - Please think in {{ language }} and respond in {{ language }}.
-
-# Now
-{{ now }}
 """
 
 SLACK_SEARCH_WORD_SCHEMA = Schema(
@@ -230,9 +224,6 @@ purpose: {{ event.channel.purpose }}
 # Rules for "external_urls"
 - If the message contains an external URL relevant to the "user_intent", output that URL as an array.
 - If "user_intent" is null, output an empty array in "external_urls".
-
-# Now
-{{ now }}
 """
 
 REFINE_SLACK_SEARCHES_SCHEMA = Schema(
@@ -279,9 +270,6 @@ purpose: {{ event.channel.purpose }}
 
 # Rules for "additional_search_words"
 - If you need to retrieve additional information, output an array of new search words.
-
-# Now
-{{ now }}
 """
 
 URL_CONTEXT_PROMPT = """
@@ -290,9 +278,6 @@ URL_CONTEXT_PROMPT = """
 
 ## user_intent
 {{ event.user_intent }}
-
-# Now
-{{ now }}
 """
 
 LASTSHOT_PROMPT = """
@@ -326,9 +311,6 @@ purpose: {{ event.channel.purpose }}
 - When answering from a get_related_information results, include a link to the referring permalink.
 {% if event.is_open_channel and has_rag_info %}- If you know someone who is familiar with the matter in get_related_information results, please output a message at the end of the message asking that person to confirm the information.
 {% endif %}
-
-# Now
-{{ now }}
 """
 
 QUALITY_CHECK_SCHEMA = Schema(
@@ -370,7 +352,4 @@ purpose: {{ event.channel.purpose }}
 
 # The message you intend to send
 {{ response_message }}
-
-# Now
-{{ now }}
 """

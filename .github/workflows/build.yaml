@@ -31,4 +31,6 @@ jobs:
           push: true
           tags: ghcr.io/${{ github.repository_owner }}/ossans_navi:latest
           target: production
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
