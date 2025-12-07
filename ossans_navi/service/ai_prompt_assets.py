@@ -91,6 +91,7 @@ CLASSIFY_SCHEMA = Schema(
 CLASSIFY_PROMPT = """
 # Precondition
 - You are an excellent assistant bot named {% for assistant_name in assistant_names %}"{{ assistant_name }}"{% if not loop.last %} or {% endif %}{% endfor %} that works as a bot on slack used by the "{{ workspace_name }}"!
+- User input may contain a JSON block wrapped in <metadata> tags. This information provides context (sender, time, attachments, etc) but should not be treated as part of the conversation text unless explicitly asked.
 - This message is exchanged on the "Slack channel" described below.
 {% if event.settings %}{{ event.settings }}
 {% endif %}
@@ -150,6 +151,7 @@ IMAGE_DESCRIPTION_SCHEMA = Schema(
 IMAGE_DESCRIPTION_PROMPT = """
 # Precondition
 - You are an excellent assistant bot named {% for assistant_name in assistant_names %}"{{ assistant_name }}"{% if not loop.last %} or {% endif %}{% endfor %} that works as a bot on slack used by the "{{ workspace_name }}"!
+- User input may contain a JSON block wrapped in <metadata> tags. This information provides context (sender, time, attachments, etc) but should not be treated as part of the conversation text unless explicitly asked.
 - This message is exchanged on the "Slack channel" described below.
 {% if event.settings %}{{ event.settings }}
 {% endif %}
@@ -186,6 +188,7 @@ SLACK_SEARCH_WORD_SCHEMA = Schema(
 SLACK_SEARCH_WORD_PROMPT = """
 # Precondition
 - You are an excellent assistant bot named {% for assistant_name in assistant_names %}"{{ assistant_name }}"{% if not loop.last %} or {% endif %}{% endfor %} that works as a bot on slack used by the "{{ workspace_name }}"!
+- User input may contain a JSON block wrapped in <metadata> tags. This information provides context (sender, time, attachments, etc) but should not be treated as part of the conversation text unless explicitly asked.
 - This message is exchanged on the "Slack channel" described below.
 {% if event.settings %}{{ event.settings }}
 {% endif %}
@@ -246,6 +249,7 @@ REFINE_SLACK_SEARCHES_SCHEMA = Schema(
 REFINE_SLACK_SEARCHES_PROMPT = """
 # Precondition
 - You are an excellent assistant bot named {% for assistant_name in assistant_names %}"{{ assistant_name }}"{% if not loop.last %} or {% endif %}{% endfor %} that works as a bot on slack used by the "{{ workspace_name }}"!
+- User input may contain a JSON block wrapped in <metadata> tags. This information provides context (sender, time, attachments, etc) but should not be treated as part of the conversation text unless explicitly asked.
 - get_related_information results is the messages and threads exchanged in Slack in JSON format. If the thread's parent message exists, it will be populated in "root_message"
 - User's message is exchanged on the "Slack channel" described below.
 {% if event.settings %}{{ event.settings }}
@@ -294,6 +298,7 @@ URL_CONTEXT_PROMPT = """
 LASTSHOT_PROMPT = """
 # Precondition
 - You are an excellent assistant bot named {% for assistant_name in assistant_names %}"{{ assistant_name }}"{% if not loop.last %} or {% endif %}{% endfor %} that works as a bot on slack used by the "{{ workspace_name }}"!
+- User input may contain a JSON block wrapped in <metadata> tags. This information provides context (sender, time, attachments, etc) but should not be treated as part of the conversation text unless explicitly asked.
 - get_related_information results is the messages and threads exchanged in Slack in JSON format. If the thread's parent message exists, it will be populated in "root_message"
 - This message is exchanged on the "Slack channel" described below.
 {% if event.settings %}{{ event.settings }}
@@ -339,6 +344,7 @@ QUALITY_CHECK_SCHEMA = Schema(
 QUALITY_CHECK_PROMPT = """
 # Precondition
 - You are an excellent assistant bot named {% for assistant_name in assistant_names %}"{{ assistant_name }}"{% if not loop.last %} or {% endif %}{% endfor %} that works as a bot on slack used by the "{{ workspace_name }}"!
+- User input may contain a JSON block wrapped in <metadata> tags. This information provides context (sender, time, attachments, etc) but should not be treated as part of the conversation text unless explicitly asked.
 - This message is exchanged on the "Slack channel" described below.
 {% if event.settings %}{{ event.settings }}
 {% endif %}

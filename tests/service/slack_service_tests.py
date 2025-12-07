@@ -53,6 +53,9 @@ def test_convert_markdown_to_mrkdwn_title():
     |TestA-1|TestB-1|TestC-1|TestD-1|TestE-1|
     |TestA-2|`TestB`-2| **TestC**-2| TestD-2 |TestE-2|
     |TestA-3|TestB-3|TestC-3| |TestE-3|
+
+    |A|B|C|D|E|
+    |-|-|-|-|-|
     """, 4).strip()
     assert SlackService.convert_markdown_to_mrkdwn(markdown_text) == dedent("""
     • list1
@@ -74,25 +77,31 @@ def test_convert_markdown_to_mrkdwn_title():
     some text `strong text` normal text
     link to <https://example.com/|example.com> here
     ┏ A
+    ┃ ┣ B
+    ┃ ┣ C
+    ┃ ┣ D
+    ┃ ┗ E
+    ┣ TestA-1
+    ┃ ┣ TestB-1
+    ┃ ┣ TestC-1
+    ┃ ┣ TestD-1
+    ┃ ┗ TestE-1
+    ┣ TestA-2
+    ┃ ┣ `TestB` -2
+    ┃ ┣ *TestC* -2
+    ┃ ┣ TestD-2
+    ┃ ┗ TestE-2
+    ┗ TestA-3
+    　 ┣ TestB-3
+    　 ┣ TestC-3
+    　 ┣ ━
+    　 ┗ TestE-3
+
+    ┏ A
     ┣ B
     ┣ C
     ┣ D
     ┗ E
-    ┏ TestA-1
-    ┣ TestB-1
-    ┣ TestC-1
-    ┣ TestD-1
-    ┗ TestE-1
-    ┏ TestA-2
-    ┣ `TestB` -2
-    ┣ *TestC* -2
-    ┣ TestD-2
-    ┗ TestE-2
-    ┏ TestA-3
-    ┣ TestB-3
-    ┣ TestC-3
-    ┣ ━
-    ┗ TestE-3
     """, 4).strip()
 
 

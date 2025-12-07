@@ -613,24 +613,38 @@ class SlackService:
                 if (table_line := next_line(False)) is not None and re.match(r'^\s*\|(\s*:?-+:?\s*\|){' + str(columns) + r'}\s*$', table_line):
                     # この時点でテーブルと確定、| A | B | のような行が続く限りテーブルとして扱う（カラム数が矛盾すると終了）
                     _ = next_line()
+
+                    def detect_next_line(table_line: Optional[str]) -> bool:
+                        return table_line is not None and re.match(r'^\s*\|([^|]+\|){' + str(columns) + r'}\s*$', table_line) is not None
+                    has_next_table_line = detect_next_line(next_line(False))
                     mrkdwn_lines.extend(
                         [
                             (
-                                ("┏ " if i == 0 else ("┗ " if i == columns - 1 else "┣ "))
+                                (
+                                    "┏ " if i == 0 else (
+                                        ("┃ " if has_next_table_line else "")
+                                        + ("┗ " if i == columns - 1 else "┣ ")
+                                    ))
                                 + (v2 if len(v2 := text_markdown_to_mrkdwn(v).strip()) > 0 else "━")
                             )
                             for (i, v) in enumerate(line.split("|")[1:][:-1])
                         ]
                     )
                     line = None
-                    while (table_line := next_line(False)) is not None:
-                        if not re.match(r'^\s*\|([^|]+\|){' + str(columns) + r'}\s*$', table_line):
-                            break
+                    while (table_line := next_line(False)) is not None and has_next_table_line:
                         _ = next_line()
+                        has_next_table_line = detect_next_line(next_line(False))
                         mrkdwn_lines.extend(
                             [
                                 (
-                                    ("┏ " if i == 0 else ("┗ " if i == columns - 1 else "┣ "))
+                                    (
+                                        (
+                                            ("┣ " if has_next_table_line else "┗ ")
+                                        ) if i == 0 else (
+                                            ("┃ " if has_next_table_line else "　 ")
+                                            + ("┗ " if i == columns - 1 else "┣ ")
+                                        )
+                                    )
                                     + (v2 if len(v2 := text_markdown_to_mrkdwn(v).strip()) > 0 else "━")
                                 )
                                 for (i, v) in enumerate(table_line.split("|")[1:][:-1])

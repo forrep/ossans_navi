@@ -2,7 +2,6 @@ import asyncio
 import functools
 import logging
 import os
-import time
 from io import IOBase
 from typing import Any, Awaitable, Callable, Dict, List, Optional, ParamSpec, Sequence, TypeVar, Union
 
@@ -58,8 +57,8 @@ def api_wrapper(
                         if error_response.get("ok") or error_response.get("error") != "ratelimited":
                             # ok: true だったり、error: ratelimited ではない場合は例外をそのまま投げる
                             raise e
-                        logger.warn(e)
-                        time.sleep(20)
+                        logger.warning(e)
+                        await asyncio.sleep(20)
             if response is None:
                 raise RuntimeError('Response is None.')
             return response

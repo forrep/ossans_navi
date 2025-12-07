@@ -753,12 +753,12 @@ class OssansNaviService:
             self.ai_service.models_usage.low_cost,
             refine_slack_searches_prompt
         )
-        logger.info(f"[{depth}][{node}] {refine_slack_searches_responses=}")
+        logger.info(f"[{depth}][{node}] _refine_slack_searches: response={refine_slack_searches_responses}")
 
         if len(refine_slack_searches_responses) == 0:
             # 返答が空のケース、普通はないはずだけど AI はどうしても誤動作する可能性があるので、稀にこのパターンも発生する
             # その回の検索結果は諦めて次にトライ、精度は下がるけど仕方なし
-            logger.error(f"[{depth}][{node}] refine_slack_searches_responses is emtpy, continue.")
+            logger.error(f"[{depth}][{node}] _refine_slack_searches: responses is emtpy, continue.")
             return
 
         # response を slack_searches へ反映する処理開始

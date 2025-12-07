@@ -14,8 +14,8 @@ from typing import Any, Iterable, Optional, overload
 from google import genai
 from google.genai import types
 from openai import AsyncAzureOpenAI, AsyncOpenAI, InternalServerError, RateLimitError
-from openai.types.chat import (ChatCompletion, ChatCompletionContentPartParam, ChatCompletionMessageParam, ChatCompletionMessageToolCallParam,
-                               ChatCompletionToolParam, completion_create_params)
+from openai.types.chat import (ChatCompletion, ChatCompletionContentPartParam, ChatCompletionMessageParam, ChatCompletionToolParam,
+                               completion_create_params)
 
 from ossans_navi import config
 from ossans_navi.common import async_utils
@@ -183,14 +183,23 @@ class AiPromptMessage:
                 "content": self.content.text,
             }
         elif self.role == AiPromptRole.USER:
-            # USERロールの場合のみ画像を入力する
+            # USERロールの場合のみ画像や<metadata>を入力する
             # OpenAI は ASSISTANTロールでの画像を入力に未対応、誤って入力するとエラーとなる
             # ASSISTANT の応答文に画像リンクが含まれると Slack 上ではメッセージに画像が添付される、よって ASSISTANTロールのメッセージにも画像が付くケースはある
             message_contents: list[ChatCompletionContentPartParam] = []
             message_contents.append(
                 {
                     "type": "text",
-                    "text": self.content.text,
+                    "text": (
+                        self.content.text
+                        + (
+                            (
+                                "\n\n<metadata>"
+                                + json.dumps(self.content.detail, ensure_ascii=False, separators=(',', ':'))
+                                + "\n</metadata>"
+                            ) if self.content.is_dict else ""
+                        )
+                    ),
                 }
             )
             for image in self.content.images:
@@ -212,46 +221,23 @@ class AiPromptMessage:
             message["name"] = self.name
         messages.append(message)
 
-        if self.content.is_dict or rag_info:
-            tool_calls: list[ChatCompletionMessageToolCallParam] = []
-            if self.content.is_dict:
-                tool_calls.append(
-                    {
-                        "id": f"call_{function_id.call_id}",
-                        "type": "function",
-                        "function": {
-                            "name": "get_previous_message_detail",
-                            "arguments": "",
-                        },
-                    }
-                )
-            if rag_info:
-                tool_calls.append(
-                    {
-                        "id": f"call_{function_id.call_id}",
-                        "type": "function",
-                        "function": {
-                            "name": "get_related_information",
-                            "arguments": json.dumps(rag_info.words, ensure_ascii=False),
-                        },
-                    }
-                )
+        if rag_info:
             messages.append(
                 {
                     "role": AiPromptRole.ASSISTANT.value,
                     "content": None,
-                    "tool_calls": tool_calls,
+                    "tool_calls": [
+                        {
+                            "id": f"call_{function_id.call_id}",
+                            "type": "function",
+                            "function": {
+                                "name": "get_related_information",
+                                "arguments": json.dumps(rag_info.words, ensure_ascii=False),
+                            },
+                        }
+                    ],
                 }
             )
-        if self.content.is_dict:
-            messages.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": f"call_{function_id.response_id}",
-                    "content": json.dumps(self.content.detail, ensure_ascii=False, separators=(',', ':')),
-                },
-            )
-        if rag_info:
             messages.append(
                 {
                     "tool_call_id": f"call_{function_id.response_id}",
@@ -270,7 +256,21 @@ class AiPromptMessage:
     def to_gemini_content(self, rag_info: Optional[AiPromptRagInfo] = None) -> list[types.ContentDict]:
         contents: list[types.ContentDict] = []
         parts: list[types.PartDict] = []
-        parts.append({"text": self.content.text})
+        parts.append(
+            {
+                "text": (
+                    self.content.text
+                    + (
+                        # AiPromptRole.USER の場合のみ <metadata> を入力する
+                        (
+                            "\n\n<metadata>\n"
+                            + json.dumps(self.content.detail, ensure_ascii=False, separators=(',', ':'))
+                            + "\n</metadata>"
+                        ) if self.content.is_dict and self.role == AiPromptRole.USER else ""
+                    )
+                )
+            }
+        )
         if self.role != AiPromptRole.ASSISTANT:
             # AiPromptRole.ASSISTANT ではない場合のみ画像・映像・音声を読み込む
             # モデルが画像生成機能を持たない現時点では、AiPromptRole.ASSISTANT に画像データが付随するケースは電文を偽造しない限りない
@@ -316,71 +316,47 @@ class AiPromptMessage:
             "parts": parts,
         })
 
-        if self.content.is_dict or rag_info:
-            parts = []
-            if self.content.is_dict:
-                parts.append(
-                    {
-                        "function_call": {
-                            "name": "get_previous_message_detail",
-                            "args": {},
-                        }
-                    }
-                )
-            if rag_info:
-                parts.append(
-                    {
-                        "function_call": {
-                            "name": "get_related_information",
-                            "args": {
-                                "terms": rag_info.words
-                            },
-                        }
-                    }
-                )
+        if rag_info:
             contents.append(
                 {
                     "role": "model",
-                    "parts": parts,
-                }
-            )
-            parts = []
-            if self.content.is_dict:
-                parts.append(
-                    {
-                        "function_response": {
-                            "name": "get_previous_message_detail",
-                            "response": self.content.detail,
-                        }
-                    }
-                )
-            if rag_info:
-                parts.append(
-                    {
-                        "function_response": {
-                            "name": "get_related_information",
-                            "response": {
-                                **(
-                                    {
-                                        "status": (
-                                            "No related information was found in the get_related_information results, "
-                                            + "please respond in general terms."
-                                        )
-                                    } if len(rag_info.contents) == 0 else {}
-                                ),
-                                **(
-                                    {
-                                        "contents": rag_info.contents,
-                                    } if len(rag_info.contents) > 0 else {}
-                                ),
+                    "parts": [
+                        {
+                            "function_call": {
+                                "name": "get_related_information",
+                                "args": {
+                                    "terms": rag_info.words
+                                },
                             }
                         }
-                    }
-                )
+                    ],
+                }
+            )
             contents.append(
                 {
                     "role": "user",
-                    "parts": parts,
+                    "parts": [
+                        {
+                            "function_response": {
+                                "name": "get_related_information",
+                                "response": {
+                                    **(
+                                        {
+                                            "status": (
+                                                "No related information was found in the get_related_information results, "
+                                                + "please respond in general terms."
+                                            )
+                                        } if len(rag_info.contents) == 0 else {}
+                                    ),
+                                    **(
+                                        {
+                                            "contents": rag_info.contents,
+                                        } if len(rag_info.contents) > 0 else {}
+                                    ),
+                                }
+                            }
+                        }
+                    ],
                 }
             )
 
@@ -463,13 +439,6 @@ class AiPrompt:
             {
                 "type": "function",
                 "function": {
-                    "name": "get_previous_message_detail",
-                    "description": "Get detailed information about the message.",
-                },
-            },
-            {
-                "type": "function",
-                "function": {
                     "name": "get_related_information",
                     "description": "Get Related information found in this slack group.",
                     "parameters": {
@@ -500,10 +469,6 @@ class AiPrompt:
                     [
                         {
                             "function_declarations": [
-                                {
-                                    "name": "get_previous_message_detail",
-                                    "description": "Get detailed information about the message.",
-                                },
                                 {
                                     "name": "get_related_information",
                                     "description": "Get Related information found in this slack group.",
