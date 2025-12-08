@@ -59,7 +59,7 @@ https://api.slack.com/apps で先ほど追加したアプリを選択して設�
 バックエンドアプリの設定を記述した `.env` ファイルを用意します。
 
 以下の内容を `.env` という名前で保存してください。`OSN_SLACK_APP_TOKEN` `OSN_SLACK_BOT_TOKEN` `OSN_SLACK_USER_TOKEN` には、前の手順で発行したトークンをそれぞれ設定します。
-LLM には Gemini, OpenAI, Azure OpenAI を利用可能で、以下は Gemini を利用する例です。
+LLM には Gemini, OpenAI, Azure OpenAI を利用可能です。
 
 ```properties
 # Slack トークン
@@ -67,14 +67,34 @@ OSN_SLACK_APP_TOKEN=xapp-...
 OSN_SLACK_BOT_TOKEN=xoxb-...
 OSN_SLACK_USER_TOKEN=xoxp-...
 
-# 利用するLLMの種類（gemini, openai, azure_openai） Geminiの例
-OSN_AI_SERVICE_TYPE=gemini
+# Gemini API キー（Gemini を利用する場合は設定する）
 OSN_GEMINI_API_KEY=AIz...
-# 低コストモデルの名称（デフォルト: GEMINI_20_FLASH）
-OSN_AI_MODEL_LOW_COST=GEMINI_20_FLASH
-# 高クオリティモデルの名称（デフォルト: GEMINI_25_FLASH）
-OSN_AI_MODEL_HIGH_QUALITY=GEMINI_25_FLASH
+# OpenAI API キー（OpenAI を利用する場合は設定する）
+OSN_OPENAI_API_KEY=684...
+# Azure OpenAI API キー及びエンドポイントのドメイン（Azure OpenAI を利用する場合は設定する）
+OSN_AZURE_OPENAI_API_KEY=684...
+OSN_AZURE_OPENAI_ENDPOINT=https://*.openai.azure.com/
+```
 
+OSN_AI_MODEL_LOW_COST/OSN_AI_MODEL_HIGH_QUALITY で利用する LLM モデルを設定します。以下が許容される設定値です。
+
+- GEMINI_20_FLASH （デフォルトの低コストモデル）
+- GEMINI_25_FLASH （デフォルトの高クオリティモデル）
+- GEMINI_25_FLASH_LITE
+- GEMINI_25_PRO
+- GPT_41
+- GPT_41_MINI
+- AZURE_GPT_41 （デプロイ名は gpt-4.1 固定）
+- AZURE_GPT_41_MINI （デプロイ名は gpt-4.1-mini 固定）
+
+```properties
+# 低コストモデル（デフォルト: GEMINI_20_FLASH）
+OSN_AI_MODEL_LOW_COST=GEMINI_20_FLASH
+# 高クオリティモデル（デフォルト: GEMINI_25_FLASH）
+OSN_AI_MODEL_HIGH_QUALITY=GEMINI_25_FLASH
+```
+
+```properties
 # -- アプリの設定 --
 # Slack ワークスペースの名称、典型的には社名等を指定、システムプロンプトで入力されて OssansNavi が自身の稼働する環境を認識するために利用
 OSN_WORKSPACE_NAME=ABC株式会社
@@ -88,26 +108,6 @@ OSN_LOG_LEVEL=INFO
 # OSN_RESPONSE_LOGGING_CHANNEL=
 # 読み込む画像の一辺の最大サイズ、これを超える場合は縮小する
 # OSN_MAX_IMAGE_SIZE=2304
-```
-
-#### OpenAI 設定例
-```properties
-# -- OpenAI の設定 --
-OSN_AI_SERVICE_TYPE=openai
-OSN_OPENAI_API_KEY=684...
-# OSN_AI_MODEL_LOW_COST=GPT_41_MINI
-# OSN_AI_MODEL_HIGH_QUALITY=GPT_41
-```
-
-#### Azure OpenAI 設定例
-```properties
-# -- Azure OpenAI の設定 --
-OSN_AI_SERVICE_TYPE=azure_openai
-OSN_AZURE_OPENAI_API_KEY=684...
-# Azure OpenAI EndPoint ドメイン
-OSN_AZURE_OPENAI_ENDPOINT=https://*.openai.azure.com/
-# OSN_AI_MODEL_LOW_COST=AZURE_GPT_41_MINI
-# OSN_AI_MODEL_HIGH_QUALITY=AZURE_GPT_41
 ```
 
 ### 4. バックエンドアプリの起動

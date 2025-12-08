@@ -78,22 +78,24 @@ class AiModelUsage:
 
 @dataclasses.dataclass
 class AiModelsUsage:
-    low_cost: AiModelUsage = dataclasses.field(init=False)
-    high_quality: AiModelUsage = dataclasses.field(init=False)
-    gemini_25_flash_lite: AiModelUsage = dataclasses.field(init=False)
+    low_cost: AiModelUsage = dataclasses.field()
+    high_quality: AiModelUsage = dataclasses.field()
+    gemini_25_flash_lite: Optional[AiModelUsage] = dataclasses.field()
     models: list[AiModelUsage] = dataclasses.field(default_factory=list, init=False)
 
     @staticmethod
     def new() -> 'AiModelsUsage':
         if config.AI_MODEL_LOW_COST is None or config.AI_MODEL_HIGH_QUALITY is None:
             raise ValueError("AI model configuration is incomplete.")
-        models_usage = AiModelsUsage()
-        models_usage.low_cost = AiModelUsage(AiModelInfo[config.AI_MODEL_LOW_COST])
-        models_usage.high_quality = AiModelUsage(AiModelInfo[config.AI_MODEL_HIGH_QUALITY])
-        models_usage.gemini_25_flash_lite = AiModelUsage(AiModelInfo.GEMINI_25_FLASH_LITE)
+        models_usage = AiModelsUsage(
+            AiModelUsage(AiModelInfo[config.AI_MODEL_LOW_COST]),
+            AiModelUsage(AiModelInfo[config.AI_MODEL_HIGH_QUALITY]),
+            (AiModelUsage(AiModelInfo.GEMINI_25_FLASH_LITE) if config.GEMINI_API_KEY else None),
+        )
         models_usage.models.append(models_usage.low_cost)
         models_usage.models.append(models_usage.high_quality)
-        models_usage.models.append(models_usage.gemini_25_flash_lite)
+        if models_usage.gemini_25_flash_lite:
+            models_usage.models.append(models_usage.gemini_25_flash_lite)
         return models_usage
 
     def get_total_cost(self) -> float:
@@ -619,18 +621,7 @@ class AiService:
 
     @classmethod
     async def start(cls) -> None:
-        match AiServiceType[config.AI_SERVICE_TYPE_NAME]:
-            case AiServiceType.OPENAI:
-                if not config.OPENAI_API_KEY:
-                    raise ValueError("OSN_OPENAI_API_KEY is required when using OpenAI service.")
-            case AiServiceType.AZURE_OPENAI:
-                if not config.AZURE_OPENAI_API_KEY or not config.AZURE_OPENAI_ENDPOINT:
-                    raise ValueError("OSN_AZURE_OPENAI_API_KEY and OSN_AZURE_OPENAI_ENDPOINT are required when using Azure OpenAI service.")
-            case AiServiceType.GEMINI:
-                if not config.GEMINI_API_KEY:
-                    raise ValueError("OSN_GEMINI_API_KEY is required when using Gemini service.")
-            case _:
-                raise NotImplementedError("Unknown AiServiceType")
+        # 環境変数にセットされた APIキーから、それぞれのクライアントインスタンスを生成する
         if config.OPENAI_API_KEY:
             AiService.client_openai_instance = AsyncOpenAI(api_key=config.OPENAI_API_KEY)
         if config.AZURE_OPENAI_API_KEY and config.AZURE_OPENAI_ENDPOINT:
@@ -641,6 +632,23 @@ class AiService:
             )
         if config.GEMINI_API_KEY:
             AiService.client_gemini_instance = genai.Client(api_key=config.GEMINI_API_KEY)
+
+        # AiModelsUsage.new() することで環境変数に設定したモデル名が正しいことを検証するのと、
+        # 利用するモデルに対応する AiService.client_*_instance が None でないことを検証する
+        models_usage = AiModelsUsage.new()
+        for model in models_usage.models:
+            match model.ai_service_type:
+                case AiServiceType.OPENAI:
+                    if not AiService.client_openai_instance:
+                        raise ValueError("OSN_OPENAI_API_KEY is required when using OpenAI service.")
+                case AiServiceType.AZURE_OPENAI:
+                    if not AiService.client_azure_openai_instance:
+                        raise ValueError("OSN_AZURE_OPENAI_API_KEY and OSN_AZURE_OPENAI_ENDPOINT are required when using Azure OpenAI service.")
+                case AiServiceType.GEMINI:
+                    if not AiService.client_gemini_instance:
+                        raise ValueError("OSN_GEMINI_API_KEY is required when using Gemini service.")
+                case _:
+                    raise NotImplementedError("Unknown AiServiceType")
 
     @property
     def client_openai(self) -> AsyncOpenAI:
@@ -718,10 +726,11 @@ class AiService:
         for _ in range(10):
             try:
                 if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(f"request({model.model_name})={json.dumps(prompt.to_gemini_rest(), ensure_ascii=False)}")
+                    logger.debug(f"request({model.model.name}/{model.model_name})={json.dumps(prompt.to_gemini_rest(), ensure_ascii=False)}")
                 else:
                     logger.info(
-                        f"request({model.model_name})(shrink)={json.dumps(shrink_message(prompt.to_gemini_rest()), ensure_ascii=False)}"
+                        f"request({model.model.name}/{model.model_name})(shrink)="
+                        + f"{json.dumps(shrink_message(prompt.to_gemini_rest()), ensure_ascii=False)}"
                     )
                 logger.debug("Generating content")
                 response = await self.client_gemini.aio.models.generate_content(
@@ -794,7 +803,7 @@ class AiService:
         tools = prompt.to_openai_tools()
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(
-                f"request({model.model_name})={
+                f"request({model.model.name}/{model.model_name})={
                     json.dumps(
                         {
                             "response_format": response_format,
@@ -807,7 +816,7 @@ class AiService:
                 }"
             )
         else:
-            logger.info(f"request({model.model_name})(shrink)={json.dumps(shrink_message(messages), ensure_ascii=False)}")
+            logger.info(f"request({model.model.name}/{model.model_name})(shrink)={json.dumps(shrink_message(messages), ensure_ascii=False)}")
         start_time = time.time()
         last_exception: Optional[Exception] = None
         response = None

@@ -13,17 +13,6 @@
             "args": []
         },
         {
-            "name": "起動（dev-gemini）",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "ossans_navi/app.py",
-            "console": "integratedTerminal",
-            "args": [],
-            "env": {
-                "OSN_AI_SERVICE_TYPE": "gemini"
-            }
-        },
-        {
             "name": "起動（dev-gemini-pro）",
             "type": "debugpy",
             "request": "launch",
@@ -31,8 +20,8 @@
             "console": "integratedTerminal",
             "args": [],
             "env": {
-                "OSN_AI_SERVICE_TYPE": "gemini",
-                "OSN_AI_MODEL_HIGH_QUALITY": "GEMINI_25_PRO",
+                "OSN_AI_MODEL_LOW_COST": "GEMINI_20_FLASH",
+                "OSN_AI_MODEL_HIGH_QUALITY": "GEMINI_25_PRO"
             }
         },
         {
@@ -43,10 +32,8 @@
             "console": "integratedTerminal",
             "args": [],
             "env": {
-                "OSN_AI_SERVICE_TYPE": "azure_openai",
                 "OSN_AI_MODEL_LOW_COST": "AZURE_GPT_41_MINI",
                 "OSN_AI_MODEL_HIGH_QUALITY": "AZURE_GPT_41"
-
             }
         },
         {

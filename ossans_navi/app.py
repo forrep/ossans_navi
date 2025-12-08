@@ -12,7 +12,7 @@ from slack_sdk import WebClient
 from ossans_navi import config
 from ossans_navi.common import async_utils
 from ossans_navi.controller import config_controller
-from ossans_navi.service.ai_service import AiModelsUsage, AiService
+from ossans_navi.service.ai_service import AiService
 from ossans_navi.service.ossans_navi_service import OssansNaviService
 from ossans_navi.service.slack_service import EventGuard, SlackService
 from ossans_navi.type.slack_type import SlackMessageEvent
@@ -140,7 +140,7 @@ async def do_ossans_navi_response_safe(event: SlackMessageEvent) -> None:
         if ossans_navi_service:
             logger.info(f"Usage Report (Total Cost: {ossans_navi_service.ai_service.models_usage.get_total_cost():.4f})")
             for model in [v for v in ossans_navi_service.ai_service.models_usage.models if v.get_total_cost() > 0.0]:
-                logger.info(f"  {model.model_name} (Cost: {model.get_total_cost():.4f})")
+                logger.info(f"  {model.model.name}({model.model_name}) Cost: {model.get_total_cost():.4f}")
                 logger.info(f"    tokens_in  = {model.tokens_in}")
                 logger.info(f"    tokens_out = {model.tokens_out}")
 
@@ -411,8 +411,16 @@ async def main():
         + f" {"silent" if config.SILENT_MODE else "no-silent"}, {"safe" if config.SAFE_MODE else "unsafe"} mode"
     )
 
-    # AiModelsUsage.new() することで環境変数に設定したモデル名が正しいことを検証する
-    _ = AiModelsUsage.new()
+    # config のダンプ
+    logger.info("config dump:")
+    for name in dir(config):
+        if not re.search(r"^[A-Z]", name):
+            continue
+        if (value := getattr(config, name)) is None:
+            continue
+        if isinstance(value, str) and ("API_KEY" in name or "TOKEN" in name):
+            value = "*" * len(str(value))
+        logger.info(f"  {name}={value}")
 
     # 非同期実行が必要な初期化処理を実行
     await asyncio.gather(

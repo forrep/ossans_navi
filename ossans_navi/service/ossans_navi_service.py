@@ -573,10 +573,7 @@ class OssansNaviService:
                 # Slack API でキーワード検索を実行して self.slack_searches に積み込む処理
                 # slack_searches 内ではヒット件数（slack_search_messages_len）が少ない方がより絞り込めた良いキーワードと判断してヒット件数の昇順で並べる
                 tg.create_task(self.search(slack_search_words))
-
-                if config.LOAD_URL_CONTEXT:
-                    # 最大10件まで、外部URLを読み込む
-                    tg.create_task(self.url_context(external_urls[:10]))
+                tg.create_task(self.url_context(external_urls[:10]))
 
             if self.search_results.slack_search_results_len == 0:
                 # キーワード自体が生成されなかったケース、つまり検索が必要がない質問やメッセージに対する応答
@@ -775,7 +772,8 @@ class OssansNaviService:
         logger.debug(f"[{depth}][{node}] _refine_slack_searches: finished")
 
     async def url_context(self, urls: list[str]) -> None:
-        if config.LOAD_URL_CONTEXT:
+        # config.LOAD_URL_CONTEXT が有効、かつ Gemini 2.5 Flash Lite モデルが利用可能な場合に URL コンテキストを取得する
+        if config.LOAD_URL_CONTEXT and self.ai_service.models_usage.gemini_25_flash_lite is not None:
             if (url_context_urls := [url for url in urls if url not in self.search_results.url_context_urls]):
                 logger.debug(f"url_context: urls={url_context_urls}")
                 self.search_results.add(

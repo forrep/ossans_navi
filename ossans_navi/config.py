@@ -9,10 +9,6 @@ SLACK_APP_TOKEN = os.environ["OSN_SLACK_APP_TOKEN"]
 SLACK_BOT_TOKEN = os.environ["OSN_SLACK_BOT_TOKEN"]
 SLACK_USER_TOKEN = os.environ["OSN_SLACK_USER_TOKEN"]
 
-if isinstance((v := os.environ.get("OSN_AI_SERVICE_TYPE")), str):
-    AI_SERVICE_TYPE_NAME = v.upper()
-else:
-    AI_SERVICE_TYPE_NAME = "GEMINI"
 OPENAI_API_KEY = os.environ.get("OSN_OPENAI_API_KEY")
 AZURE_OPENAI_API_KEY = os.environ.get("OSN_AZURE_OPENAI_API_KEY")
 AZURE_OPENAI_ENDPOINT = os.environ.get("OSN_AZURE_OPENAI_ENDPOINT")
@@ -31,18 +27,8 @@ AI_MODEL_HIGH_QUALITY = None
 #   - GPT_41_MINI
 #   - AZURE_GPT_41
 #   - AZURE_GPT_41_MINI
-match AI_SERVICE_TYPE_NAME:
-    case "OPENAI":
-        AI_MODEL_LOW_COST = os.environ.get("OSN_AI_MODEL_LOW_COST", "GPT_41_MINI")
-        AI_MODEL_HIGH_QUALITY = os.environ.get("OSN_AI_MODEL_HIGH_QUALITY", "GPT_41")
-    case "AZURE_OPENAI":
-        AI_MODEL_LOW_COST = os.environ.get("OSN_AI_MODEL_LOW_COST", "AZURE_GPT_41_MINI")
-        AI_MODEL_HIGH_QUALITY = os.environ.get("OSN_AI_MODEL_HIGH_QUALITY", "AZURE_GPT_41")
-    case "GEMINI":
-        AI_MODEL_LOW_COST = os.environ.get("OSN_AI_MODEL_LOW_COST", "GEMINI_20_FLASH")
-        AI_MODEL_HIGH_QUALITY = os.environ.get("OSN_AI_MODEL_HIGH_QUALITY", "GEMINI_25_FLASH")
-    case _:
-        raise ValueError(f"Unknown AI service type: {AI_SERVICE_TYPE_NAME}")
+AI_MODEL_LOW_COST = os.environ.get("OSN_AI_MODEL_LOW_COST", "GEMINI_20_FLASH")
+AI_MODEL_HIGH_QUALITY = os.environ.get("OSN_AI_MODEL_HIGH_QUALITY", "GEMINI_25_FLASH")
 
 WORKSPACE_NAME = v if (v := os.environ.get("OSN_WORKSPACE_NAME")) else "company"
 ASSISTANT_NAMES = v.split(r',') if (v := os.environ.get("OSN_ASSISTANT_NAMES")) else ["assistant"]
@@ -69,7 +55,7 @@ REFINE_SLACK_SEARCHES_DEPTH_NO_MENTION = 2
 
 MAX_OUTPUT_TOKENS = 12288
 
-if AI_SERVICE_TYPE_NAME == "GEMINI":
+if AI_MODEL_LOW_COST.startswith("GEMINI_") and AI_MODEL_HIGH_QUALITY.startswith("GEMINI_"):
     # Gemini の場合は API利用料金が安いのとコンテキストサイズが大きいので入力トークン数を増量
     # 入力する会話コンテキスト（スレッド）の最大トークン数
     MAX_THREAD_TOKENS = 36000
@@ -106,7 +92,7 @@ else:
     VIDEO_FPS = 0.5
 
 # 外部URLの取得をするか
-LOAD_URL_CONTEXT = GEMINI_API_KEY is not None
+LOAD_URL_CONTEXT = True
 
 # 開発モードのデフォルト値（起動時に --production が渡されると上書きされて本番モードになる）
 DEVELOPMENT_MODE = True
