@@ -430,8 +430,8 @@ async def main():
 
     # TERM/INTシグナルにトラップして (graceful) shutdown を実行、以下のフローで終了する
     #   1. Slack サーバから WebSocket を切断して新規メッセージの受信を停止
-    #   2. event.wait() で停止したスレッドを event.set() で起こす（メインスレッドの処理は全て終了）
-    #   3. ThreadPoolExecutor が with 句を抜けるタイミングで溜まったキューが全て実行される
+    #   2. await event.wait() で停止した非同期処理を event.set() で終了させる
+    #   3. graceful の場合は現在実行中のタスクが完了するまで最大 600秒待機する
     #   4. 終了する
     event = asyncio.Event()
     graceful = True

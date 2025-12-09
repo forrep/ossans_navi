@@ -85,13 +85,14 @@ class AiModelsUsage:
 
     @staticmethod
     def new() -> 'AiModelsUsage':
-        if config.AI_MODEL_LOW_COST is None or config.AI_MODEL_HIGH_QUALITY is None:
-            raise ValueError("AI model configuration is incomplete.")
-        models_usage = AiModelsUsage(
-            AiModelUsage(AiModelInfo[config.AI_MODEL_LOW_COST]),
-            AiModelUsage(AiModelInfo[config.AI_MODEL_HIGH_QUALITY]),
-            (AiModelUsage(AiModelInfo.GEMINI_25_FLASH_LITE) if config.GEMINI_API_KEY else None),
-        )
+        try:
+            models_usage = AiModelsUsage(
+                AiModelUsage(AiModelInfo[config.AI_MODEL_LOW_COST]),
+                AiModelUsage(AiModelInfo[config.AI_MODEL_HIGH_QUALITY]),
+                (AiModelUsage(AiModelInfo.GEMINI_25_FLASH_LITE) if config.GEMINI_API_KEY else None),
+            )
+        except KeyError as e:
+            raise ValueError(f"Invalid AI model name in configuration: {e}") from e
         models_usage.models.append(models_usage.low_cost)
         models_usage.models.append(models_usage.high_quality)
         if models_usage.gemini_25_flash_lite:
@@ -103,8 +104,12 @@ class AiModelsUsage:
 
 
 class AiPromptRole(Enum):
-    ASSISTANT = "assistant"
-    USER = "user"
+    ASSISTANT = ("model", "assistant")
+    USER = ("user", "user")
+
+    def __init__(self, gemini_role, openai_role) -> None:
+        self.gemini_role = gemini_role
+        self.openai_role = openai_role
 
 
 @dataclasses.dataclass
@@ -181,13 +186,15 @@ class AiPromptMessage:
         message: Optional[ChatCompletionMessageParam] = None
         if self.role == AiPromptRole.ASSISTANT:
             message = {
-                "role": AiPromptRole.ASSISTANT.value,
+                "role": AiPromptRole.ASSISTANT.openai_role,
                 "content": self.content.text,
             }
         elif self.role == AiPromptRole.USER:
-            # USERロールの場合のみ画像や<metadata>を入力する
+            # USERロールの場合のみ画像や <metadata> を入力する
             # OpenAI は ASSISTANTロールでの画像を入力に未対応、誤って入力するとエラーとなる
-            # ASSISTANT の応答文に画像リンクが含まれると Slack 上ではメッセージに画像が添付される、よって ASSISTANTロールのメッセージにも画像が付くケースはある
+            # 一方で ASSISTANT の応答文に画像リンクが含まれると Slack 上ではメッセージに画像が添付されるため、
+            # ASSISTANT ロールのメッセージにも画像が添付されるケースはある
+            # <metadata> を ASSISTANTロールで入力してしまうと、ハルシネーションで架空の <metadata> を生成してしまうことがあるため入力してはいけない
             message_contents: list[ChatCompletionContentPartParam] = []
             message_contents.append(
                 {
@@ -214,7 +221,7 @@ class AiPromptMessage:
                     }
                 )
             message = {
-                "role": AiPromptRole.USER.value,
+                "role": AiPromptRole.USER.openai_role,
                 "content": message_contents,
             }
         else:
@@ -226,7 +233,7 @@ class AiPromptMessage:
         if rag_info:
             messages.append(
                 {
-                    "role": AiPromptRole.ASSISTANT.value,
+                    "role": AiPromptRole.ASSISTANT.openai_role,
                     "content": None,
                     "tool_calls": [
                         {
@@ -258,25 +265,33 @@ class AiPromptMessage:
     def to_gemini_content(self, rag_info: Optional[AiPromptRagInfo] = None) -> list[types.ContentDict]:
         contents: list[types.ContentDict] = []
         parts: list[types.PartDict] = []
-        parts.append(
-            {
-                "text": (
-                    self.content.text
-                    + (
-                        # AiPromptRole.USER の場合のみ <metadata> を入力する
-                        (
-                            "\n\n<metadata>\n"
-                            + json.dumps(self.content.detail, ensure_ascii=False, separators=(',', ':'))
-                            + "\n</metadata>"
-                        ) if self.content.is_dict and self.role == AiPromptRole.USER else ""
+        if self.role == AiPromptRole.ASSISTANT:
+            parts.append(
+                {
+                    "text": self.content.text
+                }
+            )
+        elif self.role == AiPromptRole.USER:
+            # USERロールの場合のみ画像・映像・音声や <metadata> を入力する
+            # Gemini は ASSISTANTロールで画像を入力してもエラーにはならないが処理対象にもならない、無駄なので送らない
+            # ASSISTANT の応答文に画像リンクが含まれると Slack 上ではメッセージに画像が添付されるため、
+            # ASSISTANT ロールのメッセージにも画像が添付されるケースはある
+            # <metadata> を ASSISTANTロールで入力してしまうと、ハルシネーションで架空の <metadata> を生成してしまうことがあるため入力してはいけない
+            parts.append(
+                {
+                    "text": (
+                        self.content.text
+                        + (
+                            # <metadata> が存在する場合を入力する（self.content.is_dict の場合）
+                            (
+                                "\n\n<metadata>\n"
+                                + json.dumps(self.content.detail, ensure_ascii=False, separators=(',', ':'))
+                                + "\n</metadata>"
+                            ) if self.content.is_dict else ""
+                        )
                     )
-                )
-            }
-        )
-        if self.role != AiPromptRole.ASSISTANT:
-            # AiPromptRole.ASSISTANT ではない場合のみ画像・映像・音声を読み込む
-            # モデルが画像生成機能を持たない現時点では、AiPromptRole.ASSISTANT に画像データが付随するケースは電文を偽造しない限りない
-            # そのため現時点では画像を送信しても処理対象にならない、そのため送らない
+                }
+            )
             for image in self.content.images:
                 if image.file is not None:
                     parts.append({"text": f"Attachment(below): {image.title}"})
@@ -314,14 +329,14 @@ class AiPromptMessage:
                         }
                     )
         contents.append({
-            "role": "model" if self.role == AiPromptRole.ASSISTANT else self.role.value,
+            "role": self.role.gemini_role,
             "parts": parts,
         })
 
         if rag_info:
             contents.append(
                 {
-                    "role": "model",
+                    "role": AiPromptRole.ASSISTANT.gemini_role,
                     "parts": [
                         {
                             "function_call": {
@@ -336,7 +351,7 @@ class AiPromptMessage:
             )
             contents.append(
                 {
-                    "role": "user",
+                    "role": AiPromptRole.USER.gemini_role,
                     "parts": [
                         {
                             "function_response": {
@@ -520,9 +535,10 @@ class AiPrompt:
         }
 
     def get_upload_files(self) -> list[AiPromptUploadFile]:
-        """Get all files to be uploaded."""
+        """USERロールに紐づく画像・映像・音声ファイルを全て取得する"""
         return list(itertools.chain.from_iterable([
-            message.content.images + message.content.videos + message.content.audios for message in self.messages
+            message.content.images + message.content.videos + message.content.audios
+            for message in self.messages if message.role == AiPromptRole.USER
         ]))
 
     @staticmethod

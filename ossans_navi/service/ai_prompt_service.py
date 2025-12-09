@@ -1,5 +1,3 @@
-import datetime
-import time
 from typing import Any, Optional
 
 from jinja2 import Template
@@ -17,7 +15,6 @@ class AiPromptService:
     ):
         self.event = event
         self.context = {
-            "now": datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S'),
             "workspace_name": config.WORKSPACE_NAME,
             "language": config.LANGUAGE,
             "assistant_names": assistant_names,
