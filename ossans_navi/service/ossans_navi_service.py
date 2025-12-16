@@ -172,9 +172,10 @@ class OssansNaviService:
             ai_prompt_slack_message_lite = AiPromptSlackMessage(
                 timestamp=message.timestamp.strftime('%Y-%m-%d %H:%M:%S'),
                 name=message.user.name,
-                user_id=message.user.mention,
+                user_id=message.user.user_id,
                 content=(message.content[:limit] + (ellipsis if len(message.content) > limit else "")),
                 permalink=message.permalink,
+                mention_to=message.user.mention_to,
             )
 
             if len(message.attachments) > 0:

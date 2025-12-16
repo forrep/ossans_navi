@@ -71,8 +71,8 @@ if AI_MODEL_LOW_COST.startswith("GEMINI_") and AI_MODEL_HIGH_QUALITY.startswith(
     LASTSHOT_INPUT_IMAGE_FILES = 4
     # 映像・音声ファイルを入力する
     LOAD_VIDEO_AUDIO_FILES = True
-    # 映像ファイルの FPS、FPS=0.5 で 2秒ごとに1フレーム消費、1フレームあたり 258トークン消費
-    VIDEO_FPS = 0.5
+    # 映像ファイルの FPS、FPS=0.25 で 4秒ごとに1フレーム消費、1フレームあたり 258トークン消費
+    VIDEO_FPS = 0.25
 else:
     # 入力する会話コンテキスト（スレッド）の最大トークン数
     MAX_THREAD_TOKENS = 12000

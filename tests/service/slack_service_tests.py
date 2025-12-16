@@ -178,12 +178,12 @@ def slack_service(monkeypatch: pytest.MonkeyPatch):
 
 @pytest.mark.asyncio
 async def test_get_user(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
-    async def users_info_dummy(self, user: str):
-        if user == "U7CAL37X0":
-            return SlackResponseDummy(
-                data={
-                    "ok": True,
-                    "user": {
+    async def users_list_dummy(self):
+        return SlackResponseDummy(
+            data={
+                "ok": True,
+                "members": [
+                    {
                         "id": "U7CAL37X0",
                         "team_id": "T02L3BLC1",
                         "name": "yamada",
@@ -235,77 +235,58 @@ async def test_get_user(slack_service: SlackService, monkeypatch: pytest.MonkeyP
                         "is_email_confirmed": True,
                         "who_can_share_contact_card": "EVERYONE"
                     }
-                }
-            )
-        if user.startswith("U1"):
-            raise SlackApiError("", {
-                "ok": False,
-                "error": "user_not_found"
-            })
-        if user.startswith("U2"):
-            raise SlackApiError("", {
-                "ok": False,
-                "error": "user_not_visible"
-            })
-        if user.startswith("U3"):
-            raise SlackApiError("", {
-                "ok": False,
-                "error": "request_timeout"
-            })
-        raise ValueError()
+                ]
+            }
+        )
 
-    monkeypatch.setattr(SlackWrapper, "users_info", users_info_dummy)
+    monkeypatch.setattr(SlackWrapper, "users_list", users_list_dummy)
 
     assert await slack_service.get_user("U7CAL37X0") == SlackUser(
         user_id='U7CAL37X0',
         name='山田 太郎',
         username='yamada',
-        mention='<@U7CAL37X0>',
+        mention_to='<@U7CAL37X0>',
         is_bot=False,
         is_guest=False,
         is_admin=False,
         is_valid=True,
     )
 
-    # users_info で user_not_found が返ってくるパターン
+    # users_list で user_not_found が返ってくるパターン
     assert await slack_service.get_user("U1XXXXXXX") == SlackUser(
         user_id='U1XXXXXXX',
         name='Unknown',
-        username='Unknown',
-        mention='',
+        username='unknown',
+        mention_to=None,
         is_bot=False,
         is_guest=True,
         is_admin=False,
         is_valid=False,
     )
 
-    # users_info で user_not_visible が返ってくるパターン
+    # users_list で user_not_visible が返ってくるパターン
     assert await slack_service.get_user("U2XXXXXXX") == SlackUser(
         user_id='U2XXXXXXX',
         name='Unknown',
-        username='Unknown',
-        mention='',
+        username='unknown',
+        mention_to=None,
         is_bot=False,
         is_guest=True,
         is_admin=False,
         is_valid=False,
     )
 
-    # users_info で request_timeout が返るパターン
-    with pytest.raises(SlackApiError):
-        await slack_service.get_user("U3XXXXXXX")
-
-    # users_info で ValueError() が返るパターン
+    # users_list で ValueError() が返るパターン
     with pytest.raises(ValueError):
         await slack_service.get_user("RAISE_ERROR_TEST")
 
-    # users_info を None にしても cache から取得できる
-    monkeypatch.setattr(SlackWrapper, "users_info", None)
+    # users_list を None にしても cache から取得できる
+    monkeypatch.setattr(SlackWrapper, "users_list", None)
     assert await slack_service.get_user("U7CAL37X0") == SlackUser(
         user_id='U7CAL37X0',
         name='山田 太郎',
         username='yamada',
-        mention='<@U7CAL37X0>',
+        mention_to='<@U7CAL37X0>',
         is_bot=False,
         is_guest=False,
         is_admin=False,
@@ -315,57 +296,86 @@ async def test_get_user(slack_service: SlackService, monkeypatch: pytest.MonkeyP
 
 @pytest.mark.asyncio
 async def test_get_bot(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
-    async def bots_info_dummy(self, bot: str):
-        if bot == "BCL3TC9NW":
-            return SlackResponseDummy(
-                data={
-                    "ok": True,
-                    "bot": {
-                        "id": "BCL3TC9NW",
+    async def users_list_dummy(self):
+        return SlackResponseDummy(
+            data={
+                "ok": True,
+                "members": [
+                    {
+                        "id": "U06NDV477T2",
+                        "name": "ossansnavi",
+                        "is_bot": True,
+                        "updated": 1718237188,
+                        "is_app_user": False,
+                        "team_id": "T02L3BLC1",
                         "deleted": False,
-                        "name": "Good || New TeamBuilder",
-                        "updated": 1595922010,
-                        "app_id": "A0F7XDUAZ",
-                        "icons": {
-                            "image_36": "https://avatars.slack-edge.com/2018-09-03/428285650437_178ec1ec6d89ec78dd37_36.png",
-                            "image_48": "https://avatars.slack-edge.com/2018-09-03/428285650437_178ec1ec6d89ec78dd37_48.png",
-                            "image_72": "https://avatars.slack-edge.com/2018-09-03/428285650437_178ec1ec6d89ec78dd37_72.png"
+                        "color": "2b6836",
+                        "is_email_confirmed": False,
+                        "real_name": "ossans_navi",
+                        "tz": "America/Los_Angeles",
+                        "tz_label": "Pacific Standard Time",
+                        "tz_offset": -28800,
+                        "is_admin": False,
+                        "is_owner": False,
+                        "is_primary_owner": False,
+                        "is_restricted": False,
+                        "is_ultra_restricted": False,
+                        "who_can_share_contact_card": "EVERYONE",
+                        "profile": {
+                            "real_name": "ossans_navi",
+                            "display_name": "",
+                            "avatar_hash": "321c54e09629",
+                            "real_name_normalized": "ossans_navi",
+                            "display_name_normalized": "",
+                            "image_24": "https://avatars.slack-edge.com/2024-06-12/7253307629959_321c54e09629d37af312_24.png",
+                            "image_32": "https://avatars.slack-edge.com/2024-06-12/7253307629959_321c54e09629d37af312_32.png",
+                            "image_48": "https://avatars.slack-edge.com/2024-06-12/7253307629959_321c54e09629d37af312_48.png",
+                            "image_72": "https://avatars.slack-edge.com/2024-06-12/7253307629959_321c54e09629d37af312_72.png",
+                            "image_192": "https://avatars.slack-edge.com/2024-06-12/7253307629959_321c54e09629d37af312_192.png",
+                            "image_512": "https://avatars.slack-edge.com/2024-06-12/7253307629959_321c54e09629d37af312_512.png",
+                            "image_1024": "https://avatars.slack-edge.com/2024-06-12/7253307629959_321c54e09629d37af312_1024.png",
+                            "image_original": "https://avatars.slack-edge.com/2024-06-12/7253307629959_321c54e09629d37af312_original.png",
+                            "is_custom_image": True,
+                            "first_name": "ossans_navi",
+                            "last_name": "",
+                            "team": "T02L3BLC1",
+                            "title": "",
+                            "phone": "",
+                            "skype": "",
+                            "status_text": "",
+                            "status_text_canonical": "",
+                            "status_emoji": "",
+                            "status_emoji_display_info": [],
+                            "status_expiration": 0,
+                            "bot_id": "B06MJGK9C4E",
+                            "api_app_id": "A06MQKJC3D1",
+                            "always_active": True
                         }
                     }
-                }
-            )
-        if bot.startswith("B1"):
-            raise SlackApiError("", {
-                "ok": False,
-                "error": "bot_not_found"
-            })
-        if bot.startswith("B2"):
-            raise SlackApiError("", {
-                "ok": False,
-                "error": "request_timeout"
-            })
-        raise ValueError()
+                ]
+            }
+        )
 
-    monkeypatch.setattr(SlackWrapper, "bots_info", bots_info_dummy)
+    monkeypatch.setattr(SlackWrapper, "users_list", users_list_dummy)
 
-    assert await slack_service.get_bot("BCL3TC9NW") == SlackUser(
-        user_id="BCL3TC9NW",
-        name="Good || New TeamBuilder",
-        username="Good || New TeamBuilder",
-        mention="<@BCL3TC9NW>",
+    assert await slack_service.get_user("B06MJGK9C4E") == SlackUser(
+        user_id="U06NDV477T2",
+        name="ossans_navi",
+        username="ossansnavi",
+        mention_to="<@U06NDV477T2>",
         is_bot=True,
         is_guest=False,
         is_admin=False,
         is_valid=True,
-        bot_id="BCL3TC9NW",
+        bot_id="B06MJGK9C4E",
     )
 
     # bots_info で bot_not_found が返ってくるパターン
-    assert await slack_service.get_bot("B1XXXXXXX") == SlackUser(
+    assert await slack_service.get_user("B1XXXXXXX") == SlackUser(
         user_id='B1XXXXXXX',
         name='Unknown Bot',
         username='unknown_bot',
-        mention='',
+        mention_to=None,
         is_bot=True,
         is_guest=False,
         is_admin=False,
@@ -373,26 +383,22 @@ async def test_get_bot(slack_service: SlackService, monkeypatch: pytest.MonkeyPa
         bot_id="B1XXXXXXX",
     )
 
-    # bots_info で request_timeout が返るパターン
-    with pytest.raises(SlackApiError):
-        await slack_service.get_bot("B2XXXXXXX")
-
-    # bots_info で ValueError() が返るパターン
+    # users_list で ValueError() が返るパターン
     with pytest.raises(ValueError):
-        await slack_service.get_bot("RAISE_ERROR_TEST")
+        await slack_service.get_user("RAISE_ERROR_TEST")
 
-    # bots_info を None にしても cache から取得できる
-    monkeypatch.setattr(SlackWrapper, "bots_info", None)
-    assert await slack_service.get_bot("BCL3TC9NW") == SlackUser(
-        user_id="BCL3TC9NW",
-        name="Good || New TeamBuilder",
-        username="Good || New TeamBuilder",
-        mention="<@BCL3TC9NW>",
+    # users_list を None にしても cache から取得できる
+    monkeypatch.setattr(SlackWrapper, "users_list", None)
+    assert await slack_service.get_user("B06MJGK9C4E") == SlackUser(
+        user_id="U06NDV477T2",
+        name="ossans_navi",
+        username="ossansnavi",
+        mention_to="<@U06NDV477T2>",
         is_bot=True,
         is_guest=False,
         is_admin=False,
         is_valid=True,
-        bot_id="BCL3TC9NW",
+        bot_id="B06MJGK9C4E",
     )
 
 

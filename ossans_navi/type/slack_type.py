@@ -13,7 +13,7 @@ class SlackUser(BaseModel):
     user_id: str
     name: str
     username: str
-    mention: str
+    mention_to: Optional[str] = Field(default=None)
     is_bot: bool
     is_guest: bool
     is_admin: bool
@@ -23,18 +23,13 @@ class SlackUser(BaseModel):
 
 class SlackUsers(BaseModel):
     users: list[SlackUser]
-    _get_user_by_user_id_map: Optional[dict[str, SlackUser]] = PrivateAttr(default_factory=dict, init=False)
-    _get_user_by_bot_id_map: Optional[dict[str, SlackUser]] = PrivateAttr(default_factory=dict, init=False)
+    _user_id_bot_id_map: Optional[dict[str, SlackUser]] = PrivateAttr(default_factory=dict, init=False)
 
-    def get_user_by_user_id(self, user_id: str) -> Optional[SlackUser]:
-        if not self._get_user_by_user_id_map:
-            self._get_user_by_user_id_map = {user.user_id: user for user in self.users}
-        return self._get_user_by_user_id_map.get(user_id)
-
-    def get_user_by_bot_id(self, bot_id: str) -> Optional[SlackUser]:
-        if not self._get_user_by_bot_id_map:
-            self._get_user_by_bot_id_map = {user.bot_id: user for user in self.users if user.bot_id}
-        return self._get_user_by_bot_id_map.get(bot_id)
+    def get_user(self, user_id_bot_id: str) -> Optional[SlackUser]:
+        if not self._user_id_bot_id_map:
+            self._user_id_bot_id_map = {user.user_id: user for user in self.users}
+            self._user_id_bot_id_map.update({user.bot_id: user for user in self.users if user.bot_id})
+        return self._user_id_bot_id_map.get(user_id_bot_id)
 
 
 class SlackAttachment(BaseModel):
@@ -712,24 +707,6 @@ class SlackUserType(BaseModel):
     is_restricted: bool = True
     is_bot: bool = False
     is_stranger: bool = False
-
-
-class SlackUsersInfoResponse(SlackBaseResponse):
-    """Slack users.info API レスポンスの型定義"""
-    user: SlackUserType
-
-
-class SlackBotResponse(BaseModel):
-    """Slack bots.info.bot API レスポンスの型定義"""
-    id: str
-    user_id: Optional[str] = None
-    deleted: bool = False
-    name: str = "Unknown Bot"
-
-
-class SlackBotsInfoResponse(SlackBaseResponse):
-    """Slack bots.info API レスポンスの型定義"""
-    bot: SlackBotResponse
 
 
 class SlackChannelTopicPurposeType(BaseModel):

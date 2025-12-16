@@ -27,6 +27,7 @@ class AiPromptSlackMessage(BaseModel):
     user_id: str
     content: str
     permalink: str
+    mention_to: Optional[str] = Field(default=None)
     attachments: list[AiPromptSlackMessageAttachment] = Field(default_factory=list, init=False)
     files: list[AiPromptSlackMessageFile] = Field(default_factory=list, init=False)
     reactions: list[str] = Field(default_factory=list, init=False)

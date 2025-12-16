@@ -96,7 +96,7 @@ async def do_ossans_navi_response_safe(event: SlackMessageEvent) -> None:
         # event の構築作業
         event.canceled_events.extend(EVENT_GUARD.get_canceled_events(event))
         (event.user, event.channel) = await asyncio.gather(
-            (slack_service.get_user(event.user_id) if event.is_user else slack_service.get_bot(event.bot_id)),
+            slack_service.get_user(event.user_id if event.is_user else event.bot_id),
             slack_service.get_channel(event.channel_id),
         )
         mentions = await async_utils.asyncio_gather(*[slack_service.get_user(user_id) for user_id in event.mentions], concurrency=3)

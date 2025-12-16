@@ -274,6 +274,7 @@ purpose: {{ event.channel.purpose }}
 
 URL_CONTEXT_PROMPT = """
 - Retrieve the content from the provided URL and summarize it according to the "user_intent".
+- Use this as input for another LLM's RAG. Please output more detailed information than the "user_intent".
 - Please think in {{ language }} and respond in {{ language }}.
 
 ## user_intent

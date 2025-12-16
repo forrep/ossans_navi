@@ -21,11 +21,11 @@ from ossans_navi.common.cache import LRUCache
 from ossans_navi.service.slack_wrapper import SlackWrapper
 from ossans_navi.type import ossans_navi_type
 from ossans_navi.type.slack_type import (SlackAttachment, SlackAuthTestAppResponse, SlackAuthTestBotResponse, SlackAuthTestUserResponse,
-                                         SlackBotsInfoResponse, SlackChannel, SlackConversationsHistoryResponse, SlackConversationsInfoResponse,
+                                         SlackChannel, SlackConversationsHistoryResponse, SlackConversationsInfoResponse,
                                          SlackConversationsListResponse, SlackConversationsMembersResponse, SlackConversationsOpenResponse,
                                          SlackConversationsRepliesResponse, SlackFile, SlackMessage, SlackMessageEvent, SlackMessageLite,
                                          SlackMessageType, SlackSearch, SlackSearchMessagesResponse, SlackSearchTerm, SlackUser, SlackUsers,
-                                         SlackUsersGetPresenceResponse, SlackUsersInfoResponse, SlackUsersListResponse)
+                                         SlackUsersGetPresenceResponse, SlackUsersListResponse)
 
 logger = logging.getLogger(__name__)
 
@@ -259,11 +259,11 @@ class SlackService:
                         user_id=user.id,
                         name=user.real_name,
                         username=user.name,
-                        mention=f"<@{user.id}>",
+                        mention_to=f"<@{user.id}>",
                         is_bot=user.is_bot,
                         is_guest=user.is_stranger or user.is_restricted,
                         is_admin=user.is_admin,
-                        bot_id=user.profile.get("bot_id") if user.is_bot else None,
+                        bot_id=user.profile["bot_id"] if user.is_bot else None,
                     )
                     for user in response.members
                 ]
@@ -279,94 +279,36 @@ class SlackService:
             logger.error(e, exc_info=True)
             raise e
 
-    async def get_user(self, user_id: str) -> SlackUser:
-        if (cached := self.cache_get_user.get(user_id)).found:
-            return cached.value
-        if re.search(r"^B", user_id):
-            # B から始まる user_id はボットのものなのでボット用のAPIで取得する
-            return await self.get_bot(user_id)
-        try:
-            response = SlackUsersInfoResponse(**(v if isinstance((v := (await self.bot_client.users_info(user=user_id)).data), dict) else {}))
-            # 別の Workspace から参加しているユーザーは is_stranger: true となっているので、is_guest 扱いとする（通常ユーザーは is_stranger 自体が送られない）
-            slack_user = SlackUser(
-                user_id=user_id,
-                name=response.user.real_name,
-                username=response.user.name,
-                mention=f"<@{user_id}>",
-                is_bot=response.user.is_bot,
-                is_guest=response.user.is_stranger or response.user.is_restricted,
-                is_admin=response.user.is_admin,
-            )
-        except SlackApiError as e:
-            error_response: SlackResponse = e.response
-            if error_response.get("error") not in ("user_not_found", "user_not_visible"):
-                # error: user_not_found, user_not_visible ではない場合は例外を送出
-                logger.error(e, exc_info=True)
-                raise e
-            logger.info(f"{error_response.get("error")}, user_id={user_id}, exception={e}")
-            slack_user = SlackUser(
-                user_id=user_id,
+    async def get_user(self, user_id_bot_id: str) -> SlackUser:
+        """user_id または bot_id から SlackUser を取得する
+        Incoming Webhook の場合は user_list に存在しないため、Unknown ユーザとして返却する"""
+        users = await self.users_list()
+        if (user := users.get_user(user_id_bot_id)) is not None:
+            return user
+        if user_id_bot_id.startswith("U"):
+            return SlackUser(
+                user_id=user_id_bot_id,
                 name='Unknown',
-                username='Unknown',
-                mention="",
+                username='unknown',
+                mention_to=None,
                 is_bot=False,
                 is_guest=True,
                 is_admin=False,
                 is_valid=False
             )
-        except Exception as e:
-            logger.error(f"users_info returns error, user_id={user_id}")
-            logger.error(e, exc_info=True)
-            raise e
-        self.cache_get_user.put(user_id, slack_user)
-        return slack_user
-
-    async def get_bot(self, bot_id: str) -> SlackUser:
-        if (cached := self.cache_get_bot.get(bot_id)).found:
-            return cached.value
-        try:
-            response = SlackBotsInfoResponse(**(v if (isinstance((v := (await self.bot_client.bots_info(bot=bot_id)).data), dict)) else {}))
-            bot_user = SlackUser(
-                user_id=response.bot.user_id or bot_id,
-                name=response.bot.name,
-                username=response.bot.name,
-                mention=f"<@{bot_id}>",
+        if user_id_bot_id.startswith("B"):
+            return SlackUser(
+                user_id=user_id_bot_id,
+                name='Unknown Bot',
+                username="unknown_bot",
+                mention_to=None,
                 is_bot=True,
                 is_guest=False,
                 is_admin=False,
-                bot_id=bot_id,
+                is_valid=False,
+                bot_id=user_id_bot_id,
             )
-        except SlackApiError as e:
-            error_response: SlackResponse = e.response
-            if error_response.get("error") != "bot_not_found":
-                # error: bot_not_found ではない場合は例外を送出
-                logger.error(f"{error_response.get("error")}, bot_id={bot_id}, exception={e}")
-                logger.error(e, exc_info=True)
-                raise e
-            logger.info(f"{error_response.get("error")}, bot_id={bot_id}, exception={e}")
-            # TODO: 一時的な実装、最終的にはすべてを users_list() から取得する
-            users = await self.users_list()
-            if (get_user_by_bot_id_result := users.get_user_by_bot_id(bot_id)):
-                logger.info(f"Found bot user by users_list, bot_id={bot_id}, user_id={get_user_by_bot_id_result.user_id}")
-                bot_user = get_user_by_bot_id_result
-            else:
-                bot_user = SlackUser(
-                    user_id=bot_id,
-                    name='Unknown Bot',
-                    username="unknown_bot",
-                    mention="",
-                    is_bot=True,
-                    is_guest=False,
-                    is_admin=False,
-                    is_valid=False,
-                    bot_id=bot_id,
-                )
-        except Exception as e:
-            logger.error(f"bots_info returns error bot_id={bot_id}")
-            logger.error(e, exc_info=True)
-            raise e
-        self.cache_get_bot.put(bot_id, bot_user)
-        return bot_user
+        raise ValueError(f"Invalid user_id/bot_id: {user_id_bot_id}")
 
     async def get_channel(self, channel_id: str, user_client: bool = False, no_cache: bool = False) -> SlackChannel:
         client: SlackWrapper = self.user_client if user_client else self.bot_client
@@ -536,7 +478,7 @@ class SlackService:
             if message.user:
                 user = await self.get_user(message.user)
             elif message.bot_id:
-                user = await self.get_bot(message.bot_id)
+                user = await self.get_user(message.bot_id)
             else:
                 raise ValueError("Message has no user or bot_id")
             results.append(SlackMessageLite(
