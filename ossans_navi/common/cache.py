@@ -1,23 +1,23 @@
-import dataclasses
 import time
 from collections import OrderedDict
 from typing import Generic, Optional, TypeVar
+
+from pydantic import BaseModel
 
 K = TypeVar('K')
 V = TypeVar('V')
 
 
-@dataclasses.dataclass
-class CacheEntry(Generic[V]):
-    _value: Optional[V]
-    _expired: float
+class CacheEntry(BaseModel, Generic[V]):
+    v: Optional[V]
+    expired: float
     found: bool
 
     @property
     def value(self) -> V:
         if not self.found:
             raise ValueError('Not found Error')
-        return self._value  # type: ignore
+        return self.v  # type: ignore
 
 
 class LRUCache(Generic[K, V]):
@@ -29,17 +29,17 @@ class LRUCache(Generic[K, V]):
         self.cache: OrderedDict[K, CacheEntry[V]] = OrderedDict()
         self.capacity = capacity
         self.expire = expire
-        self.null: CacheEntry[V] = CacheEntry(None, 0, False)
+        self.null: CacheEntry[V] = CacheEntry(v=None, expired=0, found=False)
 
     def get(self, key: K) -> CacheEntry[V]:
-        if key not in self.cache or self.cache[key]._expired < time.time():
+        if key not in self.cache or self.cache[key].expired < time.time():
             return self.null
         return self.cache[key]
 
     def put(self, key: K, value: V):
         if key in self.cache:
             self.cache.move_to_end(key)
-        self.cache[key] = CacheEntry(value, time.time() + self.expire, True)
+        self.cache[key] = CacheEntry(v=value, expired=time.time() + self.expire, found=True)
         if len(self.cache) > self.capacity:
             self.cache.popitem(last=False)
 

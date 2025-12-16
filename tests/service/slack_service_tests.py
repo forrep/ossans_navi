@@ -1,8 +1,8 @@
-import dataclasses
 import os
 import re
 
 import pytest
+from pydantic import BaseModel
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 from slack_sdk.errors import SlackApiError
@@ -12,8 +12,7 @@ from ossans_navi.service.slack_wrapper import SlackWrapper
 from ossans_navi.type.slack_type import SlackChannel, SlackUser
 
 
-@dataclasses.dataclass
-class SlackResponseDummy:
+class SlackResponseDummy(BaseModel):
     data: dict
 
 
@@ -182,7 +181,7 @@ async def test_get_user(slack_service: SlackService, monkeypatch: pytest.MonkeyP
     async def users_info_dummy(self, user: str):
         if user == "U7CAL37X0":
             return SlackResponseDummy(
-                {
+                data={
                     "ok": True,
                     "user": {
                         "id": "U7CAL37X0",
@@ -319,7 +318,7 @@ async def test_get_bot(slack_service: SlackService, monkeypatch: pytest.MonkeyPa
     async def bots_info_dummy(self, bot: str):
         if bot == "BCL3TC9NW":
             return SlackResponseDummy(
-                {
+                data={
                     "ok": True,
                     "bot": {
                         "id": "BCL3TC9NW",
@@ -402,7 +401,7 @@ async def test_get_conversations_members(slack_service: SlackService, monkeypatc
     async def conversations_members_dummy(self, channel: str, limit):
         if channel == "C7GGZ82UR":
             return SlackResponseDummy(
-                {
+                data={
                     "ok": True,
                     "members": [
                         "U02L3BLC5",
@@ -480,14 +479,14 @@ async def test_get_presence(slack_service: SlackService, monkeypatch: pytest.Mon
     async def users_getPresence_dummy(self, user: str):
         if user == "U7CAL37X0":
             return SlackResponseDummy(
-                {
+                data={
                     "ok": True,
                     "presence": "active"
                 }
             )
         if user == "U4XXXXXXX":
             return SlackResponseDummy(
-                {
+                data={
                     "ok": True,
                     "presence": "away"
                 }
@@ -531,7 +530,7 @@ async def test_get_presence(slack_service: SlackService, monkeypatch: pytest.Mon
 async def test_get_channels(slack_service: SlackService, monkeypatch: pytest.MonkeyPatch):
     async def conversations_list_dummy1(self, limit: int):
         return SlackResponseDummy(
-            {
+            data={
                 "ok": True,
                 "channels": [
                     {
@@ -673,7 +672,7 @@ async def test_get_channel(slack_service: SlackService, monkeypatch: pytest.Monk
     async def conversations_info_dummy(self, channel: str):
         if channel == "C7GGZ82UR":
             return SlackResponseDummy(
-                {
+                data={
                     "ok": True,
                     "channel": {
                         "id": "C7GGZ82UR",

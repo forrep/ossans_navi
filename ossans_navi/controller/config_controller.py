@@ -3,7 +3,7 @@ import re
 from typing import Any, Optional
 
 from ossans_navi.service.slack_service import SlackService
-from ossans_navi.type import ossans_navi_types
+from ossans_navi.type import ossans_navi_type
 
 logger = logging.getLogger(__name__)
 
@@ -198,7 +198,7 @@ async def do_action(slack_service: SlackService, channel_id: str, thread_ts: str
                     }
                 ])
                 return
-            users = await slack_service.users_list()
+            users = (await slack_service.users_list()).users
             keyword = value.lower()
             users = [
                 user for user in users
@@ -435,9 +435,9 @@ async def do_action(slack_service: SlackService, channel_id: str, thread_ts: str
             ])
 
 
-async def store_config(slack_service: SlackService, config: ossans_navi_types.OssansNaviConfig, clear_cache: bool = True) -> None:
+async def store_config(slack_service: SlackService, config: ossans_navi_type.OssansNaviConfig, clear_cache: bool = True) -> None:
     await slack_service.store_config_dict(config.to_dict(), clear_cache)
 
 
-async def get_config(slack_service: SlackService) -> ossans_navi_types.OssansNaviConfig:
-    return ossans_navi_types.OssansNaviConfig.from_dict(await slack_service.get_config_dict())
+async def get_config(slack_service: SlackService) -> ossans_navi_type.OssansNaviConfig:
+    return ossans_navi_type.OssansNaviConfig.from_dict(await slack_service.get_config_dict())

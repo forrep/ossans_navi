@@ -22,9 +22,11 @@ from ossans_navi.service.ai_service import (AiPrompt, AiPromptContent, AiPromptM
                                             QualityCheckResponse)
 from ossans_navi.service.ai_tokenize_service import AiTokenizor
 from ossans_navi.service.slack_service import SlackService
-from ossans_navi.type import ossans_navi_types
-from ossans_navi.type.ossans_navi_types import SearchResults, UrlContext
+from ossans_navi.type import ossans_navi_type
+from ossans_navi.type.ai_type import AiPromptSlackMessageAttachment, AiPromptSlackMessage, AiPromptSlackMessageFile
+from ossans_navi.type.ossans_navi_type import SearchResults, UrlContext
 from ossans_navi.type.slack_type import SlackFile, SlackMessage, SlackMessageEvent, SlackMessageLite, SlackSearchTerm
+from ossans_navi.common import string_util
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +38,7 @@ class OssansNaviService:
         self,
         slack_service: SlackService,
         event: SlackMessageEvent,
-        config: ossans_navi_types.OssansNaviConfig,
+        config: ossans_navi_type.OssansNaviConfig,
     ) -> None:
         self.ai_service = AiService()
         self.slack_service = slack_service
@@ -56,7 +58,7 @@ class OssansNaviService:
         return cls(
             slack_service,
             event,
-            ossans_navi_types.OssansNaviConfig.from_dict(await slack_service.get_config_dict()),
+            ossans_navi_type.OssansNaviConfig.from_dict(await slack_service.get_config_dict()),
         )
 
     @staticmethod
@@ -101,7 +103,7 @@ class OssansNaviService:
         check_dup_files: bool = False,
         check_dup_files_dict: Optional[dict[str, int]] = None,
         allow_private_files: bool = False,
-    ) -> dict[str, Any]:
+    ) -> AiPromptSlackMessage:
         ...
 
     @overload
@@ -113,7 +115,7 @@ class OssansNaviService:
         check_dup_files: bool = False,
         check_dup_files_dict: Optional[dict[str, int]] = None,
         allow_private_files: bool = False,
-    ) -> list[dict[str, Any]]:
+    ) -> list[AiPromptSlackMessage]:
         ...
 
     @staticmethod
@@ -124,7 +126,7 @@ class OssansNaviService:
         check_dup_files: bool = False,
         check_dup_files_dict: Optional[dict[str, int]] = None,
         allow_private_files: bool = False,
-    ) -> dict[str, Any] | list[dict[str, Any]]:
+    ) -> AiPromptSlackMessage | list[AiPromptSlackMessage]:
         check_dup_files_dict = {} if check_dup_files_dict is None else check_dup_files_dict
         if isinstance(message, list):
             return [
@@ -137,98 +139,77 @@ class OssansNaviService:
                 ) for v in message
             ]
         if isinstance(message, SlackMessage):
-            return {
-                **(
-                    OssansNaviService.slack_message_to_ai_prompt(
-                        message.message,
-                        limit,
-                        ellipsis,
-                        check_dup_files,
-                        check_dup_files_dict,
-                    )
-                ),
-                "channel": message.channel,
-                **(
-                    {
-                        "root_message": OssansNaviService.slack_message_to_ai_prompt(
+            ai_prompt_slack_message = OssansNaviService.slack_message_to_ai_prompt(
+                message.message,
+                limit,
+                ellipsis,
+                check_dup_files,
+                check_dup_files_dict,
+            )
+            ai_prompt_slack_message.channel = message.channel
+            if (root_message := message.root_message):
+                ai_prompt_slack_message.root_message = OssansNaviService.slack_message_to_ai_prompt(
+                    root_message,
+                    limit,
+                    ellipsis,
+                    check_dup_files,
+                    check_dup_files_dict,
+                )
+            if len(message.messages) > 0:
+                ai_prompt_slack_message.replies.extend(
+                    [
+                        OssansNaviService.slack_message_to_ai_prompt(
                             v,
                             limit,
                             ellipsis,
                             check_dup_files,
                             check_dup_files_dict,
-                        )
-                    } if (v := message.root_message) else {}
-                ),
-                **(
-                    {
-                        "replies": [OssansNaviService.slack_message_to_ai_prompt(
-                            v,
-                            limit,
-                            ellipsis,
-                            check_dup_files,
-                            check_dup_files_dict,
-                        ) for v in message.messages]
-                    } if len(message.messages) > 0 else {}
-                ),
-            }
+                        ) for v in message.messages
+                    ]
+                )
+            return ai_prompt_slack_message
         if isinstance(message, SlackMessageLite):
-            return {
-                "timestamp": message.timestamp.strftime('%Y-%m-%d %H:%M:%S'),
-                "name": message.user.name,
-                "user_id": message.user.mention,
-                "content": message.content[:limit] + (ellipsis if len(message.content) > limit else ""),
-                "permalink": message.permalink,
-                **(
-                    {
-                        "attachments": [
-                            {
-                                "title": v.title[:limit] + (ellipsis if len(v.title) > limit else ""),
-                                "text": v.text[:limit] + (ellipsis if len(v.text) > limit else ""),
-                                "link": v.link,
-                                **(
-                                    {
-                                        "name": v.user.name,
-                                        "user_id": v.user.user_id
-                                    } if v.user else {}
-                                )
-                            } for v in message.attachments
-                        ]
-                    } if len(message.attachments) > 0 else {}
-                ),
-                **(
-                    {
-                        "files": [
-                            {
-                                "title": v.title,
-                                "link": v.permalink,
-                                **(
-                                    {} if (
-                                        # 重複ファイルをチェックする、かつ1度登場している場合は、description と text を入力しない
-                                        check_dup_files
-                                        and (1 if v.permalink in check_dup_files_dict else check_dup_files_dict.setdefault(v.permalink, 0)) > 0
-                                    ) else {
-                                        **(
-                                            {
-                                                "description": v.description[:limit] + (ellipsis if len(v.description) > limit else "")
-                                            } if v.description else {}
-                                        ),
-                                        **(
-                                            {
-                                                "text": v.text[:limit] + (ellipsis if len(v.text) > limit else "")
-                                            } if v.text else {}
-                                        ),
-                                    }
-                                )
-                            } for v in message.files if v.is_textualize and (allow_private_files or v.is_public)
-                        ]
-                    } if len([v for v in message.files if v.is_textualize and (allow_private_files or v.is_public)]) > 0 else {}
-                ),
-                **(
-                    {
-                        "reactions": [reaction for reaction in message.reactions],
-                    } if len(message.reactions) > 0 else {}
-                ),
-            }
+            ai_prompt_slack_message_lite = AiPromptSlackMessage(
+                timestamp=message.timestamp.strftime('%Y-%m-%d %H:%M:%S'),
+                name=message.user.name,
+                user_id=message.user.mention,
+                content=(message.content[:limit] + (ellipsis if len(message.content) > limit else "")),
+                permalink=message.permalink,
+            )
+
+            if len(message.attachments) > 0:
+                for attachment in message.attachments:
+                    attachment_dict = AiPromptSlackMessageAttachment(
+                        title=attachment.title[:limit] + (ellipsis if len(attachment.title) > limit else ""),
+                        text=attachment.text[:limit] + (ellipsis if len(attachment.text) > limit else ""),
+                        link=attachment.link,
+                    )
+                    if attachment.user:
+                        attachment_dict.name = attachment.user.name
+                        attachment_dict.user_id = attachment.user.user_id
+                    ai_prompt_slack_message_lite.attachments.append(attachment_dict)
+
+            if len([v for v in message.files if v.is_textualize and (allow_private_files or v.is_public)]) > 0:
+                for file in message.files:
+                    if file.is_textualize and (allow_private_files or file.is_public):
+                        file_dict = AiPromptSlackMessageFile(
+                            title=file.title,
+                            link=file.permalink,
+                        )
+                        if not (
+                            # 重複ファイルをチェックする、かつ1度登場している場合は、description と text を入力しない
+                            check_dup_files
+                            and (1 if file.permalink in check_dup_files_dict else check_dup_files_dict.setdefault(file.permalink, 0)) > 0
+                        ):
+                            if file.description:
+                                file_dict.description = file.description[:limit] + (ellipsis if len(file.description) > limit else "")
+                            if file.text:
+                                file_dict.text = file.text[:limit] + (ellipsis if len(file.text) > limit else "")
+                        ai_prompt_slack_message_lite.files.append(file_dict)
+
+            ai_prompt_slack_message_lite.reactions.extend([reaction for reaction in message.reactions])
+
+            return ai_prompt_slack_message_lite
 
     def get_ai_prompt(
         self,
@@ -261,7 +242,7 @@ class OssansNaviService:
                             # input_image_files が有効の場合は lastshot で何枚かの画像を再入力する
                             # それ以外の場合は画像を入力しない
                             [
-                                AiPromptUploadFile(file.content, file.mimetype, file.title)
+                                AiPromptUploadFile(data=file.content, mimetype=file.mimetype, title=file.title)
                                 for file in message.files if file.is_image and not file.is_analyzed and file.is_valid
                             ]
                             if analyze_image_files and message.has_not_analyzed_files() else (
@@ -269,7 +250,7 @@ class OssansNaviService:
                                     # input_image_files に指定した枚数だけ画像ファイルを再度入力する
                                     # lastshot で画像そのものを入力した方が精度が上がるため、安価な Gemini 限定で入力する
                                     # また今後画像出力に対応する場合に、元画像を編集する用途には元画像そのものを入力する必要がある
-                                    AiPromptUploadFile(file.content, file.mimetype, file.title)
+                                    AiPromptUploadFile(data=file.content, mimetype=file.mimetype, title=file.title)
                                     for file in message.files
                                     if (
                                         file.is_image
@@ -288,14 +269,14 @@ class OssansNaviService:
                         ),
                         videos=(
                             [
-                                AiPromptUploadFile(file.content, file.mimetype, file.title)
+                                AiPromptUploadFile(data=file.content, mimetype=file.mimetype, title=file.title)
                                 for file in message.files if file.is_video and file.is_valid
                             ]
                             if input_video_audio_files else []
                         ),
                         audios=(
                             [
-                                AiPromptUploadFile(file.content, file.mimetype, file.title)
+                                AiPromptUploadFile(data=file.content, mimetype=file.mimetype, title=file.title)
                                 for file in message.files if file.is_audio and file.is_valid
                             ]
                             if input_video_audio_files else []
@@ -308,7 +289,7 @@ class OssansNaviService:
                 # 生成後に再度逆順にすることで元の順番に戻す
                 for (i, message) in enumerate(messages[::-1])
             ][::-1],
-            schema=schema,
+            response_schema=schema,
             rag_info=rag_info,
         )
 
@@ -337,7 +318,7 @@ class OssansNaviService:
         )
         logger.info(
             "conversations_replies="
-            + json.dumps([v.to_dict() for v in thread_messages], ensure_ascii=False, default=OssansNaviService.json_dumps_converter)
+            + json.dumps([v.model_dump() for v in thread_messages], ensure_ascii=False, default=OssansNaviService.json_dumps_converter)
         )
 
         # スレッドのコンテキスト制限、3メッセージ以上ある場合が削減対象
@@ -363,7 +344,7 @@ class OssansNaviService:
             thread_messages = [thread_messages[0], *thread_messages[2:]]
         logger.info(
             "conversations_replies(omit)="
-            + json.dumps([v.to_dict() for v in thread_messages], ensure_ascii=False, default=OssansNaviService.json_dumps_converter)
+            + json.dumps([v.model_dump() for v in thread_messages], ensure_ascii=False, default=OssansNaviService.json_dumps_converter)
         )
         return thread_messages
 
@@ -383,7 +364,7 @@ class OssansNaviService:
             )
         )
 
-    async def store_config(self, config: ossans_navi_types.OssansNaviConfig, clear_cache: bool = True) -> None:
+    async def store_config(self, config: ossans_navi_type.OssansNaviConfig, clear_cache: bool = True) -> None:
         await self.slack_service.store_config_dict(config.to_dict(), clear_cache)
 
     async def special_command(self) -> bool:
@@ -626,7 +607,7 @@ class OssansNaviService:
             self.get_ai_prompt(
                 self.ai_prompt_service.refine_slack_searches_prompt(),
                 thread_messages,
-                rag_info=AiPromptRagInfo([], [v.words for v in self.search_results.slack_search_results]),
+                rag_info=AiPromptRagInfo(contents=[], words=[v.words for v in self.search_results.slack_search_results]),
             ).to_openai_messages()
         )
         logger.info(f"{base_messages_token=}")
@@ -695,11 +676,13 @@ class OssansNaviService:
                 # スレッド情報などを取得する（Slack API実行のため多少時間がかかる）
                 await self.load_slack_message(message)
                 # 今回の検索結果を追加した場合のトークン数を試算する
-                tokens = AiTokenizor.content_tokens(json.dumps(
-                    [OssansNaviService.slack_message_to_ai_prompt(message) for message in [*candidate_messages, message]],
-                    ensure_ascii=False,
-                    separators=(',', ':')
-                ))
+                tokens = AiTokenizor.content_tokens(
+                    json.dumps(
+                        [OssansNaviService.slack_message_to_ai_prompt(message).model_dump() for message in [*candidate_messages, message]],
+                        ensure_ascii=False,
+                        separators=(',', ':')
+                    )
+                )
                 if tokens > tokens_remain:
                     # 試算結果が入力可能トークン数を上回るなら入力せずに終了
                     tokens_full = True
@@ -718,11 +701,13 @@ class OssansNaviService:
                     if message.root_message:
                         self.search_results.use(message.root_message.permalink)
             # 今回入力するトークン数を slack_searches_tokens_remain から引いておく
-            tokens_remain -= AiTokenizor.content_tokens(json.dumps(
-                [OssansNaviService.slack_message_to_ai_prompt(message) for message in candidate_messages],
-                ensure_ascii=False,
-                separators=(',', ':')
-            ))
+            tokens_remain -= AiTokenizor.content_tokens(
+                json.dumps(
+                    [OssansNaviService.slack_message_to_ai_prompt(message).model_dump() for message in candidate_messages],
+                    ensure_ascii=False,
+                    separators=(',', ':')
+                )
+            )
             logger.info(
                 f"[{depth}][{node}] words={slack_search.words}{f" (Additional)" if slack_search.is_additional else ""},"
                 + f" candidate_messages={len(candidate_messages)}, "
@@ -739,8 +724,8 @@ class OssansNaviService:
             thread_messages,
             schema=ai_prompt_assets.REFINE_SLACK_SEARCHES_SCHEMA,
             rag_info=AiPromptRagInfo(
-                [OssansNaviService.slack_message_to_ai_prompt(message) for message in SlackMessage.sort(current_messages)],
-                [v.words for v in self.search_results.slack_search_results]
+                contents=[OssansNaviService.slack_message_to_ai_prompt(message).model_dump() for message in SlackMessage.sort(current_messages)],
+                words=[v.words for v in self.search_results.slack_search_results],
             )
         )
 
@@ -804,7 +789,7 @@ class OssansNaviService:
                     ]
                 )
 
-    async def lastshot(self, thread_messages: list[SlackMessageLite]) -> list[ossans_navi_types.LastshotResponse]:
+    async def lastshot(self, thread_messages: list[SlackMessageLite]) -> list[ossans_navi_type.LastshotResponse]:
         current_messages: list[SlackMessage] = []
         current_url_contexts: list[UrlContext] = []
         # 入力可能なトークン数を定義する、たくさん入れたら精度が上がるが費用も上がるのでほどほどのトークン数に制限する（話しかけられている時はトークン量を増やす）
@@ -832,7 +817,7 @@ class OssansNaviService:
                             limit=15000,
                             check_dup_files=True,
                             check_dup_files_dict=check_dup_files_dict
-                        ),
+                        ).model_dump(),
                         ensure_ascii=False,
                         separators=(',', ':')
                     )
@@ -865,12 +850,14 @@ class OssansNaviService:
                 limit=15000,
                 limit_last_message=40000,
                 rag_info=AiPromptRagInfo(
-                    {
+                    contents={
                         **(
                             {
-                                "slack_messages": OssansNaviService.slack_message_to_ai_prompt(
-                                    SlackMessage.sort(current_messages), limit=15000, check_dup_files=True
-                                )
+                                "slack_messages": [
+                                    v.model_dump() for v in OssansNaviService.slack_message_to_ai_prompt(
+                                        SlackMessage.sort(current_messages), limit=15000, check_dup_files=True
+                                    )
+                                ]
                             } if len(current_messages) > 0 else {}
                         ),
                         **(
@@ -879,7 +866,7 @@ class OssansNaviService:
                             } if len(current_url_contexts) > 0 else {}
                         )
                     },
-                    self.search_results.lastshot_terms
+                    words=self.search_results.lastshot_terms,
                 )
             )
         )
@@ -914,7 +901,7 @@ class OssansNaviService:
                 # - load_vtt の指示がある
                 # - slack が vtt を生成している ※file.transcription_complete and file.vtt
                 # - file.text が空 ※file.text が空ではないならすでに vtt をロードしている
-                file.text = (await self.slack_service.load_file(file.vtt, user_client)).decode("utf-8")
+                file.text = string_util.decode(await self.slack_service.load_file(file.vtt, user_client))
             if load_file:
                 file.content = await self.slack_service.load_file(file.url_private, user_client)
                 if file.is_image:
@@ -931,9 +918,9 @@ class OssansNaviService:
                     file._height = image.height
                     file._width = image.width
                 elif file.is_text:
-                    file.text = file.content.decode("utf-8")
+                    file.text = string_util.decode(file.content)
                 elif file.is_canvas:
-                    html_content = file.content.decode("utf-8")
+                    html_content = string_util.decode(file.content)
                     parser = html2text.HTML2Text()
                     parser.images_to_alt = True
                     html_parsed = parser.handle(html_content)
@@ -942,7 +929,7 @@ class OssansNaviService:
                     file.filetype = "markdown"
                     file.pretty_type = "Markdown"
         except Exception as e:
-            logger.info(f"Slack get_image failed: {str(e)}")
+            logger.info(f"Load file failed: {str(e)}")
 
     async def load_slack_message(self, message: SlackMessage) -> None:
         if message.is_initialized:

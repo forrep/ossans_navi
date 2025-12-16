@@ -1,5 +1,4 @@
 import asyncio
-import dataclasses
 import datetime
 import json
 import logging
@@ -9,6 +8,7 @@ from enum import Enum
 from typing import Any, Optional
 
 import aiohttp
+from pydantic import BaseModel
 from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
 from slack_bolt.async_app import AsyncApp
 from slack_bolt.util.utils import get_boot_message
@@ -19,12 +19,12 @@ from ossans_navi import config
 from ossans_navi.common import async_utils
 from ossans_navi.common.cache import LRUCache
 from ossans_navi.service.slack_wrapper import SlackWrapper
-from ossans_navi.type import ossans_navi_types
+from ossans_navi.type import ossans_navi_type
 from ossans_navi.type.slack_type import (SlackAttachment, SlackAuthTestAppResponse, SlackAuthTestBotResponse, SlackAuthTestUserResponse,
                                          SlackBotsInfoResponse, SlackChannel, SlackConversationsHistoryResponse, SlackConversationsInfoResponse,
                                          SlackConversationsListResponse, SlackConversationsMembersResponse, SlackConversationsOpenResponse,
                                          SlackConversationsRepliesResponse, SlackFile, SlackMessage, SlackMessageEvent, SlackMessageLite,
-                                         SlackMessageType, SlackSearch, SlackSearchMessagesResponse, SlackSearchTerm, SlackUser,
+                                         SlackMessageType, SlackSearch, SlackSearchMessagesResponse, SlackSearchTerm, SlackUser, SlackUsers,
                                          SlackUsersGetPresenceResponse, SlackUsersInfoResponse, SlackUsersListResponse)
 
 logger = logging.getLogger(__name__)
@@ -36,8 +36,7 @@ class EventGuard:
         RUNNING = 2
         CANCELED = 3
 
-    @dataclasses.dataclass
-    class EventGuardData:
+    class EventGuardData(BaseModel):
         status: "EventGuard.Status"
         event: SlackMessageEvent
         canceled_events: list[SlackMessageEvent]
@@ -77,7 +76,7 @@ class EventGuard:
                     # キューに入っているイベントの ts と今回のイベントの ts が一致する場合は更新イベントであり、元メッセージがイベントとして登録されている
                     # その場合は更新前の同一メッセージを canceled_events として扱わない、更新前のメッセージの情報は使う必要が無い
                     canceled_events.append(val[key].event)
-        val[event.event_ts] = EventGuard.EventGuardData(EventGuard.Status.QUEUED, event, canceled_events)
+        val[event.event_ts] = EventGuard.EventGuardData(status=EventGuard.Status.QUEUED, event=event, canceled_events=canceled_events)
         logger.info(f"EventGuard queued: {event.id()}")
         logger.info(f"EventGuard={self}")
 
@@ -199,6 +198,7 @@ class SlackService:
         self.app_client = SlackWrapper(token=self.app_token)
         self.user_client = SlackWrapper(token=self.user_token)
         self.bot_client = SlackWrapper(token=self.bot_token)
+        self.cache_users_list = LRUCache[bool, SlackUsers](capacity=1, expire=60 * 3)   # 3分
         self.cache_get_user = LRUCache[str, SlackUser](capacity=1000, expire=1 * 60 * 60 * 4)  # 4時間
         self.cache_get_bot = LRUCache[str, SlackUser](capacity=1000, expire=1 * 60 * 60 * 4)   # 4時間
         self.cache_get_conversations_members = LRUCache[str, list[str]](capacity=1000, expire=1 * 60 * 60 * 4)  # 4時間
@@ -248,20 +248,36 @@ class SlackService:
         if self.aiohttp_session_instance:
             await self.aiohttp_session_instance.close()
 
-    async def users_list(self) -> list[SlackUser]:
-        response = SlackUsersListResponse(**(v if isinstance(v := (await self.bot_client.users_list()).data, dict) else {}))
-        return [
-            SlackUser(
-                user_id=user.id,
-                name=user.real_name,
-                username=user.name,
-                mention=f"<@{user.id}>",
-                is_bot=user.is_bot,
-                is_guest=user.is_stranger or user.is_restricted,
-                is_admin=user.is_admin,
+    async def users_list(self) -> SlackUsers:
+        if (cached := self.cache_users_list.get(True)).found:
+            return cached.value
+        try:
+            response = SlackUsersListResponse(**(v if isinstance(v := (await self.bot_client.users_list()).data, dict) else {}))
+            users = SlackUsers(
+                users=[
+                    SlackUser(
+                        user_id=user.id,
+                        name=user.real_name,
+                        username=user.name,
+                        mention=f"<@{user.id}>",
+                        is_bot=user.is_bot,
+                        is_guest=user.is_stranger or user.is_restricted,
+                        is_admin=user.is_admin,
+                        bot_id=user.profile.get("bot_id") if user.is_bot else None,
+                    )
+                    for user in response.members
+                ]
             )
-            for user in response.members
-        ]
+            self.cache_users_list.put(True, users)
+            return users
+        except SlackApiError as e:
+            error_response: SlackResponse = e.response
+            logger.error(f"{error_response.get("error")}, exception={e}")
+            raise e
+        except Exception as e:
+            logger.error("users_list returns error")
+            logger.error(e, exc_info=True)
+            raise e
 
     async def get_user(self, user_id: str) -> SlackUser:
         if (cached := self.cache_get_user.get(user_id)).found:
@@ -288,7 +304,16 @@ class SlackService:
                 logger.error(e, exc_info=True)
                 raise e
             logger.info(f"{error_response.get("error")}, user_id={user_id}, exception={e}")
-            slack_user = SlackUser(user_id, 'Unknown', 'Unknown', "", False, True, False, is_valid=False)
+            slack_user = SlackUser(
+                user_id=user_id,
+                name='Unknown',
+                username='Unknown',
+                mention="",
+                is_bot=False,
+                is_guest=True,
+                is_admin=False,
+                is_valid=False
+            )
         except Exception as e:
             logger.error(f"users_info returns error, user_id={user_id}")
             logger.error(e, exc_info=True)
@@ -319,17 +344,23 @@ class SlackService:
                 logger.error(e, exc_info=True)
                 raise e
             logger.info(f"{error_response.get("error")}, bot_id={bot_id}, exception={e}")
-            bot_user = SlackUser(
-                user_id=bot_id,
-                name='Unknown Bot',
-                username="unknown_bot",
-                mention="",
-                is_bot=True,
-                is_guest=False,
-                is_admin=False,
-                is_valid=False,
-                bot_id=bot_id,
-            )
+            # TODO: 一時的な実装、最終的にはすべてを users_list() から取得する
+            users = await self.users_list()
+            if (get_user_by_bot_id_result := users.get_user_by_bot_id(bot_id)):
+                logger.info(f"Found bot user by users_list, bot_id={bot_id}, user_id={get_user_by_bot_id_result.user_id}")
+                bot_user = get_user_by_bot_id_result
+            else:
+                bot_user = SlackUser(
+                    user_id=bot_id,
+                    name='Unknown Bot',
+                    username="unknown_bot",
+                    mention="",
+                    is_bot=True,
+                    is_guest=False,
+                    is_admin=False,
+                    is_valid=False,
+                    bot_id=bot_id,
+                )
         except Exception as e:
             logger.error(f"bots_info returns error bot_id={bot_id}")
             logger.error(e, exc_info=True)
@@ -531,7 +562,7 @@ class SlackService:
         text: Optional[str] = None,
         blocks: Optional[list[dict[str, Any]]] = None,
         thread_ts: Optional[str] = None,
-        images: list[ossans_navi_types.Image] = [],
+        images: list[ossans_navi_type.Image] = [],
     ) -> None:
         files: list[dict[str, Any]] = [
             {
@@ -804,7 +835,7 @@ class SlackService:
     def duplicate_search_result(result: SlackSearch, year: int) -> SlackSearch:
         """指定した結果を指定の年数内のメッセージで絞り込んで新しい検索結果を生成する、同時に検索ワードに after:yyyy-mm-dd を付与する"""
         years_ago = datetime.datetime.now() - (datetime.timedelta(days=365) * year) - datetime.timedelta(days=1)
-        term = SlackSearchTerm(result.term.words, years_ago, None)
+        term = SlackSearchTerm(words=result.term.words, date_from=years_ago, date_to=None)
         filtered_contents = [content for content in result.messages if content.message.timestamp > years_ago]
         return SlackSearch(
             term=term,

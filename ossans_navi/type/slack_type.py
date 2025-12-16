@@ -1,5 +1,4 @@
 import base64
-import dataclasses
 import datetime
 import hashlib
 import itertools
@@ -7,11 +6,10 @@ import json
 import re
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 
-@dataclasses.dataclass
-class SlackUser:
+class SlackUser(BaseModel):
     user_id: str
     name: str
     username: str
@@ -19,28 +17,42 @@ class SlackUser:
     is_bot: bool
     is_guest: bool
     is_admin: bool
-    is_valid: bool = dataclasses.field(default=True)
-    bot_id: Optional[str] = dataclasses.field(default=None)
+    is_valid: bool = Field(default=True)
+    bot_id: Optional[str] = Field(default=None)
 
 
-@dataclasses.dataclass
-class SlackAttachment:
+class SlackUsers(BaseModel):
+    users: list[SlackUser]
+    _get_user_by_user_id_map: Optional[dict[str, SlackUser]] = PrivateAttr(default_factory=dict, init=False)
+    _get_user_by_bot_id_map: Optional[dict[str, SlackUser]] = PrivateAttr(default_factory=dict, init=False)
+
+    def get_user_by_user_id(self, user_id: str) -> Optional[SlackUser]:
+        if not self._get_user_by_user_id_map:
+            self._get_user_by_user_id_map = {user.user_id: user for user in self.users}
+        return self._get_user_by_user_id_map.get(user_id)
+
+    def get_user_by_bot_id(self, bot_id: str) -> Optional[SlackUser]:
+        if not self._get_user_by_bot_id_map:
+            self._get_user_by_bot_id_map = {user.bot_id: user for user in self.users if user.bot_id}
+        return self._get_user_by_bot_id_map.get(bot_id)
+
+
+class SlackAttachment(BaseModel):
     title: str
     text: str
     link: str
-    user: Optional[SlackUser] = dataclasses.field(default=None, init=False)
+    user: Optional[SlackUser] = Field(default=None, init=False)
 
-    @staticmethod
-    def from_model(attachment: 'SlackAttachmentType') -> 'SlackAttachment':
-        return SlackAttachment(
+    @classmethod
+    def from_model(cls, attachment: 'SlackAttachmentType') -> 'SlackAttachment':
+        return cls(
             title=attachment.title,
             text=attachment.text,
             link=attachment.title_link or attachment.from_url or "",
         )
 
 
-@dataclasses.dataclass
-class SlackChannel:
+class SlackChannel(BaseModel):
     channel_id: str
     name: str
     topic: str
@@ -49,14 +61,10 @@ class SlackChannel:
     is_private: bool
     is_im: bool
     is_mpim: bool
-    is_valid: bool = dataclasses.field(default=True)
-
-    def to_dict(self) -> dict[str, Any]:
-        return dataclasses.asdict(self)
+    is_valid: bool = Field(default=True)
 
 
-@dataclasses.dataclass
-class SlackFile:
+class SlackFile(BaseModel):
     title: str
     mimetype: str
     filetype: str
@@ -66,13 +74,13 @@ class SlackFile:
     is_public: bool
     transcription_complete: bool
     vtt: Optional[str]
-    is_initialized: bool = dataclasses.field(default=False, init=False)
-    is_analyzed: bool = dataclasses.field(default=False, init=False)
-    description: Optional[str] = dataclasses.field(default=None, init=False)
-    text: Optional[str] = dataclasses.field(default=None, init=False)
-    _content: Optional[bytes] = dataclasses.field(default=None, init=False)
-    _height: int = dataclasses.field(default=0, init=False)
-    _width: int = dataclasses.field(default=0, init=False)
+    is_initialized: bool = Field(default=False, init=False)
+    is_analyzed: bool = Field(default=False, init=False)
+    description: Optional[str] = Field(default=None, init=False)
+    text: Optional[str] = Field(default=None, init=False)
+    _content: Optional[bytes] = PrivateAttr(default=None, init=False)
+    _height: int = PrivateAttr(default=0, init=False)
+    _width: int = PrivateAttr(default=0, init=False)
 
     @staticmethod
     def from_model(file: 'SlackFileType') -> Optional['SlackFile']:
@@ -154,30 +162,8 @@ class SlackFile:
     def image_uri(self) -> str:
         return f"data:image/png;base64,{base64.b64encode(self.content).decode()}"
 
-    def to_dict(self) -> dict:
-        return {
-            "title": self.title,
-            "mimetype": self.mimetype,
-            "pretty_type": self.pretty_type,
-            "url_private": self.url_private,
-            "permalink": self.permalink,
-            **(
-                {
-                    "width": self._width,
-                    "height": self._height,
-                } if self.is_image and self._width > 0 and self._height > 0 else {}
-            ),
-            **(
-                {"description": self.description} if self.description else {}
-            ),
-            **(
-                {"text": self.text} if self.text else {}
-            ),
-        }
 
-
-@dataclasses.dataclass
-class SlackMessageLite:
+class SlackMessageLite(BaseModel):
     timestamp: datetime.datetime
     ts: str
     thread_ts: str
@@ -186,7 +172,7 @@ class SlackMessageLite:
     permalink: str
     attachments: list[SlackAttachment]
     files: list[SlackFile]
-    reactions: list[str] = dataclasses.field(default_factory=list)
+    reactions: list[str] = Field(default_factory=list)
 
     def is_root_message(self) -> bool:
         return self.ts == self.thread_ts
@@ -197,30 +183,17 @@ class SlackMessageLite:
     def has_not_analyzed_files(self) -> bool:
         return len([file for file in self.files if file.is_image and not file.is_analyzed]) > 0
 
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "timestamp": self.timestamp,
-            "ts": self.ts,
-            "thread_ts": self.thread_ts,
-            "user": dataclasses.asdict(self.user),
-            "content": self.content,
-            "permalink": self.permalink,
-            "attachments": [dataclasses.asdict(attachment) for attachment in self.attachments],
-            "files": [file.to_dict() for file in self.files],
-        }
 
-
-@dataclasses.dataclass
-class SlackMessage:
+class SlackMessage(BaseModel):
     message: SlackMessageLite
     channel: str
     channel_id: str
     score: float
     is_private: bool
-    is_initialized: bool = dataclasses.field(default=False, init=False)
-    _root_message: Optional[SlackMessageLite] = dataclasses.field(default=None, init=False)
-    _messages: list[SlackMessageLite] = dataclasses.field(default_factory=list, init=False)
-    _is_full: bool = dataclasses.field(default=False, init=False)
+    is_initialized: bool = Field(default=False, init=False)
+    _root_message: Optional[SlackMessageLite] = PrivateAttr(default=None, init=False)
+    _messages: list[SlackMessageLite] = PrivateAttr(default_factory=list, init=False)
+    _is_full: bool = PrivateAttr(default=False, init=False)
 
     @property
     def root_message(self) -> SlackMessageLite | None:
@@ -261,12 +234,11 @@ class SlackMessage:
         return sorted(messages, key=lambda v: v.message.timestamp, reverse=True)
 
 
-@dataclasses.dataclass(order=True)
-class SlackSearchTerm:
-    _order_index: tuple[Any, ...] = dataclasses.field(init=False, repr=False)
+class SlackSearchTerm(BaseModel):
     words: frozenset[str]
     date_from: Optional[datetime.datetime]
     date_to: Optional[datetime.datetime]
+    _order_index: tuple[Any, ...] = PrivateAttr(init=False)
 
     def to_term(self, expand: bool = False) -> str:
         expand_days = 1 if expand else 0
@@ -278,7 +250,7 @@ class SlackSearchTerm:
             ])
         )
 
-    def __post_init__(self) -> None:
+    def model_post_init(self, __context: Any) -> None:
         # 並び替え専用項目（_order_index）を構築、以下の順に並べる
         #   1. ワード数が少ない
         #   2. ワードの合計文字数が少ない
@@ -306,6 +278,9 @@ class SlackSearchTerm:
             and self.date_from == value.date_from
             and self.date_to == value.date_to
         )
+
+    def __lt__(self, other: "SlackSearchTerm") -> bool:
+        return self._order_index < other._order_index
 
     def is_subset(self, other: "SlackSearchTerm") -> bool:
         return (
@@ -337,11 +312,10 @@ class SlackSearchTerm:
                     date_from = datetime.datetime.strptime(matched.group(2), '%Y-%m-%d')
             else:
                 words.append(word)
-        return SlackSearchTerm(frozenset(words), date_from, date_to)
+        return SlackSearchTerm(words=frozenset(words), date_from=date_from, date_to=date_to)
 
 
-@dataclasses.dataclass
-class SlackSearch:
+class SlackSearch(BaseModel):
     term: SlackSearchTerm
     total_count: int
     messages: list[SlackMessage]
@@ -362,20 +336,19 @@ class SlackSearch:
         return len(self.messages) >= 60
 
 
-@dataclasses.dataclass
-class SlackMessageEvent:
+class SlackMessageEvent(BaseModel):
     source: dict[str, Any]
-    _user: Optional[SlackUser] = dataclasses.field(default=None, init=False)
-    _channel: Optional[SlackChannel] = dataclasses.field(default=None, init=False)
-    is_mention: bool = dataclasses.field(default=False, init=False)
-    is_talk_to_other: bool = dataclasses.field(default=False, init=False)
-    is_joined: bool = dataclasses.field(default=False, init=False)
-    is_next_message_from_ossans_navi: bool = dataclasses.field(default=False, init=False)
-    classification: Optional[dict[str, str | list[str]]] = dataclasses.field(init=False, default=None)
-    settings: str = dataclasses.field(default="", init=False)
-    canceled_events: list['SlackMessageEvent'] = dataclasses.field(default_factory=list, init=False)
-    reactions_to_message: list[str] = dataclasses.field(default_factory=list, init=False)
-    has_image_video_audio: bool = dataclasses.field(default=False, init=False)
+    is_mention: bool = Field(default=False, init=False)
+    is_talk_to_other: bool = Field(default=False, init=False)
+    is_joined: bool = Field(default=False, init=False)
+    is_next_message_from_ossans_navi: bool = Field(default=False, init=False)
+    classification: Optional[dict[str, str | list[str]]] = Field(default=None, init=False)
+    settings: str = Field(default="", init=False)
+    canceled_events: list['SlackMessageEvent'] = Field(default_factory=list, init=False)
+    reactions_to_message: list[str] = Field(default_factory=list, init=False)
+    has_image_video_audio: bool = Field(default=False, init=False)
+    _user: Optional[SlackUser] = PrivateAttr(default=None, init=False)
+    _channel: Optional[SlackChannel] = PrivateAttr(default=None, init=False)
 
     def valid(self) -> bool:
         return bool(self._user)
@@ -684,9 +657,6 @@ class SlackMessageEvent:
             self._is_mention_to_subteam(),
             *[event._is_mention_to_subteam() for event in self.canceled_events]
         ])
-
-    def to_dict(self) -> dict:
-        return dataclasses.asdict(self)
 
     @property
     def id_source(self) -> str:

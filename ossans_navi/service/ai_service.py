@@ -1,12 +1,11 @@
 import asyncio
 import base64
-import dataclasses
 import itertools
 import json
 import logging
 import time
 from collections import defaultdict
-from enum import Enum, auto
+from enum import Enum
 from io import BytesIO
 from operator import itemgetter
 from typing import Any, Iterable, Optional, overload
@@ -16,91 +15,15 @@ from google.genai import types
 from openai import AsyncAzureOpenAI, AsyncOpenAI, InternalServerError, RateLimitError
 from openai.types.chat import (ChatCompletion, ChatCompletionContentPartParam, ChatCompletionMessageParam, ChatCompletionToolParam,
                                completion_create_params)
+from pydantic import BaseModel, Field
 
 from ossans_navi import config
 from ossans_navi.common import async_utils
 from ossans_navi.common.logger import shrink_message
-from ossans_navi.type import ossans_navi_types
+from ossans_navi.type import ossans_navi_type
+from ossans_navi.type.ai_type import AiModelsUsage, AiModelUsage, AiPromptSlackMessage, AiServiceType
 
 logger = logging.getLogger(__name__)
-
-
-class AiServiceType(Enum):
-    OPENAI = auto()
-    AZURE_OPENAI = auto()
-    GEMINI = auto()
-
-
-class AiModelInfo(Enum):
-    GEMINI_20_FLASH = ("gemini-2.0-flash", AiServiceType.GEMINI, 0.10, 0.40)
-    GEMINI_25_FLASH = ("gemini-2.5-flash-preview-09-2025", AiServiceType.GEMINI, 0.30, 2.50)
-    GEMINI_25_FLASH_LITE = ("gemini-2.5-flash-lite-preview-09-2025", AiServiceType.GEMINI, 0.10, 0.40)
-    GEMINI_25_PRO = ("gemini-2.5-pro", AiServiceType.GEMINI, 1.25, 10.00)
-    GPT_41 = ("gpt-4.1", AiServiceType.OPENAI, 2.00, 8.00)
-    GPT_41_MINI = ("gpt-4.1-mini", AiServiceType.OPENAI, 1.10, 4.40)
-    AZURE_GPT_41 = ("gpt-4.1", AiServiceType.AZURE_OPENAI, 2.00, 8.00)
-    AZURE_GPT_41_MINI = ("gpt-4.1-mini", AiServiceType.AZURE_OPENAI, 1.10, 4.40)
-
-    def __init__(self, model_name: str, ai_service_type: AiServiceType, cost_in: float, cost_out: float):
-        self.model_name = model_name
-        self.ai_service_type = ai_service_type
-        self.cost_in = cost_in
-        """入力コスト（$ / 1,000,000 tokens）"""
-        self.cost_out = cost_out
-        """出力コスト（$ / 1,000,000 tokens）"""
-
-
-@dataclasses.dataclass
-class AiModelUsage:
-    model: AiModelInfo
-    tokens_in: int = dataclasses.field(default=0, init=False)
-    tokens_out: int = dataclasses.field(default=0, init=False)
-
-    @property
-    def model_name(self) -> str:
-        return self.model.model_name
-
-    @property
-    def ai_service_type(self) -> AiServiceType:
-        return self.model.ai_service_type
-
-    @property
-    def cost_in(self) -> float:
-        return self.model.cost_in
-
-    @property
-    def cost_out(self) -> float:
-        return self.model.cost_out
-
-    def get_total_cost(self) -> float:
-        return self.cost_in * self.tokens_in / 1_000_000 + self.cost_out * self.tokens_out / 1_000_000
-
-
-@dataclasses.dataclass
-class AiModelsUsage:
-    low_cost: AiModelUsage = dataclasses.field()
-    high_quality: AiModelUsage = dataclasses.field()
-    gemini_25_flash_lite: Optional[AiModelUsage] = dataclasses.field()
-    models: list[AiModelUsage] = dataclasses.field(default_factory=list, init=False)
-
-    @staticmethod
-    def new() -> 'AiModelsUsage':
-        try:
-            models_usage = AiModelsUsage(
-                AiModelUsage(AiModelInfo[config.AI_MODEL_LOW_COST]),
-                AiModelUsage(AiModelInfo[config.AI_MODEL_HIGH_QUALITY]),
-                (AiModelUsage(AiModelInfo.GEMINI_25_FLASH_LITE) if config.GEMINI_API_KEY else None),
-            )
-        except KeyError as e:
-            raise ValueError(f"Invalid AI model name in configuration: {e}") from e
-        models_usage.models.append(models_usage.low_cost)
-        models_usage.models.append(models_usage.high_quality)
-        if models_usage.gemini_25_flash_lite:
-            models_usage.models.append(models_usage.gemini_25_flash_lite)
-        return models_usage
-
-    def get_total_cost(self) -> float:
-        return sum([model.get_total_cost() for model in self.models])
 
 
 class AiPromptRole(Enum):
@@ -112,18 +35,16 @@ class AiPromptRole(Enum):
         self.openai_role = openai_role
 
 
-@dataclasses.dataclass
-class AiPromptRagInfo:
-    contents: list | dict
+class AiPromptRagInfo(BaseModel):
+    contents: list[Any] | dict[str, Any]
     words: list[str]
 
 
-@dataclasses.dataclass
-class AiPromptUploadFile:
+class AiPromptUploadFile(BaseModel):
     data: bytes
     mimetype: str
     title: str
-    file: Optional[types.File] = dataclasses.field(default=None, init=False)
+    file: Optional[types.File] = Field(default=None, init=False)
 
     def to_bytes_io(self) -> BytesIO:
         return BytesIO(self.data)
@@ -133,36 +54,34 @@ class AiPromptUploadFile:
         return f"data:image/png;base64,{base64.b64encode(self.data).decode()}"
 
 
-@dataclasses.dataclass
-class AiPromptContent:
-    data: str | dict[str, Any]
-    images: list[AiPromptUploadFile] = dataclasses.field(default_factory=list)
-    videos: list[AiPromptUploadFile] = dataclasses.field(default_factory=list)
-    audios: list[AiPromptUploadFile] = dataclasses.field(default_factory=list)
+class AiPromptContent(BaseModel):
+    data: str | AiPromptSlackMessage
+    images: list[AiPromptUploadFile] = Field(default_factory=list)
+    videos: list[AiPromptUploadFile] = Field(default_factory=list)
+    audios: list[AiPromptUploadFile] = Field(default_factory=list)
 
     @property
     def is_dict(self) -> bool:
-        return isinstance(self.data, dict)
+        return isinstance(self.data, AiPromptSlackMessage)
 
     @property
     def text(self) -> str:
-        if isinstance(self.data, dict):
-            return self.data["content"]
+        if isinstance(self.data, AiPromptSlackMessage):
+            return self.data.content
         else:
             return self.data
 
     @property
     def detail(self) -> dict[str, Any]:
-        if isinstance(self.data, dict):
-            return {k: v for (k, v) in self.data.items() if k != "content"}
+        if isinstance(self.data, AiPromptSlackMessage):
+            return {k: v for (k, v) in self.data.model_dump().items() if k != "content"}
         else:
             return {}
 
 
-@dataclasses.dataclass
-class AiPromptFunctionId:
-    call: int = dataclasses.field(default=0, init=False)
-    response: int = dataclasses.field(default=0, init=False)
+class AiPromptFunctionId(BaseModel):
+    call: int = Field(default=0, init=False)
+    response: int = Field(default=0, init=False)
 
     @property
     def call_id(self) -> int:
@@ -175,11 +94,10 @@ class AiPromptFunctionId:
         return self.response
 
 
-@dataclasses.dataclass
-class AiPromptMessage:
+class AiPromptMessage(BaseModel):
     role: AiPromptRole
     content: AiPromptContent
-    name: Optional[str] = dataclasses.field(default=None)
+    name: Optional[str] = Field(default=None)
 
     def to_openai_messages(self, function_id: AiPromptFunctionId, rag_info: Optional[AiPromptRagInfo] = None) -> list[ChatCompletionMessageParam]:
         messages: list[ChatCompletionMessageParam] = []
@@ -380,18 +298,17 @@ class AiPromptMessage:
         return contents
 
 
-@dataclasses.dataclass
-class AiPrompt:
+class AiPrompt(BaseModel):
     system: str
     messages: list[AiPromptMessage]
-    schema: Optional[types.Schema] = dataclasses.field(default=None)
-    choices: int = dataclasses.field(default=1)
-    rag_info: Optional[AiPromptRagInfo] = dataclasses.field(default=None)
-    tools_url_context: bool = dataclasses.field(default=False)
+    response_schema: Optional[types.Schema] = Field(default=None)
+    choices: int = Field(default=1)
+    rag_info: Optional[AiPromptRagInfo] = Field(default=None)
+    tools_url_context: bool = Field(default=False)
 
     @property
     def is_json(self) -> bool:
-        return self.schema is not None
+        return self.response_schema is not None
 
     @overload
     @staticmethod
@@ -435,14 +352,14 @@ class AiPrompt:
         ]
 
     def to_openai_response_format(self) -> completion_create_params.ResponseFormat:
-        if self.is_json and self.schema:
+        if self.is_json and self.response_schema:
             return {
                 "type": "json_schema",
                 "json_schema": {
                     "name": "ossans_navi_response",
                     "description": "ossans_navi_response schema",
                     "schema": AiPrompt._convert_type_to_lower(
-                        self.schema.model_dump(exclude_unset=True, exclude_defaults=True)
+                        self.response_schema.model_dump(exclude_unset=True, exclude_defaults=True)
                     ),
                 },
             }
@@ -477,7 +394,10 @@ class AiPrompt:
             "candidate_count": self.choices,
             "max_output_tokens": config.MAX_OUTPUT_TOKENS,
             "response_mime_type": "application/json" if self.is_json else None,
-            "response_schema": self.schema.model_dump(exclude_unset=True, exclude_defaults=True) if self.is_json and self.schema else None,
+            "response_schema": (
+                self.response_schema.model_dump(exclude_unset=True, exclude_defaults=True)
+                if self.is_json and self.response_schema else None
+            ),
             "tool_config": {
                 "function_calling_config": {"mode": types.FunctionCallingConfigMode.NONE},
             },
@@ -552,15 +472,13 @@ class AiPrompt:
         return value
 
 
-@dataclasses.dataclass
-class AiResponseMessage:
+class AiResponseMessage(BaseModel):
     content: str | dict[str, Any]
     role: AiPromptRole
-    images: list[ossans_navi_types.Image] = dataclasses.field(default_factory=list)
+    images: list[ossans_navi_type.Image] = Field(default_factory=list)
 
 
-@dataclasses.dataclass
-class AiResponse:
+class AiResponse(BaseModel):
     choices: list[AiResponseMessage]
 
     @staticmethod
@@ -568,13 +486,15 @@ class AiResponse:
         # response の形式
         #   { "choices": [ { "message": { "content": "encoded_json_contents", "role": "assistant" }, "other_key": "some_value" } ] }
         # この中の encoded_json_contents から slack_search_words を取り出す処理
-        return AiResponse([
-            AiResponseMessage(
-                content=json.loads(v) if is_json else v,
-                role=AiPromptRole.ASSISTANT,
-            )
-            for choice in response.choices if isinstance(v := choice.message.content, str)
-        ])
+        return AiResponse(
+            choices=[
+                AiResponseMessage(
+                    content=json.loads(v) if is_json else v,
+                    role=AiPromptRole.ASSISTANT,
+                )
+                for choice in response.choices if isinstance(v := choice.message.content, str)
+            ]
+        )
 
     @staticmethod
     def from_gemini_response(response: types.GenerateContentResponse, is_json: bool) -> 'AiResponse':
@@ -582,7 +502,7 @@ class AiResponse:
         for candidate in (response.candidates if response.candidates else []):
             if candidate.content and candidate.content.parts:
                 texts: list[str] = []
-                images: list[ossans_navi_types.Image] = []
+                images: list[ossans_navi_type.Image] = []
                 for part in candidate.content.parts:
                     if isinstance(part.text, str):
                         if is_json:
@@ -603,7 +523,7 @@ class AiResponse:
                         and part.inline_data.mime_type.startswith("image/")
                         and part.inline_data.data
                     ):
-                        images.append(ossans_navi_types.Image(part.inline_data.data, part.inline_data.mime_type))
+                        images.append(ossans_navi_type.Image(part.inline_data.data, part.inline_data.mime_type))
                 if len(texts) > 0:
                     ai_response_messages.append(
                         AiResponseMessage(
@@ -612,17 +532,15 @@ class AiResponse:
                             images=images,
                         )
                     )
-        return AiResponse(ai_response_messages)
+        return AiResponse(choices=ai_response_messages)
 
 
-@dataclasses.dataclass
-class RefineResponse:
+class RefineResponse(BaseModel):
     permalinks: list[str]
     additional_search_words: list[str]
 
 
-@dataclasses.dataclass
-class QualityCheckResponse:
+class QualityCheckResponse(BaseModel):
     user_intent: Optional[str]
     response_quality: bool
 
@@ -973,8 +891,8 @@ class AiService:
     def _analyze_refine_slack_searches_response(response: AiResponse) -> list[RefineResponse]:
         return [
             RefineResponse(
-                [v for v in message.content.get('permalinks', []) if isinstance(v, str)],
-                [v for v in message.content.get('additional_search_words', []) if isinstance(v, str)],
+                permalinks=[v for v in message.content.get('permalinks', []) if isinstance(v, str)],
+                additional_search_words=[v for v in message.content.get('additional_search_words', []) if isinstance(v, str)],
             )
             for message in response.choices if (
                 isinstance(message.content, dict)
@@ -999,13 +917,13 @@ class AiService:
         return v
 
     @staticmethod
-    def _analyze_lastshot_response(response: AiResponse) -> list[ossans_navi_types.LastshotResponse]:
+    def _analyze_lastshot_response(response: AiResponse) -> list[ossans_navi_type.LastshotResponse]:
         return [
-            ossans_navi_types.LastshotResponse(message.content, message.images)
+            ossans_navi_type.LastshotResponse(message.content, message.images)
             for message in response.choices if isinstance(message.content, str)
         ]
 
-    async def request_lastshot(self, model: AiModelUsage, prompt: AiPrompt) -> list[ossans_navi_types.LastshotResponse]:
+    async def request_lastshot(self, model: AiModelUsage, prompt: AiPrompt) -> list[ossans_navi_type.LastshotResponse]:
         for _ in range(2):
             response = await self._chat_completions(model, prompt)
             if len(result := AiService._analyze_lastshot_response(response)) > 0:
@@ -1017,8 +935,8 @@ class AiService:
     def _analyze_quality_check_response(response: AiResponse) -> Optional[QualityCheckResponse]:
         result = [
             QualityCheckResponse(
-                message.content['user_intent'],
-                message.content['response_quality'],
+                user_intent=message.content['user_intent'],
+                response_quality=message.content['response_quality'],
             )
             for message in response.choices if (
                 isinstance(message.content, dict)

@@ -36,7 +36,7 @@ async def handle_button_click(ack: Callable, body: dict[Any, Any], client: WebCl
 async def handle_message_events(ack: Callable[[], Coroutine[Any, Any, None]], event: dict[str, dict]):
     await ack()
     logger.info("event=" + json.dumps(event, ensure_ascii=False))
-    message_event = SlackMessageEvent(event)
+    message_event = SlackMessageEvent(source=event)
 
     # 処理キュー(EVENT_GUARD)を操作する、途中に他の非同期処理を挟まないようにする
     if EVENT_GUARD.is_duplicate(message_event):

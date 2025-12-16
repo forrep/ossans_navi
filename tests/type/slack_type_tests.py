@@ -7,43 +7,43 @@ from . import slack_messages_sample
 
 
 def test_slack_search_term():
-    t1 = SlackSearchTerm(frozenset(("ワード1", "ワード2", "ワード3",)), datetime.datetime(2024, 11, 8, 0, 0, 0, 0), datetime.datetime(2024, 12, 8, 0, 0, 0, 0))
-    t1_sub1 = SlackSearchTerm(frozenset(("ワード1", "ワード2",)), None, None)
-    t1_sub2 = SlackSearchTerm(frozenset(("ワード1", "ワード2",)), datetime.datetime(2024, 11, 8, 0, 0, 0, 0), None)
-    t1_sub3 = SlackSearchTerm(frozenset(("ワード1", "ワード2",)), None, datetime.datetime(2024, 12, 8, 0, 0, 0, 0))
-    t1_sub4 = SlackSearchTerm(frozenset(("ワード1", "ワード2",)), datetime.datetime(2024, 11, 8, 0, 0, 0, 0), datetime.datetime(2024, 12, 8, 0, 0, 0, 0))
-    t1_sub5 = SlackSearchTerm(frozenset(("ワード1", "ワード2",)), datetime.datetime(2024, 11, 7, 0, 0, 0, 0), datetime.datetime(2024, 12, 9, 0, 0, 0, 0))
+    t1 = SlackSearchTerm(words=frozenset(("ワード1", "ワード2", "ワード3",)), date_from=datetime.datetime(2024, 11, 8, 0, 0, 0, 0), date_to=datetime.datetime(2024, 12, 8, 0, 0, 0, 0))
+    t1_sub1 = SlackSearchTerm(words=frozenset(("ワード1", "ワード2",)), date_from=None, date_to=None)
+    t1_sub2 = SlackSearchTerm(words=frozenset(("ワード1", "ワード2",)), date_from=datetime.datetime(2024, 11, 8, 0, 0, 0, 0), date_to=None)
+    t1_sub3 = SlackSearchTerm(words=frozenset(("ワード1", "ワード2",)), date_from=None, date_to=datetime.datetime(2024, 12, 8, 0, 0, 0, 0))
+    t1_sub4 = SlackSearchTerm(words=frozenset(("ワード1", "ワード2",)), date_from=datetime.datetime(2024, 11, 8, 0, 0, 0, 0), date_to=datetime.datetime(2024, 12, 8, 0, 0, 0, 0))
+    t1_sub5 = SlackSearchTerm(words=frozenset(("ワード1", "ワード2",)), date_from=datetime.datetime(2024, 11, 7, 0, 0, 0, 0), date_to=datetime.datetime(2024, 12, 9, 0, 0, 0, 0))
     assert t1_sub1.is_subset(t1)
     assert t1_sub2.is_subset(t1)
     assert t1_sub3.is_subset(t1)
     assert t1_sub4.is_subset(t1)
     assert t1_sub5.is_subset(t1)
 
-    t1_not_sub1 = SlackSearchTerm(frozenset(("ワード1", "ワード2",)), datetime.datetime(2024, 11, 9, 0, 0, 0, 0), None)
-    t1_not_sub2 = SlackSearchTerm(frozenset(("ワード1", "ワード2",)), None, datetime.datetime(2024, 12, 7, 0, 0, 0, 0))
+    t1_not_sub1 = SlackSearchTerm(words=frozenset(("ワード1", "ワード2",)), date_from=datetime.datetime(2024, 11, 9, 0, 0, 0, 0), date_to=None)
+    t1_not_sub2 = SlackSearchTerm(words=frozenset(("ワード1", "ワード2",)), date_from=None, date_to=datetime.datetime(2024, 12, 7, 0, 0, 0, 0))
     assert not t1_not_sub1.is_subset(t1)
     assert not t1_not_sub2.is_subset(t1)
 
-    o1_1 = SlackSearchTerm(frozenset(("ワード1", "ワード2",)), None, None)
-    o1_2 = SlackSearchTerm(frozenset(("ワード1", "ワード2", "ワード3",)), None, None)
+    o1_1 = SlackSearchTerm(words=frozenset(("ワード1", "ワード2",)), date_from=None, date_to=None)
+    o1_2 = SlackSearchTerm(words=frozenset(("ワード1", "ワード2", "ワード3",)), date_from=None, date_to=None)
     assert sorted([o1_1, o1_2]) == sorted([o1_2, o1_1]) == [o1_1, o1_2]
 
-    o2_1 = SlackSearchTerm(frozenset(("ワード1", "ワード2",)), None, None)
-    o2_2 = SlackSearchTerm(frozenset(("ワード1", "ワーード2",)), None, None)
+    o2_1 = SlackSearchTerm(words=frozenset(("ワード1", "ワード2",)), date_from=None, date_to=None)
+    o2_2 = SlackSearchTerm(words=frozenset(("ワード1", "ワーード2",)), date_from=None, date_to=None)
     assert sorted([o2_1, o2_2]) == sorted([o2_2, o2_1]) == [o2_1, o2_2]
 
-    o3_1 = SlackSearchTerm(frozenset(("ワード1", "ワード2",)), None, None)
-    o3_2 = SlackSearchTerm(frozenset(("ワード1", "ワーー2",)), None, None)
+    o3_1 = SlackSearchTerm(words=frozenset(("ワード1", "ワード2",)), date_from=None, date_to=None)
+    o3_2 = SlackSearchTerm(words=frozenset(("ワード1", "ワーー2",)), date_from=None, date_to=None)
     assert sorted([o3_1, o3_2]) == sorted([o3_2, o3_1]) == [o3_1, o3_2]
 
-    o4_1 = SlackSearchTerm(frozenset(("ワード1", "ワード2",)), None, None)
-    o4_2 = SlackSearchTerm(frozenset(("ワード1", "ワード2",)), datetime.datetime(2024, 11, 9, 0, 0, 0, 0), None)
-    o4_3 = SlackSearchTerm(frozenset(("ワード1", "ワード2",)), datetime.datetime(2024, 11, 9, 0, 0, 0, 0), datetime.datetime(2024, 12, 7, 0, 0, 0, 0))
+    o4_1 = SlackSearchTerm(words=frozenset(("ワード1", "ワード2",)), date_from=None, date_to=None)
+    o4_2 = SlackSearchTerm(words=frozenset(("ワード1", "ワード2",)), date_from=datetime.datetime(2024, 11, 9, 0, 0, 0, 0), date_to=None)
+    o4_3 = SlackSearchTerm(words=frozenset(("ワード1", "ワード2",)), date_from=datetime.datetime(2024, 11, 9, 0, 0, 0, 0), date_to=datetime.datetime(2024, 12, 7, 0, 0, 0, 0))
     assert sorted([o4_1, o4_2, o4_3]) == sorted([o4_3, o4_2, o4_1]) == [o4_1, o4_2, o4_3]
 
-    o5_1 = SlackSearchTerm(frozenset(("ワード1", "ワード2",)), datetime.datetime(2024, 11, 7, 0, 0, 0, 0), datetime.datetime(2024, 12, 5, 0, 0, 0, 0))
-    o5_2 = SlackSearchTerm(frozenset(("ワード1", "ワード2",)), datetime.datetime(2024, 11, 8, 0, 0, 0, 0), datetime.datetime(2024, 12, 6, 0, 0, 0, 0))
-    o5_3 = SlackSearchTerm(frozenset(("ワード1", "ワード2",)), datetime.datetime(2024, 11, 9, 0, 0, 0, 0), datetime.datetime(2024, 12, 7, 0, 0, 0, 0))
+    o5_1 = SlackSearchTerm(words=frozenset(("ワード1", "ワード2",)), date_from=datetime.datetime(2024, 11, 7, 0, 0, 0, 0), date_to=datetime.datetime(2024, 12, 5, 0, 0, 0, 0))
+    o5_2 = SlackSearchTerm(words=frozenset(("ワード1", "ワード2",)), date_from=datetime.datetime(2024, 11, 8, 0, 0, 0, 0), date_to=datetime.datetime(2024, 12, 6, 0, 0, 0, 0))
+    o5_3 = SlackSearchTerm(words=frozenset(("ワード1", "ワード2",)), date_from=datetime.datetime(2024, 11, 9, 0, 0, 0, 0), date_to=datetime.datetime(2024, 12, 7, 0, 0, 0, 0))
     assert sorted([o5_1, o5_2, o5_3]) == sorted([o5_3, o5_2, o5_1]) == [o5_1, o5_2, o5_3]
 
     # 不正フォーマットが指定されたら None を返却する
@@ -51,17 +51,17 @@ def test_slack_search_term():
     assert o6_1 is None
 
     o7_1 = SlackSearchTerm.parse("ワード1 ワード2")
-    o7_2 = SlackSearchTerm(frozenset(("ワード1", "ワード2",)), None, None)
+    o7_2 = SlackSearchTerm(words=frozenset(("ワード1", "ワード2",)), date_from=None, date_to=None)
     assert o7_1 == o7_2
 
     o8_1 = SlackSearchTerm.parse("ワード1 ワード2 after:2024-11-09 before:2024-12-07")
-    o8_2 = SlackSearchTerm(frozenset(("ワード1", "ワード2",)), datetime.datetime(2024, 11, 9, 0, 0, 0, 0), datetime.datetime(2024, 12, 7, 0, 0, 0, 0))
+    o8_2 = SlackSearchTerm(words=frozenset(("ワード1", "ワード2",)), date_from=datetime.datetime(2024, 11, 9, 0, 0, 0, 0), date_to=datetime.datetime(2024, 12, 7, 0, 0, 0, 0))
     assert o8_1 == o8_2
 
 
 def test_slack_message_event():
     # メッセージイベント（通常）
-    event_message = SlackMessageEvent(slack_messages_sample.message)
+    event_message = SlackMessageEvent(source=slack_messages_sample.message)
     assert event_message.channel_id == "C0000XXX0XX"
     assert event_message.text == "<@U0761XXXX6X> テレビCMをしていたのはいつですか？"
     assert event_message.user_id == "U0XXX00X0"
@@ -79,7 +79,7 @@ def test_slack_message_event():
     assert not event_message.is_mention_to_subteam()
 
     # 更新イベント（通常）
-    event_message_changed = SlackMessageEvent(slack_messages_sample.message_changed)
+    event_message_changed = SlackMessageEvent(source=slack_messages_sample.message_changed)
     assert event_message_changed.channel_id == "C0000XXX0XX"
     assert event_message_changed.text == "<@U0761XXXX6X> テレビ・ラジオでCMをしていたのはいつでしたっけ？"
     assert event_message_changed.user_id == "U0XXX00X0"
@@ -97,7 +97,7 @@ def test_slack_message_event():
     assert not event_message_changed.is_mention_to_subteam()
 
     # メッセージイベント（スレッド内）
-    event_message_in_thread = SlackMessageEvent(slack_messages_sample.message_in_thread)
+    event_message_in_thread = SlackMessageEvent(source=slack_messages_sample.message_in_thread)
     assert event_message_in_thread.channel_id == "C0000XXX0XX"
     assert event_message_in_thread.text == "ラジオCMは"
     assert event_message_in_thread.user_id == "U0XXX00X0"
@@ -115,7 +115,7 @@ def test_slack_message_event():
     assert not event_message_in_thread.is_mention_to_subteam()
 
     # 更新イベント（スレッド内）
-    event_message_in_thread_changed = SlackMessageEvent(slack_messages_sample.message_in_thread_changed)
+    event_message_in_thread_changed = SlackMessageEvent(source=slack_messages_sample.message_in_thread_changed)
     assert event_message_in_thread_changed.channel_id == "C0000XXX0XX"
     assert event_message_in_thread_changed.text == "ラジオCMはやってましたか？"
     assert event_message_in_thread_changed.user_id == "U0XXX00X0"
@@ -134,7 +134,7 @@ def test_slack_message_event():
 
     # 削除イベント（スレッドのルートメッセージ）
     # 「This message was deleted.」というメッセージに置き換わる、メッセージ自体は消えない
-    event_thread_root_message_deleted = SlackMessageEvent(slack_messages_sample.thread_root_message_deleted)
+    event_thread_root_message_deleted = SlackMessageEvent(source=slack_messages_sample.thread_root_message_deleted)
     assert event_thread_root_message_deleted.channel_id == "C0000XXX0XX"
     assert event_thread_root_message_deleted.text == "This message was deleted."
     assert event_thread_root_message_deleted.user_id == "U0XXX00X0"
@@ -152,7 +152,7 @@ def test_slack_message_event():
     assert not event_thread_root_message_deleted.is_mention_to_subteam()
 
     # 削除イベント（スレッドの子メッセージ）
-    event_message_in_thread_deleted = SlackMessageEvent(slack_messages_sample.message_in_thread_deleted)
+    event_message_in_thread_deleted = SlackMessageEvent(source=slack_messages_sample.message_in_thread_deleted)
     assert event_message_in_thread_deleted.channel_id == "C0000XXX0XX"
     assert event_message_in_thread_deleted.text == "This message was deleted."
     assert event_message_in_thread_deleted.user_id == "U0XXX00X0"
@@ -170,7 +170,7 @@ def test_slack_message_event():
     assert not event_message_in_thread_deleted.is_mention_to_subteam()
 
     # メッセージイベント2（通常）
-    event_message2 = SlackMessageEvent(slack_messages_sample.message2)
+    event_message2 = SlackMessageEvent(source=slack_messages_sample.message2)
     assert event_message2.channel_id == "C0000XXX0XX"
     assert event_message2.text == "テストメッセージ"
     assert event_message2.user_id == "U0XXX00X0"
@@ -188,7 +188,7 @@ def test_slack_message_event():
     assert not event_message2.is_mention_to_subteam()
 
     # 削除イベント2（非スレッド）
-    event_message2_deleted = SlackMessageEvent(slack_messages_sample.message2_deleted)
+    event_message2_deleted = SlackMessageEvent(source=slack_messages_sample.message2_deleted)
     assert event_message2_deleted.channel_id == "C0000XXX0XX"
     assert event_message2_deleted.text == "This message was deleted."
     assert event_message2_deleted.user_id == "U0XXX00X0"
@@ -206,7 +206,7 @@ def test_slack_message_event():
     assert not event_message2_deleted.is_mention_to_subteam()
 
     # メッセージイベント（ファイル送信）
-    event_message2 = SlackMessageEvent(slack_messages_sample.file_share_message)
+    event_message2 = SlackMessageEvent(source=slack_messages_sample.file_share_message)
     assert event_message2.channel_id == "C0000XXX0XX"
     assert event_message2.text == "<@U0761XXXX6X> 添付したファイルの内容をそのまま復唱してください。"
     assert event_message2.user_id == "U0XXX00X0"
@@ -224,7 +224,7 @@ def test_slack_message_event():
     assert not event_message2.is_mention_to_subteam()
 
     # 更新イベント（ファイル送信）
-    event_message_changed = SlackMessageEvent(slack_messages_sample.file_share_message_changed)
+    event_message_changed = SlackMessageEvent(source=slack_messages_sample.file_share_message_changed)
     assert event_message_changed.channel_id == "C0000XXX0XX"
     assert event_message_changed.text == "<@U0761XXXX6X> 添付したファイルの内容をそのまま2回復唱してください。"
     assert event_message_changed.user_id == "U0XXX00X0"
@@ -242,7 +242,7 @@ def test_slack_message_event():
     assert not event_message_changed.is_mention_to_subteam()
 
     # 削除イベント（ファイル送信）
-    event_message2_deleted = SlackMessageEvent(slack_messages_sample.file_share_root_message_deleted)
+    event_message2_deleted = SlackMessageEvent(source=slack_messages_sample.file_share_root_message_deleted)
     assert event_message2_deleted.channel_id == "C0000XXX0XX"
     assert event_message2_deleted.text == "This message was deleted."
     assert event_message2_deleted.user_id == "U0XXX00X0"
@@ -260,7 +260,7 @@ def test_slack_message_event():
     assert not event_message2_deleted.is_mention_to_subteam()
 
     # メッセージイベント（ボット）
-    event_bot_message = SlackMessageEvent(slack_messages_sample.bot_message)
+    event_bot_message = SlackMessageEvent(source=slack_messages_sample.bot_message)
     assert event_bot_message.channel_id == "C056X111111"
     assert event_bot_message.text == "ありがとうございます。"
     assert not event_bot_message.is_user
@@ -280,7 +280,7 @@ def test_slack_message_event():
     assert not event_bot_message.is_mention_to_subteam()
 
     # メッセージイベント（ファイル送信・ボット）
-    event_bot_message_file_share = SlackMessageEvent(slack_messages_sample.bot_message_file_share)
+    event_bot_message_file_share = SlackMessageEvent(source=slack_messages_sample.bot_message_file_share)
     assert event_bot_message_file_share.channel_id == "C0000XXX0XX"
     assert event_bot_message_file_share.text == "<@U0761XXXX6X> こんにちは"
     assert not event_bot_message_file_share.is_user
