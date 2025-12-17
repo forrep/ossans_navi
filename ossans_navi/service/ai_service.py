@@ -657,7 +657,7 @@ class AiService:
             # ファイルのアップロード失敗はエラーとせずに処理を続行する
             logger.warning(f"Failed to upload files: {e}")
 
-        for _ in range(10):
+        for _ in range(2):
             try:
                 if logger.isEnabledFor(logging.DEBUG):
                     logger.debug(f"request({model.model.name}/{model.model_name})={json.dumps(prompt.to_gemini_rest(), ensure_ascii=False)}")
@@ -754,7 +754,7 @@ class AiService:
         start_time = time.time()
         last_exception: Optional[Exception] = None
         response = None
-        for _ in range(10):
+        for _ in range(2):
             try:
                 response = await client.chat.completions.create(
                     model=model.model_name,

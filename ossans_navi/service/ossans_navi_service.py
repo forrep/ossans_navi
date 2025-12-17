@@ -269,18 +269,20 @@ class OssansNaviService:
                             )
                         ),
                         videos=(
+                            # 動画はスレッドの最新メッセージかつ、input_video_audio_files が有効な場合のみ入力する
                             [
                                 AiPromptUploadFile(data=file.content, mimetype=file.mimetype, title=file.title)
                                 for file in message.files if file.is_video and file.is_valid
                             ]
-                            if input_video_audio_files else []
+                            if i == 0 and input_video_audio_files else []
                         ),
                         audios=(
+                            # 音声はスレッドの最新メッセージかつ、input_video_audio_files が有効な場合のみ入力する
                             [
                                 AiPromptUploadFile(data=file.content, mimetype=file.mimetype, title=file.title)
                                 for file in message.files if file.is_audio and file.is_valid
                             ]
-                            if input_video_audio_files else []
+                            if i == 0 and input_video_audio_files else []
                         ),
                     ),
                     name=message.user.user_id,
