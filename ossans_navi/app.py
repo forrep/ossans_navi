@@ -201,7 +201,7 @@ async def do_ossans_navi_response(
                 return
 
     # DM の topic から設定を取得する
-    if event.is_user:
+    if event.is_user and not event.user.is_bot:
         event.settings = await slack_service.get_dm_info_with_ossans_navi(event.user.user_id)
 
     # スレッドでやりとりされた履歴メッセージを取得

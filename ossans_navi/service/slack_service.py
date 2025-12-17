@@ -874,6 +874,7 @@ class SlackService:
             return cached.value
         logger.info(f"Downloading: {url}")
         async with self.aiohttp_session.get(url, headers={"Authorization": f"Bearer {client.token}"}) as response:
+            logger.info(f"Downloaded: {url}")
             if not (200 <= response.status < 300):
                 raise RuntimeError(f"Response returns error: {response.status}")
             content = await response.read()
