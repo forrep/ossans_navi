@@ -523,7 +523,7 @@ class AiResponse(BaseModel):
                         and part.inline_data.mime_type.startswith("image/")
                         and part.inline_data.data
                     ):
-                        images.append(ossans_navi_type.Image(part.inline_data.data, part.inline_data.mime_type))
+                        images.append(ossans_navi_type.Image(data=part.inline_data.data, mime_type=part.inline_data.mime_type))
                 if len(texts) > 0:
                     ai_response_messages.append(
                         AiResponseMessage(
@@ -919,7 +919,7 @@ class AiService:
     @staticmethod
     def _analyze_lastshot_response(response: AiResponse) -> list[ossans_navi_type.LastshotResponse]:
         return [
-            ossans_navi_type.LastshotResponse(message.content, message.images)
+            ossans_navi_type.LastshotResponse(text=message.content, images=message.images)
             for message in response.choices if isinstance(message.content, str)
         ]
 

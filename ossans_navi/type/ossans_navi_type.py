@@ -1,13 +1,11 @@
-import dataclasses
-from typing import Iterable
+from typing import Any, Iterable
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, PrivateAttr
 
 from ossans_navi.type.slack_type import SlackFile, SlackMessage, SlackSearch
 
 
-@dataclasses.dataclass
-class Image:
+class Image(BaseModel):
     data: bytes
     mime_type: str
 
@@ -23,33 +21,31 @@ class Image:
             return ""
 
 
-@dataclasses.dataclass
-class OssansNaviConfig:
-    trusted_bots: list[str] = dataclasses.field(default_factory=list, init=False)
-    allow_responds: list[str] = dataclasses.field(default_factory=list, init=False)
-    admin_users: list[str] = dataclasses.field(default_factory=list, init=False)
-    viewable_private_channels: list[str] = dataclasses.field(default_factory=list, init=False)
+class OssansNaviConfig(BaseModel):
+    trusted_bots: list[str] = Field(default_factory=list, init=False)
+    allow_responds: list[str] = Field(default_factory=list, init=False)
+    admin_users: list[str] = Field(default_factory=list, init=False)
+    viewable_private_channels: list[str] = Field(default_factory=list, init=False)
 
-    @staticmethod
-    def from_dict(settings_dict: dict) -> 'OssansNaviConfig':
-        settings = OssansNaviConfig()
+    @classmethod
+    def from_dict(cls, settings_dict: dict[str, Any]) -> 'OssansNaviConfig':
+        settings = cls()
         if settings_dict.get("type") == "config":
             if isinstance(settings_dict.get("trusted_bots"), list):
-                settings.trusted_bots.extend([v for v in settings_dict["trusted_bots"] if isinstance(v, str)])
+                settings.trusted_bots.extend([v for v in settings_dict["trusted_bots"] if isinstance(v, str) and v.startswith("U")])
             if isinstance(settings_dict.get("allow_responds"), list):
-                settings.allow_responds.extend([v for v in settings_dict["allow_responds"] if isinstance(v, str)])
+                settings.allow_responds.extend([v for v in settings_dict["allow_responds"] if isinstance(v, str) and v.startswith("U")])
             if isinstance(settings_dict.get("admin_users"), list):
-                settings.admin_users.extend([v for v in settings_dict["admin_users"] if isinstance(v, str)])
+                settings.admin_users.extend([v for v in settings_dict["admin_users"] if isinstance(v, str) and v.startswith("U")])
             if isinstance(settings_dict.get("viewable_private_channels"), list):
                 settings.viewable_private_channels.extend([v for v in settings_dict["viewable_private_channels"] if isinstance(v, str)])
         return settings
 
-    def to_dict(self) -> dict:
-        return dataclasses.asdict(self)
+    def to_dict(self) -> dict[str, Any]:
+        return self.model_dump()
 
 
-@dataclasses.dataclass
-class LastshotResponse:
+class LastshotResponse(BaseModel):
     text: str
     images: list[Image]
 
@@ -59,17 +55,16 @@ class UrlContext(BaseModel):
     content: str
 
 
-@dataclasses.dataclass
-class SearchResults:
-    slack_search_results: list[SlackSearch] = dataclasses.field(default_factory=list, init=False)
-    url_context_results: list[UrlContext] = dataclasses.field(default_factory=list, init=False)
-    messages: dict[str, SlackMessage] = dataclasses.field(default_factory=dict, init=False)
-    files: dict[str, SlackFile] = dataclasses.field(default_factory=dict, init=False)
-    slack_search_messages_len: int = dataclasses.field(default=0, init=False)
-    _used: set[str] = dataclasses.field(default_factory=set, init=False)
-    _lastshot: dict[str, SlackMessage] = dataclasses.field(default_factory=dict, init=False)
-    _lastshot_terms: set[str] = dataclasses.field(default_factory=set, init=False)
-    _lastshot_permalinks: set[str] = dataclasses.field(default_factory=set, init=False)
+class SearchResults(BaseModel):
+    slack_search_results: list[SlackSearch] = Field(default_factory=list, init=False)
+    url_context_results: list[UrlContext] = Field(default_factory=list, init=False)
+    messages: dict[str, SlackMessage] = Field(default_factory=dict, init=False)
+    files: dict[str, SlackFile] = Field(default_factory=dict, init=False)
+    slack_search_messages_len: int = Field(default=0, init=False)
+    _used: set[str] = PrivateAttr(default_factory=set, init=False)
+    _lastshot: dict[str, SlackMessage] = PrivateAttr(default_factory=dict, init=False)
+    _lastshot_terms: set[str] = PrivateAttr(default_factory=set, init=False)
+    _lastshot_permalinks: set[str] = PrivateAttr(default_factory=set, init=False)
 
     def add(self, result: SlackSearch | UrlContext | list[SlackSearch | UrlContext]) -> None:
         if isinstance(result, list):
