@@ -1,5 +1,5 @@
 from enum import Enum, auto
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -13,12 +13,29 @@ class AiPromptSlackMessageAttachment(BaseModel):
     name: Optional[str] = Field(default=None, init=False)
     user_id: Optional[str] = Field(default=None, init=False)
 
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "title": self.title,
+            "text": self.text,
+            "link": self.link,
+            **({"name": self.name} if self.name is not None else {}),
+            **({"user_id": self.user_id} if self.user_id is not None else {}),
+        }
+
 
 class AiPromptSlackMessageFile(BaseModel):
     title: str
     link: str
     description: Optional[str] = Field(default=None, init=False)
     text: Optional[str] = Field(default=None, init=False)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "title": self.title,
+            "link": self.link,
+            **({"description": self.description} if self.description is not None else {}),
+            **({"text": self.text} if self.text is not None else {}),
+        }
 
 
 class AiPromptSlackMessage(BaseModel):
@@ -34,6 +51,22 @@ class AiPromptSlackMessage(BaseModel):
     channel: Optional[str] = Field(default=None, init=False)
     root_message: Optional["AiPromptSlackMessage"] = Field(default=None, init=False)
     replies: list["AiPromptSlackMessage"] = Field(default_factory=list, init=False)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "timestamp": self.timestamp,
+            "name": self.name,
+            "user_id": self.user_id,
+            "content": self.content,
+            "permalink": self.permalink,
+            **({"mention_to": self.mention_to} if self.mention_to is not None else {}),
+            **({"attachments": [attachment.to_dict() for attachment in self.attachments]} if len(self.attachments) > 0 else {}),
+            **({"files": [file.to_dict() for file in self.files]} if len(self.files) > 0 else {}),
+            **({"reactions": self.reactions} if len(self.reactions) > 0 else {}),
+            **({"channel": self.channel} if self.channel is not None else {}),
+            **({"root_message": self.root_message.to_dict()} if self.root_message is not None else {}),
+            **({"replies": [reply.to_dict() for reply in self.replies]} if len(self.replies) > 0 else {}),
+        }
 
 
 class AiServiceType(Enum):

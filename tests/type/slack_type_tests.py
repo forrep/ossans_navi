@@ -263,8 +263,7 @@ def test_slack_message_event():
     event_bot_message = SlackMessageEvent(source=slack_messages_sample.bot_message)
     assert event_bot_message.channel_id == "C056X111111"
     assert event_bot_message.text == "ありがとうございます。"
-    assert not event_bot_message.is_user
-    assert event_bot_message.is_bot
+    assert not event_bot_message.has_user_id
     assert event_bot_message.bot_id == "B08E00XXXX0"
     assert event_bot_message.ts == "1740126435.330219"
     assert event_bot_message.event_ts == "1740126435.330219"
@@ -283,8 +282,7 @@ def test_slack_message_event():
     event_bot_message_file_share = SlackMessageEvent(source=slack_messages_sample.bot_message_file_share)
     assert event_bot_message_file_share.channel_id == "C0000XXX0XX"
     assert event_bot_message_file_share.text == "<@U0761XXXX6X> こんにちは"
-    assert not event_bot_message_file_share.is_user
-    assert event_bot_message_file_share.is_bot
+    assert not event_bot_message_file_share.has_user_id
     assert event_bot_message_file_share.bot_id == "B08E00XXXX0"
     assert event_bot_message_file_share.ts == "1740455797.032319"
     assert event_bot_message_file_share.event_ts == "1740455797.032319"

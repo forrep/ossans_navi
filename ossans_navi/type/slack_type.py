@@ -20,6 +20,10 @@ class SlackUser(BaseModel):
     is_valid: bool = Field(default=True)
     bot_id: Optional[str] = Field(default=None)
 
+    @property
+    def is_user(self) -> bool:
+        return not self.is_bot
+
 
 class SlackUsers(BaseModel):
     users: list[SlackUser]
@@ -393,7 +397,7 @@ class SlackMessageEvent(BaseModel):
         return self.source["user"]
 
     @property
-    def is_user(self) -> bool:
+    def has_user_id(self) -> bool:
         if self.is_message_changed():
             # メッセージが変更された場合、変更後のユーザー ID を返す
             return "user" in self.source["message"]
@@ -408,10 +412,6 @@ class SlackMessageEvent(BaseModel):
             # ボットによる更新・削除イベントは対応していない
             raise ValueError("Cannot get bot_id with message_changed or message_deleted")
         return self.source["bot_id"]
-
-    @property
-    def is_bot(self) -> bool:
-        return not self.is_user
 
     @property
     def ts(self) -> str:

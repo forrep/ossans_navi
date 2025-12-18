@@ -74,7 +74,7 @@ class AiPromptContent(BaseModel):
     @property
     def detail(self) -> dict[str, Any]:
         if isinstance(self.data, AiPromptSlackMessage):
-            return {k: v for (k, v) in self.data.model_dump().items() if k != "content"}
+            return {k: v for (k, v) in self.data.to_dict().items() if k != "content"}
         else:
             return {}
 

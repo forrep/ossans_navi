@@ -101,7 +101,7 @@ class OssansNaviService:
         limit: int = 800,
         ellipsis: str = "...",
         check_dup_files: bool = False,
-        check_dup_files_dict: Optional[dict[str, int]] = None,
+        check_dup_files_dict: Optional[dict[str, bool]] = None,
         allow_private_files: bool = False,
     ) -> AiPromptSlackMessage:
         ...
@@ -113,7 +113,7 @@ class OssansNaviService:
         limit: int = 800,
         ellipsis: str = "...",
         check_dup_files: bool = False,
-        check_dup_files_dict: Optional[dict[str, int]] = None,
+        check_dup_files_dict: Optional[dict[str, bool]] = None,
         allow_private_files: bool = False,
     ) -> list[AiPromptSlackMessage]:
         ...
@@ -124,7 +124,7 @@ class OssansNaviService:
         limit: int = 800,
         ellipsis: str = "...",
         check_dup_files: bool = False,
-        check_dup_files_dict: Optional[dict[str, int]] = None,
+        check_dup_files_dict: Optional[dict[str, bool]] = None,
         allow_private_files: bool = False,
     ) -> AiPromptSlackMessage | list[AiPromptSlackMessage]:
         check_dup_files_dict = {} if check_dup_files_dict is None else check_dup_files_dict
@@ -178,35 +178,33 @@ class OssansNaviService:
                 mention_to=message.user.mention_to,
             )
 
-            if len(message.attachments) > 0:
-                for attachment in message.attachments:
-                    attachment_dict = AiPromptSlackMessageAttachment(
-                        title=attachment.title[:limit] + (ellipsis if len(attachment.title) > limit else ""),
-                        text=attachment.text[:limit] + (ellipsis if len(attachment.text) > limit else ""),
-                        link=attachment.link,
-                    )
-                    if attachment.user:
-                        attachment_dict.name = attachment.user.name
-                        attachment_dict.user_id = attachment.user.user_id
-                    ai_prompt_slack_message_lite.attachments.append(attachment_dict)
+            for attachment in message.attachments:
+                ai_prompt_slack_message_attachment = AiPromptSlackMessageAttachment(
+                    title=attachment.title[:limit] + (ellipsis if len(attachment.title) > limit else ""),
+                    text=attachment.text[:limit] + (ellipsis if len(attachment.text) > limit else ""),
+                    link=attachment.link,
+                )
+                if attachment.user:
+                    ai_prompt_slack_message_attachment.name = attachment.user.name
+                    ai_prompt_slack_message_attachment.user_id = attachment.user.user_id
+                ai_prompt_slack_message_lite.attachments.append(ai_prompt_slack_message_attachment)
 
-            if len([v for v in message.files if v.is_textualize and (allow_private_files or v.is_public)]) > 0:
-                for file in message.files:
-                    if file.is_textualize and (allow_private_files or file.is_public):
-                        file_dict = AiPromptSlackMessageFile(
-                            title=file.title,
-                            link=file.permalink,
-                        )
-                        if not (
-                            # 重複ファイルをチェックする、かつ1度登場している場合は、description と text を入力しない
-                            check_dup_files
-                            and (1 if file.permalink in check_dup_files_dict else check_dup_files_dict.setdefault(file.permalink, 0)) > 0
-                        ):
-                            if file.description:
-                                file_dict.description = file.description[:limit] + (ellipsis if len(file.description) > limit else "")
-                            if file.text:
-                                file_dict.text = file.text[:limit] + (ellipsis if len(file.text) > limit else "")
-                        ai_prompt_slack_message_lite.files.append(file_dict)
+            for file in message.files:
+                if file.is_textualize and (allow_private_files or file.is_public):
+                    ai_prompt_slack_message_file = AiPromptSlackMessageFile(
+                        title=file.title,
+                        link=file.permalink,
+                    )
+                    if not (
+                        # 重複ファイルをチェックする、かつ1度登場している場合は、description と text を入力しない
+                        check_dup_files
+                        and (file.permalink in check_dup_files_dict or check_dup_files_dict.setdefault(file.permalink, False))
+                    ):
+                        if file.description:
+                            ai_prompt_slack_message_file.description = file.description[:limit] + (ellipsis if len(file.description) > limit else "")
+                        if file.text:
+                            ai_prompt_slack_message_file.text = file.text[:limit] + (ellipsis if len(file.text) > limit else "")
+                    ai_prompt_slack_message_lite.files.append(ai_prompt_slack_message_file)
 
             ai_prompt_slack_message_lite.reactions.extend([reaction for reaction in message.reactions])
 
@@ -226,6 +224,7 @@ class OssansNaviService:
     ) -> AiPrompt:
         if limit_last_message < 0:
             limit_last_message = limit
+        check_dup_files_dict: dict[str, bool] = {}
 
         return AiPrompt(
             system=system,
@@ -237,6 +236,8 @@ class OssansNaviService:
                             message,
                             limit=(limit_last_message if i == 0 else limit),
                             allow_private_files=True,
+                            check_dup_files=True,
+                            check_dup_files_dict=check_dup_files_dict,
                         ),
                         images=(
                             # analyze_image_files が有効の場合は画像を解析して文字列化するために、未解析の画像ファイルを入力する
@@ -681,7 +682,7 @@ class OssansNaviService:
                 # 今回の検索結果を追加した場合のトークン数を試算する
                 tokens = AiTokenizor.content_tokens(
                     json.dumps(
-                        [OssansNaviService.slack_message_to_ai_prompt(message).model_dump() for message in [*candidate_messages, message]],
+                        [OssansNaviService.slack_message_to_ai_prompt(message).to_dict() for message in [*candidate_messages, message]],
                         ensure_ascii=False,
                         separators=(',', ':')
                     )
@@ -706,7 +707,7 @@ class OssansNaviService:
             # 今回入力するトークン数を slack_searches_tokens_remain から引いておく
             tokens_remain -= AiTokenizor.content_tokens(
                 json.dumps(
-                    [OssansNaviService.slack_message_to_ai_prompt(message).model_dump() for message in candidate_messages],
+                    [OssansNaviService.slack_message_to_ai_prompt(message).to_dict() for message in candidate_messages],
                     ensure_ascii=False,
                     separators=(',', ':')
                 )
@@ -727,7 +728,7 @@ class OssansNaviService:
             thread_messages,
             schema=ai_prompt_assets.REFINE_SLACK_SEARCHES_SCHEMA,
             rag_info=AiPromptRagInfo(
-                contents=[OssansNaviService.slack_message_to_ai_prompt(message).model_dump() for message in SlackMessage.sort(current_messages)],
+                contents=[OssansNaviService.slack_message_to_ai_prompt(message).to_dict() for message in SlackMessage.sort(current_messages)],
                 words=[v.words for v in self.search_results.slack_search_results],
             )
         )
@@ -809,7 +810,7 @@ class OssansNaviService:
             ).to_openai_messages()
         )
         # 低価格LLM が精査してくれた結果を元にトークン数が収まる範囲で入力データとする
-        check_dup_files_dict: dict[str, int] = {}
+        check_dup_files_dict: dict[str, bool] = {}
         for (content, url_context) in itertools.zip_longest(self.search_results.lastshot_messages, self.search_results.url_context_results):
             tokens = 0
             if content is not None:
@@ -820,7 +821,7 @@ class OssansNaviService:
                             limit=15000,
                             check_dup_files=True,
                             check_dup_files_dict=check_dup_files_dict
-                        ).model_dump(),
+                        ).to_dict(),
                         ensure_ascii=False,
                         separators=(',', ':')
                     )
@@ -857,7 +858,8 @@ class OssansNaviService:
                         **(
                             {
                                 "slack_messages": [
-                                    v.model_dump() for v in OssansNaviService.slack_message_to_ai_prompt(
+                                    v.to_dict()
+                                    for v in OssansNaviService.slack_message_to_ai_prompt(
                                         SlackMessage.sort(current_messages), limit=15000, check_dup_files=True
                                     )
                                 ]

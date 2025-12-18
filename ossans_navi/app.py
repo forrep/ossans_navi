@@ -96,7 +96,7 @@ async def do_ossans_navi_response_safe(event: SlackMessageEvent) -> None:
         # event の構築作業
         event.canceled_events.extend(EVENT_GUARD.get_canceled_events(event))
         (event.user, event.channel) = await asyncio.gather(
-            slack_service.get_user(event.user_id if event.is_user else event.bot_id),
+            slack_service.get_user(event.user_id if event.has_user_id else event.bot_id),
             slack_service.get_channel(event.channel_id),
         )
         mentions = await async_utils.asyncio_gather(*[slack_service.get_user(user_id) for user_id in event.mentions], concurrency=3)
@@ -201,7 +201,7 @@ async def do_ossans_navi_response(
                 return
 
     # DM の topic から設定を取得する
-    if event.is_user and not event.user.is_bot:
+    if event.user.is_user:
         event.settings = await slack_service.get_dm_info_with_ossans_navi(event.user.user_id)
 
     # スレッドでやりとりされた履歴メッセージを取得
