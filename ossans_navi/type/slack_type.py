@@ -139,7 +139,12 @@ class SlackFile(BaseModel):
 
     @property
     def is_textualize(self) -> bool:
-        return self.is_text or self.is_canvas or (self.is_image and self.is_analyzed) or ((self.is_video or self.is_audio) and bool(self.text))
+        return (
+            self.is_text
+            or self.is_canvas
+            or (self.is_image and self.is_analyzed)
+            or ((self.is_video or self.is_audio) and (bool(self.text) or bool(self.description)))
+        )
 
     @property
     def width(self) -> int:

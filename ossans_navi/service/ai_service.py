@@ -39,6 +39,27 @@ class AiPromptRagInfo(BaseModel):
     contents: list[Any] | dict[str, Any]
     words: list[str]
 
+    def to_json(self) -> str:
+        if len(self.contents) == 0:
+            return json.dumps(
+                {
+                    "status": (
+                        "No related information was found. Please respond in general terms."
+                    )
+                },
+                ensure_ascii=False,
+                separators=(',', ':')
+            )
+        else:
+            return json.dumps(
+                {
+                    "search_terms": self.words,
+                    "contents": self.contents,
+                },
+                ensure_ascii=False,
+                separators=(',', ':')
+            )
+
 
 class AiPromptUploadFile(BaseModel):
     data: bytes
@@ -147,37 +168,6 @@ class AiPromptMessage(BaseModel):
         if self.name:
             message["name"] = self.name
         messages.append(message)
-
-        if rag_info:
-            messages.append(
-                {
-                    "role": AiPromptRole.ASSISTANT.openai_role,
-                    "content": None,
-                    "tool_calls": [
-                        {
-                            "id": f"call_{function_id.call_id}",
-                            "type": "function",
-                            "function": {
-                                "name": "get_related_information",
-                                "arguments": json.dumps(rag_info.words, ensure_ascii=False),
-                            },
-                        }
-                    ],
-                }
-            )
-            messages.append(
-                {
-                    "tool_call_id": f"call_{function_id.response_id}",
-                    "role": "tool",
-                    "content": json.dumps(
-                        rag_info.contents if len(rag_info.contents) > 0 else {
-                            "status": "No valid information was found in the get_related_information results, please respond in general terms."
-                        },
-                        ensure_ascii=False,
-                        separators=(',', ':')
-                    ),
-                },
-            )
         return messages
 
     def to_gemini_content(self, rag_info: Optional[AiPromptRagInfo] = None) -> list[types.ContentDict]:
@@ -250,51 +240,6 @@ class AiPromptMessage(BaseModel):
             "role": self.role.gemini_role,
             "parts": parts,
         })
-
-        if rag_info:
-            contents.append(
-                {
-                    "role": AiPromptRole.ASSISTANT.gemini_role,
-                    "parts": [
-                        {
-                            "function_call": {
-                                "name": "get_related_information",
-                                "args": {
-                                    "terms": rag_info.words
-                                },
-                            }
-                        }
-                    ],
-                }
-            )
-            contents.append(
-                {
-                    "role": AiPromptRole.USER.gemini_role,
-                    "parts": [
-                        {
-                            "function_response": {
-                                "name": "get_related_information",
-                                "response": {
-                                    **(
-                                        {
-                                            "status": (
-                                                "No related information was found in the get_related_information results, "
-                                                + "please respond in general terms."
-                                            )
-                                        } if len(rag_info.contents) == 0 else {}
-                                    ),
-                                    **(
-                                        {
-                                            "contents": rag_info.contents,
-                                        } if len(rag_info.contents) > 0 else {}
-                                    ),
-                                }
-                            }
-                        }
-                    ],
-                }
-            )
-
         return contents
 
 
@@ -341,7 +286,16 @@ class AiPrompt(BaseModel):
         return [
             {
                 "role": "system",
-                "content": self.system,
+                "content": (
+                    self.system
+                    + (
+                        (
+                            "\n\n<rag_info>\n"
+                            + self.rag_info.to_json()
+                            + "\n</rag_info>"
+                        ) if self.rag_info else ""
+                    )
+                ),
             },
             *(
                 list(itertools.chain.from_iterable([message.to_openai_messages(function_id) for message in self.messages[:-1]]))
@@ -369,28 +323,26 @@ class AiPrompt(BaseModel):
             }
 
     def to_openai_tools(self) -> Iterable[ChatCompletionToolParam]:
-        return [
-            {
-                "type": "function",
-                "function": {
-                    "name": "get_related_information",
-                    "description": "Get Related information found in this slack group.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "terms": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                            }
-                        }
-                    }
-                },
-            },
-        ]
+        return []
 
     def to_gemini_config(self) -> types.GenerateContentConfigDict:
         return {
-            "system_instruction": {"parts": [{"text": self.system}]},
+            "system_instruction": {
+                "parts": [
+                    {
+                        "text": (
+                            self.system
+                            + (
+                                (
+                                    "\n\n<rag_info>\n"
+                                    + self.rag_info.to_json()
+                                    + "\n</rag_info>"
+                                ) if self.rag_info else ""
+                            )
+                        )
+                    }
+                ]
+            },
             "candidate_count": self.choices,
             "max_output_tokens": config.MAX_OUTPUT_TOKENS,
             "response_mime_type": "application/json" if self.is_json else None,
@@ -402,27 +354,6 @@ class AiPrompt(BaseModel):
                 "function_calling_config": {"mode": types.FunctionCallingConfigMode.NONE},
             },
             "tools": [
-                *(
-                    [
-                        {
-                            "function_declarations": [
-                                {
-                                    "name": "get_related_information",
-                                    "description": "Get Related information found in this slack group.",
-                                    "parameters": {
-                                        "type": types.Type.OBJECT,
-                                        "properties": {
-                                            "terms": {
-                                                "type": types.Type.ARRAY,
-                                                "items": {"type": types.Type.STRING},
-                                            }
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    ] if not self.tools_url_context else []
-                ),
                 *(
                     [{"url_context": {}}] if self.tools_url_context else []
                 )
@@ -853,6 +784,14 @@ class AiService:
             return content
         else:
             return {}
+
+    async def request_video_audio_description(self, model: AiModelUsage, prompt: AiPrompt) -> str:
+        response = await self._chat_completions(model, prompt)
+        if len(response.choices) == 0:
+            return ""
+        if not isinstance((v := response.choices[0].content), str):
+            return ""
+        return v
 
     async def request_slack_search_words(self, model: AiModelUsage, prompt: AiPrompt) -> tuple[list[str], list[str]]:
         # Gemini は n=2 で十分なバリエーションを生成してくれる

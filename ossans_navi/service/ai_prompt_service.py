@@ -36,6 +36,9 @@ class AiPromptService:
     def image_description_prompt(self) -> str:
         return self._prompt(ai_prompt_assets.IMAGE_DESCRIPTION_PROMPT)
 
+    def video_audio_description_prompt(self) -> str:
+        return self._prompt(ai_prompt_assets.VIDEO_AUDIO_DESCRIPTION_PROMPT)
+
     def slack_search_word_prompt(self) -> str:
         return self._prompt(ai_prompt_assets.SLACK_SEARCH_WORD_PROMPT)
 

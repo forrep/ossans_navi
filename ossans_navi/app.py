@@ -300,7 +300,10 @@ async def do_ossans_navi_response(
                     await ossans_navi_service.load_slack_file(file, user_client=False, load_file=True, load_vtt=True)
 
     # 添付画像がある場合は画像の説明を取得する
-    await ossans_navi_service.analyze_image_description(thread_messages)
+    async with asyncio.TaskGroup() as tg:
+        tg.create_task(ossans_navi_service.analyze_image_description(thread_messages))
+        if event.is_mention and config.LOAD_VIDEO_AUDIO_FILES:
+            tg.create_task(ossans_navi_service.analyze_video_audio_description(thread_messages))
 
     if event.is_need_additional_information:
         if ossans_navi_service.has_progress_reaction():

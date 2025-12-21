@@ -199,8 +199,6 @@ class SlackService:
         self.user_client = SlackWrapper(token=self.user_token)
         self.bot_client = SlackWrapper(token=self.bot_token)
         self.cache_users_list = LRUCache[bool, SlackUsers](capacity=1, expire=60 * 3)   # 3分
-        self.cache_get_user = LRUCache[str, SlackUser](capacity=1000, expire=1 * 60 * 60 * 4)  # 4時間
-        self.cache_get_bot = LRUCache[str, SlackUser](capacity=1000, expire=1 * 60 * 60 * 4)   # 4時間
         self.cache_get_conversations_members = LRUCache[str, list[str]](capacity=1000, expire=1 * 60 * 60 * 4)  # 4時間
         self.cache_get_channels = LRUCache[bool, dict[str, dict]](capacity=1, expire=1 * 60 * 60 * 4)   # 4時間
         self.cache_user_presence = LRUCache[str, bool](capacity=100, expire=1 * 60 * 10)   # 10分

@@ -426,7 +426,7 @@ class OssansNaviService:
                     for file in message.files:
                         file.is_analyzed = False
 
-    async def analyze_image_description(self, thread_messages: list[SlackMessageLite]):
+    async def analyze_image_description(self, thread_messages: list[SlackMessageLite]) -> None:
         # キャッシュから読み込めるやつは読み込んでおく、ここで読み込まれた分は生成AIに渡されないからトークンの節約になる
         OssansNaviService.load_image_description_from_cache(thread_messages)
         messages_token = AiTokenizor.messages_tokens(
@@ -488,6 +488,19 @@ class OssansNaviService:
             OssansNaviService.image_cache.put(permalink, analyzed)
         # キャッシュに追加した後で再度キャッシュから情報を読み込む
         OssansNaviService.load_image_description_from_cache(thread_messages)
+
+    async def analyze_video_audio_description(self, thread_messages: list[SlackMessageLite]) -> None:
+        files = [v for v in thread_messages[-1].files if (v.is_video or v.is_audio) and v.is_valid]
+        if len(files) > 0:
+            files[0].text = await self.ai_service.request_video_audio_description(
+                self.ai_service.models_usage.low_cost,
+                self.get_ai_prompt(
+                    self.ai_prompt_service.video_audio_description_prompt(),
+                    thread_messages,
+                    input_video_audio_files=True,
+                )
+            )
+            files[0].is_analyzed = True
 
     async def search(
         self,
@@ -850,7 +863,6 @@ class OssansNaviService:
                 self.ai_prompt_service.lastshot_prompt(len(current_messages) > 0 or len(current_url_contexts) > 0),
                 thread_messages,
                 input_image_files=config.LASTSHOT_INPUT_IMAGE_FILES,
-                input_video_audio_files=config.LOAD_VIDEO_AUDIO_FILES,
                 limit=15000,
                 limit_last_message=40000,
                 rag_info=AiPromptRagInfo(
