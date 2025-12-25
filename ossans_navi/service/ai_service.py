@@ -15,7 +15,7 @@ from google.genai import types
 from openai import AsyncAzureOpenAI, AsyncOpenAI, InternalServerError, RateLimitError
 from openai.types.chat import (ChatCompletion, ChatCompletionContentPartParam, ChatCompletionMessageParam, ChatCompletionToolParam,
                                completion_create_params)
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from ossans_navi import config
 from ossans_navi.common import async_utils
@@ -43,9 +43,7 @@ class AiPromptRagInfo(BaseModel):
         if len(self.contents) == 0:
             return json.dumps(
                 {
-                    "status": (
-                        "No related information was found. Please respond in general terms."
-                    )
+                    "status": "No related information was found. Please respond in general terms."
                 },
                 ensure_ascii=False,
                 separators=(',', ':')
@@ -100,27 +98,12 @@ class AiPromptContent(BaseModel):
             return {}
 
 
-class AiPromptFunctionId(BaseModel):
-    call: int = Field(default=0, init=False)
-    response: int = Field(default=0, init=False)
-
-    @property
-    def call_id(self) -> int:
-        self.call = self.call + 1
-        return self.call
-
-    @property
-    def response_id(self) -> int:
-        self.response = self.response + 1
-        return self.response
-
-
 class AiPromptMessage(BaseModel):
     role: AiPromptRole
     content: AiPromptContent
     name: Optional[str] = Field(default=None)
 
-    def to_openai_messages(self, function_id: AiPromptFunctionId, rag_info: Optional[AiPromptRagInfo] = None) -> list[ChatCompletionMessageParam]:
+    def to_openai_messages(self) -> list[ChatCompletionMessageParam]:
         messages: list[ChatCompletionMessageParam] = []
         message: Optional[ChatCompletionMessageParam] = None
         if self.role == AiPromptRole.ASSISTANT:
@@ -282,7 +265,6 @@ class AiPrompt(BaseModel):
             }
 
     def to_openai_messages(self) -> Iterable[ChatCompletionMessageParam]:
-        function_id = AiPromptFunctionId()
         return [
             {
                 "role": "system",
@@ -298,10 +280,7 @@ class AiPrompt(BaseModel):
                 ),
             },
             *(
-                list(itertools.chain.from_iterable([message.to_openai_messages(function_id) for message in self.messages[:-1]]))
-            ),
-            *(
-                list(itertools.chain.from_iterable([message.to_openai_messages(function_id, self.rag_info) for message in self.messages[-1:]]))
+                list(itertools.chain.from_iterable([message.to_openai_messages() for message in self.messages]))
             ),
         ]
 
@@ -350,9 +329,6 @@ class AiPrompt(BaseModel):
                 self.response_schema.model_dump(exclude_unset=True, exclude_defaults=True)
                 if self.is_json and self.response_schema else None
             ),
-            "tool_config": {
-                "function_calling_config": {"mode": types.FunctionCallingConfigMode.NONE},
-            },
             "tools": [
                 *(
                     [{"url_context": {}}] if self.tools_url_context else []
@@ -476,27 +452,32 @@ class QualityCheckResponse(BaseModel):
     response_quality: bool
 
 
-class AiService:
-    client_openai_instance: Optional[AsyncOpenAI] = None
-    client_azure_openai_instance: Optional[AsyncAzureOpenAI] = None
-    client_gemini_instance: Optional[genai.Client] = None
+class AiState(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    def __init__(self):
+    client_openai: Optional[AsyncOpenAI] = None
+    client_azure_openai: Optional[AsyncAzureOpenAI] = None
+    client_gemini: Optional[genai.Client] = None
+
+
+class AiService:
+    def __init__(self, state: AiState) -> None:
+        self.state = state
         self.models_usage = AiModelsUsage.new()
 
-    @classmethod
-    async def start(cls) -> None:
+    @staticmethod
+    async def start(state: AiState) -> None:
         # 環境変数にセットされた APIキーから、それぞれのクライアントインスタンスを生成する
         if config.OPENAI_API_KEY:
-            AiService.client_openai_instance = AsyncOpenAI(api_key=config.OPENAI_API_KEY)
+            state.client_openai = AsyncOpenAI(api_key=config.OPENAI_API_KEY)
         if config.AZURE_OPENAI_API_KEY and config.AZURE_OPENAI_ENDPOINT:
-            AiService.client_azure_openai_instance = AsyncAzureOpenAI(
+            state.client_azure_openai = AsyncAzureOpenAI(
                 api_key=config.AZURE_OPENAI_API_KEY,
                 api_version=config.AZURE_OPENAI_API_VERSION,
                 azure_endpoint=config.AZURE_OPENAI_ENDPOINT,
             )
         if config.GEMINI_API_KEY:
-            AiService.client_gemini_instance = genai.Client(api_key=config.GEMINI_API_KEY)
+            state.client_gemini = genai.Client(api_key=config.GEMINI_API_KEY)
 
         # AiModelsUsage.new() することで環境変数に設定したモデル名が正しいことを検証するのと、
         # 利用するモデルに対応する AiService.client_*_instance が None でないことを検証する
@@ -504,34 +485,47 @@ class AiService:
         for model in models_usage.models:
             match model.ai_service_type:
                 case AiServiceType.OPENAI:
-                    if not AiService.client_openai_instance:
+                    if not state.client_openai:
                         raise ValueError("OSN_OPENAI_API_KEY is required when using OpenAI service.")
                 case AiServiceType.AZURE_OPENAI:
-                    if not AiService.client_azure_openai_instance:
+                    if not state.client_azure_openai:
                         raise ValueError("OSN_AZURE_OPENAI_API_KEY and OSN_AZURE_OPENAI_ENDPOINT are required when using Azure OpenAI service.")
                 case AiServiceType.GEMINI:
-                    if not AiService.client_gemini_instance:
+                    if not state.client_gemini:
                         raise ValueError("OSN_GEMINI_API_KEY is required when using Gemini service.")
                 case _:
                     raise NotImplementedError("Unknown AiServiceType")
 
+    @staticmethod
+    async def stop(state: AiState) -> None:
+        # クライアントインスタンスをクローズする
+        if state.client_openai is not None:
+            await state.client_openai.close()
+            state.client_openai = None
+        if state.client_azure_openai is not None:
+            await state.client_azure_openai.close()
+            state.client_azure_openai = None
+        if state.client_gemini is not None:
+            await state.client_gemini.aio.aclose()
+            state.client_gemini = None
+
     @property
     def client_openai(self) -> AsyncOpenAI:
-        if AiService.client_openai_instance is None:
+        if self.state.client_openai is None:
             raise RuntimeError("AiService is not started.")
-        return AiService.client_openai_instance
+        return self.state.client_openai
 
     @property
     def client_azure_openai(self) -> AsyncAzureOpenAI:
-        if AiService.client_azure_openai_instance is None:
+        if self.state.client_azure_openai is None:
             raise RuntimeError("AiService is not started.")
-        return AiService.client_azure_openai_instance
+        return self.state.client_azure_openai
 
     @property
     def client_gemini(self) -> genai.Client:
-        if AiService.client_gemini_instance is None:
+        if self.state.client_gemini is None:
             raise RuntimeError("AiService is not started.")
-        return AiService.client_gemini_instance
+        return self.state.client_gemini
 
     async def _chat_completions(
         self,

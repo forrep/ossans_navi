@@ -108,7 +108,7 @@ purpose: {{ event.channel.purpose }}
 
 # Rules for "user_intent"
 - Organize and output the questions and intentions contained in the last message.
-- If the last message does not contain a question or intent, null is output.
+- If the last message does not contain a questions or intentions, null is output.
 
 # Rules for "user_intentions_type"
 - Consider the intent of the last message sent by the user. Then, select the message intent from the options below. Be sure to select from only the following options.

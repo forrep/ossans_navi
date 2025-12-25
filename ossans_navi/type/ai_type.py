@@ -85,7 +85,13 @@ class AiModelInfo(Enum):
     AZURE_GPT_41 = ("gpt-4.1", AiServiceType.AZURE_OPENAI, 2.00, 8.00)
     AZURE_GPT_41_MINI = ("gpt-4.1-mini", AiServiceType.AZURE_OPENAI, 1.10, 4.40)
 
-    def __init__(self, model_name: str, ai_service_type: AiServiceType, cost_in: float, cost_out: float):
+    def __init__(
+        self,
+        model_name: str,
+        ai_service_type: AiServiceType,
+        cost_in: float,
+        cost_out: float,
+    ):
         self.model_name = model_name
         self.ai_service_type = ai_service_type
         self.cost_in = cost_in

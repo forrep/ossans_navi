@@ -37,11 +37,12 @@ class OssansNaviService:
     def __init__(
         self,
         slack_service: SlackService,
+        ai_service: AiService,
         event: SlackMessageEvent,
         config: ossans_navi_type.OssansNaviConfig,
     ) -> None:
-        self.ai_service = AiService()
         self.slack_service = slack_service
+        self.ai_service = ai_service
         self.ai_prompt_service = AiPromptService(event, self.slack_service.get_assistant_names())
         self.event = event
         self.config = config
@@ -53,10 +54,12 @@ class OssansNaviService:
     async def create(
         cls,
         slack_service: SlackService,
+        ai_service: AiService,
         event: SlackMessageEvent,
     ) -> "OssansNaviService":
         return cls(
             slack_service,
+            ai_service,
             event,
             ossans_navi_type.OssansNaviConfig.from_dict(await slack_service.get_config_dict()),
         )

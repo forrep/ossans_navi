@@ -8,7 +8,7 @@ from enum import Enum
 from typing import Any, Optional
 
 import aiohttp
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
 from slack_bolt.async_app import AsyncApp
 from slack_bolt.util.utils import get_boot_message
@@ -183,68 +183,233 @@ class EventGuard:
         return self.lock.__aexit__(exc_type, exc_value, traceback)
 
 
+class SlackState(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    app_token: Optional[str] = Field(default=None, init=False)
+    user_token: Optional[str] = Field(default=None, init=False)
+    bot_token: Optional[str] = Field(default=None, init=False)
+    app: Optional[AsyncApp] = Field(default=None, init=False)
+    socket_mode_handler: Optional[AsyncSocketModeHandler] = Field(default=None, init=False)
+    app_client: Optional[SlackWrapper] = Field(default=None, init=False)
+    user_client: Optional[SlackWrapper] = Field(default=None, init=False)
+    bot_client: Optional[SlackWrapper] = Field(default=None, init=False)
+    aiohttp_session: Optional[aiohttp.ClientSession] = Field(default=None, init=False)
+    my_user_id: Optional[str] = Field(default=None, init=False)
+    my_bot_user_id: Optional[str] = Field(default=None, init=False)
+    my_bot_user: Optional[SlackUser] = Field(default=None, init=False)
+    workspace_url: Optional[str] = Field(default=None, init=False)
+    slackbot_channel_id: Optional[str] = Field(default=None, init=False)
+    cache_users_list: LRUCache[bool, SlackUsers] = Field(
+        # 3分
+        default_factory=lambda: LRUCache[bool, SlackUsers](capacity=1, expire=60 * 3), init=False
+    )
+    cache_get_conversations_members: LRUCache[str, list[str]] = Field(
+        # 4時間
+        default_factory=lambda: LRUCache[str, list[str]](capacity=1000, expire=1 * 60 * 60 * 4), init=False
+    )
+    cache_get_channels: LRUCache[bool, dict[str, dict]] = Field(
+        # 4時間
+        default_factory=lambda: LRUCache[bool, dict[str, dict]](capacity=1, expire=1 * 60 * 60 * 4), init=False
+    )
+    cache_user_presence: LRUCache[str, bool] = Field(
+        # 10分
+        default_factory=lambda: LRUCache[str, bool](capacity=100, expire=1 * 60 * 10), init=False
+    )
+    cache_get_channel: LRUCache[str, SlackChannel] = Field(
+        # 60分
+        default_factory=lambda: LRUCache[str, SlackChannel](capacity=1000, expire=1 * 60 * 60), init=False
+    )
+    cache_config: LRUCache[bool, dict] = Field(
+        # 60分
+        default_factory=lambda: LRUCache[bool, dict](capacity=1, expire=1 * 60 * 60), init=False
+    )
+    cache_load_file: LRUCache[str, bytes] = Field(
+        # 60分
+        default_factory=lambda: LRUCache[str, bytes](capacity=50, expire=1 * 60 * 60), init=False
+    )
+    cache_conversations_open: LRUCache[str, str] = Field(
+        # 4時間
+        default_factory=lambda: LRUCache[str, str](capacity=100, expire=1 * 60 * 60 + 4), init=False
+    )
+
+
 class SlackService:
-    def __init__(
-        self,
-        app_token: Optional[str] = None,
-        user_token: Optional[str] = None,
-        bot_token: Optional[str] = None
-    ) -> None:
-        self.app_token = app_token if app_token else config.SLACK_APP_TOKEN
-        self.user_token = user_token if user_token else config.SLACK_USER_TOKEN
-        self.bot_token = bot_token if bot_token else config.SLACK_BOT_TOKEN
-        self.app = AsyncApp(token=self.bot_token, logger=logging.getLogger("slack_bolt"))
-        self.socket_mode_handler_instance: Optional[AsyncSocketModeHandler] = None
-        self.app_client = SlackWrapper(token=self.app_token)
-        self.user_client = SlackWrapper(token=self.user_token)
-        self.bot_client = SlackWrapper(token=self.bot_token)
-        self.cache_users_list = LRUCache[bool, SlackUsers](capacity=1, expire=60 * 3)   # 3分
-        self.cache_get_conversations_members = LRUCache[str, list[str]](capacity=1000, expire=1 * 60 * 60 * 4)  # 4時間
-        self.cache_get_channels = LRUCache[bool, dict[str, dict]](capacity=1, expire=1 * 60 * 60 * 4)   # 4時間
-        self.cache_user_presence = LRUCache[str, bool](capacity=100, expire=1 * 60 * 10)   # 10分
-        self.cache_get_channel = LRUCache[str, SlackChannel](capacity=1000, expire=1 * 60 * 60)   # 60分
-        self.cache_config = LRUCache[bool, dict](capacity=1, expire=1 * 60 * 60)   # 60分
-        self.cache_load_file = LRUCache[str, bytes](capacity=50, expire=1 * 60 * 60)   # 60分
-        self.cache_conversations_open = LRUCache[str, str](capacity=100, expire=1 * 60 * 60 + 4)   # 4時間
-        self.my_user_id: str = ""
-        self.my_bot_user_id: str = ""
-        self.my_bot_user: Optional[SlackUser] = None
-        self.workspace_url: str = "https://slack.com/"
-        self.slackbot_channel_id: Optional[str] = None
-        self.aiohttp_session_instance: Optional[aiohttp.ClientSession] = None
+    def __init__(self, state: SlackState) -> None:
+        self.state = state
+
+    @property
+    def app_token(self) -> str:
+        if self.state.app_token is None:
+            raise RuntimeError("SlackService is not started. app_token is None")
+        return self.state.app_token
+
+    @property
+    def user_token(self) -> str:
+        if self.state.user_token is None:
+            raise RuntimeError("SlackService is not started. user_token is None")
+        return self.state.user_token
+
+    @property
+    def bot_token(self) -> str:
+        if self.state.bot_token is None:
+            raise RuntimeError("SlackService is not started. bot_token is None")
+        return self.state.bot_token
+
+    @property
+    def app(self) -> AsyncApp:
+        if self.state.app is None:
+            raise RuntimeError("SlackService is not started. app is None")
+        return self.state.app
 
     @property
     def socket_mode_handler(self) -> AsyncSocketModeHandler:
-        if not self.socket_mode_handler_instance:
-            raise RuntimeError("SocketModeHandler is not initialized")
-        return self.socket_mode_handler_instance
+        if self.state.socket_mode_handler is None:
+            raise RuntimeError("SlackService is not started. socket_mode_handler is None")
+        return self.state.socket_mode_handler
+
+    @property
+    def app_client(self) -> SlackWrapper:
+        if self.state.app_client is None:
+            raise RuntimeError("SlackService is not started. app_client is None")
+        return self.state.app_client
+
+    @property
+    def user_client(self) -> SlackWrapper:
+        if self.state.user_client is None:
+            raise RuntimeError("SlackService is not started. user_client is None")
+        return self.state.user_client
+
+    @property
+    def bot_client(self) -> SlackWrapper:
+        if self.state.bot_client is None:
+            raise RuntimeError("SlackService is not started. bot_client is None")
+        return self.state.bot_client
 
     @property
     def aiohttp_session(self) -> aiohttp.ClientSession:
-        if not self.aiohttp_session_instance:
+        if self.state.aiohttp_session is None:
             raise RuntimeError("aiohttp.ClientSession is not initialized")
-        return self.aiohttp_session_instance
+        return self.state.aiohttp_session
 
-    async def start(self) -> None:
-        self.socket_mode_handler_instance = AsyncSocketModeHandler(self.app, self.app_token)
-        response_app = SlackAuthTestAppResponse(**(v if isinstance((v := (await self.app_client.auth_test()).data), dict) else {}))
-        response_user = SlackAuthTestUserResponse(**(v if isinstance((v := (await self.user_client.auth_test()).data), dict) else {}))
-        response_bot = SlackAuthTestBotResponse(**(v if isinstance((v := (await self.bot_client.auth_test()).data), dict) else {}))
-        self.my_user_id = response_user.user_id
-        self.my_bot_user_id = response_bot.user_id
-        self.my_bot_user = await self.get_user(response_bot.user_id)
-        self.workspace_url = response_bot.url
-        self.slackbot_channel_id = await self.conversations_open("USLACKBOT")
-        self.aiohttp_session_instance = aiohttp.ClientSession(trust_env=True)
+    @property
+    def my_user_id(self) -> str:
+        if self.state.my_user_id is None:
+            raise RuntimeError("SlackService is not started. my_user_id is None")
+        return self.state.my_user_id
+
+    @property
+    def my_bot_user_id(self) -> str:
+        if self.state.my_bot_user_id is None:
+            raise RuntimeError("SlackService is not started. my_bot_user_id is None")
+        return self.state.my_bot_user_id
+
+    @property
+    def my_bot_user(self) -> SlackUser:
+        if self.state.my_bot_user is None:
+            raise RuntimeError("SlackService is not started. my_bot_user is None")
+        return self.state.my_bot_user
+
+    @property
+    def workspace_url(self) -> str:
+        if self.state.workspace_url is None:
+            raise RuntimeError("SlackService is not started. workspace_url is None")
+        return self.state.workspace_url
+
+    @property
+    def slackbot_channel_id(self) -> str:
+        if self.state.slackbot_channel_id is None:
+            raise RuntimeError("SlackService is not started. slackbot_channel_id is None")
+        return self.state.slackbot_channel_id
+
+    @property
+    def cache_users_list(self) -> LRUCache[bool, SlackUsers]:
+        if self.state.cache_users_list is None:
+            raise RuntimeError("SlackService is not started. cache_users_list is None")
+        return self.state.cache_users_list
+
+    @property
+    def cache_get_conversations_members(self) -> LRUCache[str, list[str]]:
+        if self.state.cache_get_conversations_members is None:
+            raise RuntimeError("SlackService is not started. cache_get_conversations_members is None")
+        return self.state.cache_get_conversations_members
+
+    @property
+    def cache_get_channels(self) -> LRUCache[bool, dict[str, dict]]:
+        if self.state.cache_get_channels is None:
+            raise RuntimeError("SlackService is not started. cache_get_channels is None")
+        return self.state.cache_get_channels
+
+    @property
+    def cache_user_presence(self) -> LRUCache[str, bool]:
+        if self.state.cache_user_presence is None:
+            raise RuntimeError("SlackService is not started. cache_user_presence is None")
+        return self.state.cache_user_presence
+
+    @property
+    def cache_get_channel(self) -> LRUCache[str, SlackChannel]:
+        if self.state.cache_get_channel is None:
+            raise RuntimeError("SlackService is not started. cache_get_channel is None")
+        return self.state.cache_get_channel
+
+    @property
+    def cache_config(self) -> LRUCache[bool, dict]:
+        if self.state.cache_config is None:
+            raise RuntimeError("SlackService is not started. cache_config is None")
+        return self.state.cache_config
+
+    @property
+    def cache_load_file(self) -> LRUCache[str, bytes]:
+        if self.state.cache_load_file is None:
+            raise RuntimeError("SlackService is not started. cache_load_file is None")
+        return self.state.cache_load_file
+
+    @property
+    def cache_conversations_open(self) -> LRUCache[str, str]:
+        if self.state.cache_conversations_open is None:
+            raise RuntimeError("SlackService is not started. cache_conversations_open is None")
+        return self.state.cache_conversations_open
+
+    @classmethod
+    async def start(
+        cls,
+        state: SlackState,
+        app_token: Optional[str] = None,
+        user_token: Optional[str] = None,
+        bot_token: Optional[str] = None,
+    ) -> AsyncApp:
+        state.app_token = app_token if app_token else config.SLACK_APP_TOKEN
+        state.user_token = user_token if user_token else config.SLACK_USER_TOKEN
+        state.bot_token = bot_token if bot_token else config.SLACK_BOT_TOKEN
+        state.app = AsyncApp(token=state.bot_token, logger=logging.getLogger("slack_bolt"))
+        state.socket_mode_handler = AsyncSocketModeHandler(state.app, state.app_token)
+        state.app_client = SlackWrapper(token=state.app_token)
+        state.user_client = SlackWrapper(token=state.user_token)
+        state.bot_client = SlackWrapper(token=state.bot_token)
+        state.aiohttp_session = aiohttp.ClientSession(trust_env=True)
+
+        slack_service = cls(state)
+        response_app = SlackAuthTestAppResponse(**(v if isinstance((v := (await state.app_client.auth_test()).data), dict) else {}))
+        response_user = SlackAuthTestUserResponse(**(v if isinstance((v := (await state.user_client.auth_test()).data), dict) else {}))
+        response_bot = SlackAuthTestBotResponse(**(v if isinstance((v := (await state.bot_client.auth_test()).data), dict) else {}))
+        state.my_user_id = response_user.user_id
+        state.my_bot_user_id = response_bot.user_id
+        state.my_bot_user = await slack_service.get_user(response_bot.user_id)
+        state.workspace_url = response_bot.url
+        state.slackbot_channel_id = await slack_service.conversations_open("USLACKBOT")
+
         # 起動したトークンに紐づくアプリ名をロギングする、間違って本番トークンで起動してしまわないように
         logger.info(f"App start with: {response_app.app_name}")
-        await self.socket_mode_handler.connect_async()
+        await state.socket_mode_handler.connect_async()
         logger.info(get_boot_message())
+        return state.app
 
-    async def stop(self) -> None:
-        await self.socket_mode_handler.close_async()
-        if self.aiohttp_session_instance:
-            await self.aiohttp_session_instance.close()
+    @staticmethod
+    async def stop(state: SlackState) -> None:
+        if state.socket_mode_handler is not None:
+            await state.socket_mode_handler.close_async()
+        if state.aiohttp_session is not None:
+            await state.aiohttp_session.close()
 
     async def users_list(self) -> SlackUsers:
         if (cached := self.cache_users_list.get(True)).found:

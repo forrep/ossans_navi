@@ -7,33 +7,32 @@ import sys
 from collections.abc import AsyncGenerator
 from typing import Any, Callable, Coroutine
 
-from slack_sdk import WebClient
-
 from ossans_navi import config
 from ossans_navi.common import async_utils
 from ossans_navi.controller import config_controller
-from ossans_navi.service.ai_service import AiService
+from ossans_navi.service.ai_service import AiService, AiState
 from ossans_navi.service.ossans_navi_service import OssansNaviService
-from ossans_navi.service.slack_service import EventGuard, SlackService
+from ossans_navi.service.slack_service import EventGuard, SlackService, SlackState
 from ossans_navi.type.slack_type import SlackMessageEvent
 
 EVENT_GUARD = EventGuard()
 SEMAPHORE = asyncio.Semaphore(2)
 
-slack_service = SlackService()
-
 logger = logging.getLogger(__name__)
 
 
-@slack_service.app.action(re.compile(r".*"))
-async def handle_button_click(ack: Callable, body: dict[Any, Any], client: WebClient):
+async def handle_button_click(ack: Callable, body: dict[Any, Any], slack_state: SlackState):
     await ack()
     logger.info(f"{json.dumps(body, ensure_ascii=False)}")
-    await config_controller.routing(body, slack_service)
+    await config_controller.routing(body, SlackService(slack_state))
 
 
-@slack_service.app.event("message")
-async def handle_message_events(ack: Callable[[], Coroutine[Any, Any, None]], event: dict[str, dict]):
+async def handle_message_events(
+    ack: Callable[[], Coroutine[Any, Any, None]],
+    event: dict[str, dict],
+    slack_state: SlackState,
+    ai_state: AiState
+) -> None:
     await ack()
     logger.info("event=" + json.dumps(event, ensure_ascii=False))
     message_event = SlackMessageEvent(source=event)
@@ -74,7 +73,7 @@ async def handle_message_events(ack: Callable[[], Coroutine[Any, Any, None]], ev
     # ここまで他の非同期処理を挟まないようにする
 
     async with SEMAPHORE:
-        await do_ossans_navi_response_safe(message_event)
+        await do_ossans_navi_response_safe(message_event, SlackService(slack_state), AiService(ai_state))
 
     logger.info(f"Event finished: {message_event.id()} ({message_event.id_source})")
     # 応答まで至ったパターンはロックを取ってから finish が必要なのですでに終了済み、重複して終了しても問題なし
@@ -82,7 +81,7 @@ async def handle_message_events(ack: Callable[[], Coroutine[Any, Any, None]], ev
     EVENT_GUARD.finish(message_event)
 
 
-async def do_ossans_navi_response_safe(event: SlackMessageEvent) -> None:
+async def do_ossans_navi_response_safe(event: SlackMessageEvent, slack_service: SlackService, ai_service: AiService) -> None:
     # 処理キュー(EVENT_GUARD)を操作する、途中に他の非同期処理を挟まないようにする
     if EVENT_GUARD.is_canceled(event):
         logger.info(f"Event canceled: {event.id()} ({event.id_source})")
@@ -113,10 +112,11 @@ async def do_ossans_navi_response_safe(event: SlackMessageEvent) -> None:
 
         ossans_navi_service = await OssansNaviService.create(
             slack_service=slack_service,
+            ai_service=ai_service,
             event=event,
         )
 
-        async for _ in do_ossans_navi_response(ossans_navi_service, event):
+        async for _ in do_ossans_navi_response(ossans_navi_service, event, slack_service):
             # yield のタイミングで処理が戻されるごとにイベントがキャンセルされていないか確認して、キャンセルされていれば終了する
             if EVENT_GUARD.is_canceled(event):
                 logger.info(f"Event canceled: {event.id()}({event.id_source})")
@@ -148,6 +148,7 @@ async def do_ossans_navi_response_safe(event: SlackMessageEvent) -> None:
 async def do_ossans_navi_response(
     ossans_navi_service: OssansNaviService,
     event: SlackMessageEvent,
+    slack_service: SlackService,
 ) -> AsyncGenerator[None, None]:
     if event.is_dm() and await ossans_navi_service.special_command():
         # DM の場合は special_command() を実行、そして True が返ってきたら special_command を実行しているので通常のメッセージ処理は終了する
@@ -426,10 +427,20 @@ async def main():
         logger.info(f"  {name}={value}")
 
     # 非同期実行が必要な初期化処理を実行
-    await asyncio.gather(
-        AiService.start(),
-        slack_service.start(),
+    slack_state = SlackState()
+    ai_state = AiState()
+    (_, app) = await asyncio.gather(
+        AiService.start(ai_state),
+        SlackService.start(slack_state),
     )
+
+    @app.action(re.compile(r".*"))
+    async def slack_action_handler(ack: Callable, body: dict[Any, Any]):
+        await handle_button_click(ack, body, slack_state)
+
+    @app.event("message")
+    async def slack_message_events_handler(ack: Callable[[], Coroutine[Any, Any, None]], event: dict[str, dict]):
+        await handle_message_events(ack, event, slack_state, ai_state)
 
     # TERM/INTシグナルにトラップして (graceful) shutdown を実行、以下のフローで終了する
     #   1. Slack サーバから WebSocket を切断して新規メッセージの受信を停止
@@ -452,7 +463,10 @@ async def main():
     await event.wait()
 
     # アプリの終了
-    await slack_service.stop()
+    await asyncio.gather(
+        SlackService.stop(slack_state),
+        AiService.stop(ai_state),
+    )
     logger.info("Slack app stopped.")
     if graceful:
         current_task = asyncio.current_task()

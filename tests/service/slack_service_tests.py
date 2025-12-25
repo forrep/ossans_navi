@@ -7,7 +7,7 @@ from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 from slack_sdk.errors import SlackApiError
 
-from ossans_navi.service.slack_service import SlackService
+from ossans_navi.service.slack_service import SlackService, SlackState
 from ossans_navi.service.slack_wrapper import SlackWrapper
 from ossans_navi.type.slack_type import SlackChannel, SlackUser
 
@@ -173,7 +173,11 @@ def slack_service(monkeypatch: pytest.MonkeyPatch):
         pass
     monkeypatch.setattr(App, '__init__', app_dummy)
     monkeypatch.setattr(SocketModeHandler, '__init__', app_dummy)
-    return SlackService()
+    slack_state = SlackState()
+    slack_state.app_client = SlackWrapper("dummy token")
+    slack_state.user_client = SlackWrapper("dummy token")
+    slack_state.bot_client = SlackWrapper("dummy token")
+    return SlackService(slack_state)
 
 
 @pytest.mark.asyncio
