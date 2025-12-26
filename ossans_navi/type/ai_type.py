@@ -1,5 +1,5 @@
 from enum import Enum, auto
-from typing import Any, Optional
+from typing import Any, Optional, overload
 
 from pydantic import BaseModel, Field
 
@@ -80,6 +80,7 @@ class AiModelInfo(Enum):
     GEMINI_25_FLASH = ("gemini-2.5-flash-preview-09-2025", AiServiceType.GEMINI, 0.30, 2.50)
     GEMINI_25_FLASH_LITE = ("gemini-2.5-flash-lite-preview-09-2025", AiServiceType.GEMINI, 0.10, 0.40)
     GEMINI_25_PRO = ("gemini-2.5-pro", AiServiceType.GEMINI, 1.25, 10.00)
+    GEMINI_30_FLASH = ("gemini-3-flash-preview", AiServiceType.GEMINI, 0.50, 3.00)
     GPT_41 = ("gpt-4.1", AiServiceType.OPENAI, 2.00, 8.00)
     GPT_41_MINI = ("gpt-4.1-mini", AiServiceType.OPENAI, 1.10, 4.40)
     AZURE_GPT_41 = ("gpt-4.1", AiServiceType.AZURE_OPENAI, 2.00, 8.00)
@@ -125,27 +126,60 @@ class AiModelUsage(BaseModel):
         return self.cost_in * self.tokens_in / 1_000_000 + self.cost_out * self.tokens_out / 1_000_000
 
 
+class AiModelType(Enum):
+    LOW_COST = auto()
+    HIGH_QUALITY = auto()
+
+
 class AiModelsUsage(BaseModel):
-    low_cost: AiModelUsage
-    high_quality: AiModelUsage
-    gemini_25_flash_lite: Optional[AiModelUsage]
     models: list[AiModelUsage] = Field(default_factory=list, init=False)
+    models_map: dict[str, AiModelUsage] = Field(default_factory=dict, init=False)
 
     @staticmethod
     def new() -> 'AiModelsUsage':
-        try:
-            models_usage = AiModelsUsage(
-                low_cost=AiModelUsage(model=AiModelInfo[config.AI_MODEL_LOW_COST]),
-                high_quality=AiModelUsage(model=AiModelInfo[config.AI_MODEL_HIGH_QUALITY]),
-                gemini_25_flash_lite=(AiModelUsage(model=AiModelInfo.GEMINI_25_FLASH_LITE) if config.GEMINI_API_KEY else None),
-            )
-        except KeyError as e:
-            raise ValueError(f"Invalid AI model name in configuration: {e}") from e
-        models_usage.models.append(models_usage.low_cost)
-        models_usage.models.append(models_usage.high_quality)
-        if models_usage.gemini_25_flash_lite:
-            models_usage.models.append(models_usage.gemini_25_flash_lite)
+        models_usage = AiModelsUsage()
+        models_usage.models_map.update(
+            {
+                ai_model_info.name: AiModelUsage(model=ai_model_info)
+                for ai_model_info in AiModelInfo
+                if (
+                    (ai_model_info.ai_service_type == AiServiceType.GEMINI and config.GEMINI_API_KEY)
+                    or (ai_model_info.ai_service_type == AiServiceType.OPENAI and config.OPENAI_API_KEY)
+                    or (ai_model_info.ai_service_type == AiServiceType.AZURE_OPENAI and config.AZURE_OPENAI_API_KEY and config.AZURE_OPENAI_ENDPOINT)
+                )
+            }
+        )
+        models_usage.models.extend(models_usage.models_map.values())
+        if (
+            config.AI_MODEL_LOW_COST not in models_usage.models_map
+            or config.AI_MODEL_HIGH_QUALITY not in models_usage.models_map
+        ):
+            raise ValueError(f"Invalid AI model configuration: LOW_COST={config.AI_MODEL_LOW_COST}, HIGH_QUALITY={config.AI_MODEL_HIGH_QUALITY}")
+        models_usage.models_map[AiModelType.LOW_COST.name] = models_usage.models_map[config.AI_MODEL_LOW_COST]
+        models_usage.models_map[AiModelType.HIGH_QUALITY.name] = models_usage.models_map[config.AI_MODEL_HIGH_QUALITY]
+
+        # モデル名が正常に設定されているかの確認
+        for name in dir(config):
+            if not name.startswith("MODEL_FOR_"):
+                continue
+            if (value := getattr(config, name)) in models_usage.models_map:
+                continue
+            raise ValueError(f"Invalid AI model configuration for {name}: {value}")
+
         return models_usage
 
     def get_total_cost(self) -> float:
         return sum([model.get_total_cost() for model in self.models])
+
+    @overload
+    def get_model(self, name: AiModelType) -> AiModelUsage:
+        ...
+
+    @overload
+    def get_model(self, name: str) -> Optional[AiModelUsage]:
+        ...
+
+    def get_model(self, name: str | AiModelType) -> Optional[AiModelUsage]:
+        if isinstance(name, AiModelType):
+            name = name.name
+        return self.models_map.get(name)

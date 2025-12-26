@@ -13,7 +13,8 @@ from google.genai.types import Schema, Type
 from PIL import Image, ImageFile
 
 from ossans_navi import config
-from ossans_navi.common import async_utils
+from ossans_navi import config as global_config
+from ossans_navi.common import async_utils, string_util
 from ossans_navi.common.cache import LRUCache
 from ossans_navi.controller import config_controller
 from ossans_navi.service import ai_prompt_assets
@@ -23,10 +24,9 @@ from ossans_navi.service.ai_service import (AiPrompt, AiPromptContent, AiPromptM
 from ossans_navi.service.ai_tokenize_service import AiTokenizor
 from ossans_navi.service.slack_service import SlackService
 from ossans_navi.type import ossans_navi_type
-from ossans_navi.type.ai_type import AiPromptSlackMessageAttachment, AiPromptSlackMessage, AiPromptSlackMessageFile
+from ossans_navi.type.ai_type import AiPromptSlackMessage, AiPromptSlackMessageAttachment, AiPromptSlackMessageFile
 from ossans_navi.type.ossans_navi_type import SearchResults, UrlContext
 from ossans_navi.type.slack_type import SlackFile, SlackMessage, SlackMessageEvent, SlackMessageLite, SlackSearchTerm
-from ossans_navi.common import string_util
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,44 @@ class OssansNaviService:
         self.search_results = SearchResults()
         self.slack_file_permalinks: dict[str, SlackFile] = {}
         """同一 permalink に紐づく SlackFile を一つのインスタンスにまとめるために permalink から SlackFile を取得する辞書"""
+
+        if (v := ai_service.models_usage.get_model(global_config.MODEL_FOR_CLASSIFY)) is not None:
+            self.model_for_classify = v
+        else:
+            raise ValueError(f"Model {global_config.MODEL_FOR_CLASSIFY} not found")
+
+        if (v := ai_service.models_usage.get_model(global_config.MODEL_FOR_IMAGE_DESCRIPTION)) is not None:
+            self.model_for_image_description = v
+        else:
+            raise ValueError(f"Model {global_config.MODEL_FOR_IMAGE_DESCRIPTION} not found")
+
+        if (v := ai_service.models_usage.get_model(global_config.MODEL_FOR_VIDEO_AUDIO_DESCRIPTION)) is not None:
+            self.model_for_video_audio_description = v
+        else:
+            raise ValueError(f"Model {global_config.MODEL_FOR_VIDEO_AUDIO_DESCRIPTION} not found")
+
+        if (v := ai_service.models_usage.get_model(global_config.MODEL_FOR_SLACK_SEARCH_WORDS)) is not None:
+            self.model_for_slack_search_words = v
+        else:
+            raise ValueError(f"Model {global_config.MODEL_FOR_SLACK_SEARCH_WORDS} not found")
+
+        if (v := ai_service.models_usage.get_model(global_config.MODEL_FOR_REFINE_SLACK_SEARCHES)) is not None:
+            self.model_for_refine_slack_searches = v
+        else:
+            raise ValueError(f"Model {global_config.MODEL_FOR_REFINE_SLACK_SEARCHES} not found")
+
+        if (v := ai_service.models_usage.get_model(global_config.MODEL_FOR_LASTSHOT)) is not None:
+            self.model_for_lastshot = v
+        else:
+            raise ValueError(f"Model {global_config.MODEL_FOR_LASTSHOT} not found")
+
+        if (v := ai_service.models_usage.get_model(global_config.MODEL_FOR_QUALITY_CHECK)) is not None:
+            self.model_for_quality_check = v
+        else:
+            raise ValueError(f"Model {global_config.MODEL_FOR_QUALITY_CHECK} not found")
+
+        # URLコンテキスト用モデルだけはオプショナル扱い
+        self.model_for_url_context = ai_service.models_usage.get_model(global_config.MODEL_FOR_URL_CONTEXT)
 
     @classmethod
     async def create(
@@ -363,7 +401,7 @@ class OssansNaviService:
 
     async def classify(self, thread_messages: list[SlackMessageLite]) -> dict[str, str | list[str]]:
         return await self.ai_service.request_classify(
-            self.ai_service.models_usage.low_cost,
+            self.model_for_classify,
             self.get_ai_prompt(
                 self.ai_prompt_service.classify_prompt(),
                 thread_messages,
@@ -471,7 +509,7 @@ class OssansNaviService:
 
         # 添付画像を AI で解析実行
         image_description = await self.ai_service.request_image_description(
-            self.ai_service.models_usage.low_cost,
+            self.model_for_image_description,
             self.get_ai_prompt(
                 self.ai_prompt_service.image_description_prompt(),
                 thread_messages,
@@ -496,7 +534,7 @@ class OssansNaviService:
         files = [v for v in thread_messages[-1].files if (v.is_video or v.is_audio) and v.is_valid]
         if len(files) > 0:
             files[0].text = await self.ai_service.request_video_audio_description(
-                self.ai_service.models_usage.low_cost,
+                self.model_for_video_audio_description,
                 self.get_ai_prompt(
                     self.ai_prompt_service.video_audio_description_prompt(),
                     thread_messages,
@@ -566,7 +604,7 @@ class OssansNaviService:
             yield
 
             (slack_search_words, external_urls) = await self.ai_service.request_slack_search_words(
-                self.ai_service.models_usage.high_quality,
+                self.model_for_slack_search_words,
                 request_slack_search_words_prompt
             )
 
@@ -752,7 +790,7 @@ class OssansNaviService:
         # AI への問い合わせ部分だけ並列で処理する
         logger.debug(f"[{depth}][{node}] _refine_slack_searches: calling AI service")
         refine_slack_searches_responses = await self.ai_service.request_refine_slack_searches(
-            self.ai_service.models_usage.low_cost,
+            self.model_for_refine_slack_searches,
             refine_slack_searches_prompt
         )
         logger.info(f"[{depth}][{node}] _refine_slack_searches: response={refine_slack_searches_responses}")
@@ -778,7 +816,7 @@ class OssansNaviService:
 
     async def url_context(self, urls: list[str]) -> None:
         # config.LOAD_URL_CONTEXT が有効、かつ Gemini 2.5 Flash Lite モデルが利用可能な場合に URL コンテキストを取得する
-        if config.LOAD_URL_CONTEXT and self.ai_service.models_usage.gemini_25_flash_lite is not None:
+        if config.LOAD_URL_CONTEXT and self.model_for_url_context is not None:
             if (url_context_urls := [url for url in urls if url not in self.search_results.url_context_urls]):
                 logger.debug(f"url_context: urls={url_context_urls}")
                 self.search_results.add(
@@ -789,7 +827,7 @@ class OssansNaviService:
                             await async_utils.asyncio_gather(
                                 *[
                                     self.ai_service.request_url_context(
-                                        self.ai_service.models_usage.gemini_25_flash_lite,
+                                        self.model_for_url_context,
                                         AiPrompt(
                                             system=self.ai_prompt_service.url_context_prompt(),
                                             messages=[
@@ -861,7 +899,7 @@ class OssansNaviService:
         logger.info(f"Lastshot current_messages={len(current_messages)}, current_url_contexts={len(current_url_contexts)}")
 
         return await self.ai_service.request_lastshot(
-            self.ai_service.models_usage.high_quality,
+            self.model_for_lastshot,
             self.get_ai_prompt(
                 self.ai_prompt_service.lastshot_prompt(len(current_messages) > 0 or len(current_url_contexts) > 0),
                 thread_messages,
@@ -893,7 +931,7 @@ class OssansNaviService:
 
     async def quality_check(self, thread_messages: list[SlackMessageLite], response_message: str) -> QualityCheckResponse:
         return await self.ai_service.request_quality_check(
-            self.ai_service.models_usage.low_cost,
+            self.model_for_quality_check,
             self.get_ai_prompt(
                 self.ai_prompt_service.quality_check_prompt(response_message),
                 thread_messages,

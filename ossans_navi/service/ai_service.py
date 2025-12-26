@@ -631,7 +631,7 @@ class AiService:
             # 実行に失敗していた場合は例外を送出
             raise last_exception or RuntimeError()
         logger.info(f"elapsed: {time.time() - start_time}")
-        logger.info("response=" + json.dumps(response.model_dump(exclude_unset=True, exclude_defaults=True), ensure_ascii=False))
+        logger.info(f"response={response.model_dump_json(exclude_unset=True, exclude_defaults=True)}")
         # 利用したトークン数を加算する
         if response.usage_metadata:
             if isinstance(response.usage_metadata.prompt_token_count, int):
