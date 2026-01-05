@@ -233,6 +233,7 @@ class AiPrompt(BaseModel):
     choices: int = Field(default=1)
     rag_info: Optional[AiPromptRagInfo] = Field(default=None)
     tools_url_context: bool = Field(default=False)
+    tools_code_execution: bool = Field(default=False)
 
     @property
     def is_json(self) -> bool:
@@ -332,7 +333,10 @@ class AiPrompt(BaseModel):
             "tools": [
                 *(
                     [{"url_context": {}}] if self.tools_url_context else []
-                )
+                ),
+                *(
+                    [{"code_execution": {}}] if self.tools_code_execution else []
+                ),
             ],
         }
 
@@ -424,6 +428,23 @@ class AiResponse(BaseModel):
                             break
                         else:
                             texts.append(part.text)
+                    elif is_json:
+                        # 構造化出力時(is_json=True)に part.text 以外のレスポンスが返ってくる場合を想定しない
+                        logger.warning("Unexpected part in JSON response: " + str(part))
+                        continue
+                    elif (
+                        part.executable_code is not None
+                        and part.executable_code.code is not None
+                        and part.executable_code.language is not None
+                        and len(part.executable_code.code.strip()) > 0
+                    ):
+                        texts.append(f"```{part.executable_code.language.lower()}\n{part.executable_code.code.strip()}\n```\n")
+                    elif (
+                        part.code_execution_result is not None
+                        and part.code_execution_result.output is not None
+                        and len(part.code_execution_result.output.strip()) > 0
+                    ):
+                        texts.append(f"```\n{part.code_execution_result.output.strip()}\n```\n")
                     elif (
                         isinstance(part.inline_data, dict)
                         and part.inline_data.mime_type
@@ -434,7 +455,7 @@ class AiResponse(BaseModel):
                 if len(texts) > 0:
                     ai_response_messages.append(
                         AiResponseMessage(
-                            content="\n".join(texts),
+                            content="".join(texts),
                             role=AiPromptRole.ASSISTANT,
                             images=images,
                         )

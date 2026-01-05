@@ -24,7 +24,7 @@ from ossans_navi.service.ai_service import (AiPrompt, AiPromptContent, AiPromptM
 from ossans_navi.service.ai_tokenize_service import AiTokenizor
 from ossans_navi.service.slack_service import SlackService
 from ossans_navi.type import ossans_navi_type
-from ossans_navi.type.ai_type import AiPromptSlackMessage, AiPromptSlackMessageAttachment, AiPromptSlackMessageFile
+from ossans_navi.type.ai_type import AiPromptSlackMessage, AiPromptSlackMessageAttachment, AiPromptSlackMessageFile, AiServiceType
 from ossans_navi.type.ossans_navi_type import SearchResults, UrlContext
 from ossans_navi.type.slack_type import SlackFile, SlackMessage, SlackMessageEvent, SlackMessageLite, SlackSearchTerm
 
@@ -898,36 +898,36 @@ class OssansNaviService:
                 current_url_contexts.append(url_context)
         logger.info(f"Lastshot current_messages={len(current_messages)}, current_url_contexts={len(current_url_contexts)}")
 
-        return await self.ai_service.request_lastshot(
-            self.model_for_lastshot,
-            self.get_ai_prompt(
-                self.ai_prompt_service.lastshot_prompt(len(current_messages) > 0 or len(current_url_contexts) > 0),
-                thread_messages,
-                input_image_files=config.LASTSHOT_INPUT_IMAGE_FILES,
-                limit=15000,
-                limit_last_message=40000,
-                rag_info=AiPromptRagInfo(
-                    contents={
-                        **(
-                            {
-                                "slack_messages": [
-                                    v.to_dict()
-                                    for v in OssansNaviService.slack_message_to_ai_prompt(
-                                        SlackMessage.sort(current_messages), limit=15000, check_dup_files=True
-                                    )
-                                ]
-                            } if len(current_messages) > 0 else {}
-                        ),
-                        **(
-                            {
-                                "url_contexts": OssansNaviService.url_context_to_ai_prompt(current_url_contexts, limit=15000)
-                            } if len(current_url_contexts) > 0 else {}
-                        )
-                    },
-                    words=self.search_results.lastshot_terms,
-                )
+        lastshot_prompt = self.get_ai_prompt(
+            self.ai_prompt_service.lastshot_prompt(len(current_messages) > 0 or len(current_url_contexts) > 0),
+            thread_messages,
+            input_image_files=config.LASTSHOT_INPUT_IMAGE_FILES,
+            limit=15000,
+            limit_last_message=40000,
+            rag_info=AiPromptRagInfo(
+                contents={
+                    **(
+                        {
+                            "slack_messages": [
+                                v.to_dict()
+                                for v in OssansNaviService.slack_message_to_ai_prompt(
+                                    SlackMessage.sort(current_messages), limit=15000, check_dup_files=True
+                                )
+                            ]
+                        } if len(current_messages) > 0 else {}
+                    ),
+                    **(
+                        {
+                            "url_contexts": OssansNaviService.url_context_to_ai_prompt(current_url_contexts, limit=15000)
+                        } if len(current_url_contexts) > 0 else {}
+                    )
+                },
+                words=self.search_results.lastshot_terms,
             )
         )
+        if config.ENABLE_CODE_EXECUTION_TOOL and self.model_for_lastshot.model.ai_service_type in [AiServiceType.GEMINI]:
+            lastshot_prompt.tools_code_execution = True
+        return await self.ai_service.request_lastshot(self.model_for_lastshot, lastshot_prompt)
 
     async def quality_check(self, thread_messages: list[SlackMessageLite], response_message: str) -> QualityCheckResponse:
         return await self.ai_service.request_quality_check(

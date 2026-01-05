@@ -1,5 +1,5 @@
 from enum import Enum, auto
-from typing import Any, Optional, overload
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -83,8 +83,12 @@ class AiModelInfo(Enum):
     GEMINI_30_FLASH = ("gemini-3-flash-preview", AiServiceType.GEMINI, 0.50, 3.00)
     GPT_41 = ("gpt-4.1", AiServiceType.OPENAI, 2.00, 8.00)
     GPT_41_MINI = ("gpt-4.1-mini", AiServiceType.OPENAI, 1.10, 4.40)
+    GPT_5_NANO = ("gpt-5-nano", AiServiceType.OPENAI, 0.05, 0.40)
+    GPT_5_MINI = ("gpt-5-mini", AiServiceType.OPENAI, 0.25, 2.00)
     AZURE_GPT_41 = ("gpt-4.1", AiServiceType.AZURE_OPENAI, 2.00, 8.00)
     AZURE_GPT_41_MINI = ("gpt-4.1-mini", AiServiceType.AZURE_OPENAI, 1.10, 4.40)
+    AZURE_GPT_5_NANO = ("gpt-5-nano", AiServiceType.AZURE_OPENAI, 0.05, 0.40)
+    AZURE_GPT_5_MINI = ("gpt-5-mini", AiServiceType.AZURE_OPENAI, 0.25, 2.00)
 
     def __init__(
         self,
@@ -171,15 +175,5 @@ class AiModelsUsage(BaseModel):
     def get_total_cost(self) -> float:
         return sum([model.get_total_cost() for model in self.models])
 
-    @overload
-    def get_model(self, name: AiModelType) -> AiModelUsage:
-        ...
-
-    @overload
     def get_model(self, name: str) -> Optional[AiModelUsage]:
-        ...
-
-    def get_model(self, name: str | AiModelType) -> Optional[AiModelUsage]:
-        if isinstance(name, AiModelType):
-            name = name.name
         return self.models_map.get(name)

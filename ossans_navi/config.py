@@ -103,6 +103,9 @@ else:
 # 外部URLの取得をするか
 LOAD_URL_CONTEXT = True
 
+# code_execution ツールを有効にするか
+ENABLE_CODE_EXECUTION_TOOL = True
+
 # 開発モードのデフォルト値（起動時に --production が渡されると上書きされて本番モードになる）
 DEVELOPMENT_MODE = True
 

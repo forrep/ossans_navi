@@ -32,8 +32,8 @@
             "console": "integratedTerminal",
             "args": [],
             "env": {
-                "OSN_AI_MODEL_LOW_COST": "AZURE_GPT_41_MINI",
-                "OSN_AI_MODEL_HIGH_QUALITY": "AZURE_GPT_41"
+                "OSN_AI_MODEL_LOW_COST": "AZURE_GPT_5_NANO",
+                "OSN_AI_MODEL_HIGH_QUALITY": "AZURE_GPT_5_MINI"
             }
         },
         {
