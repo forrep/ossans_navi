@@ -177,6 +177,7 @@ class SlackMessageLite(BaseModel):
     attachments: list[SlackAttachment]
     files: list[SlackFile]
     reactions: list[str] = Field(default_factory=list)
+    mentions_in_content: list[SlackUser] = Field(default_factory=list)
 
     def is_root_message(self) -> bool:
         return self.ts == self.thread_ts

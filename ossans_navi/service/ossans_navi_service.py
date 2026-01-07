@@ -24,7 +24,7 @@ from ossans_navi.service.ai_service import (AiPrompt, AiPromptContent, AiPromptM
 from ossans_navi.service.ai_tokenize_service import AiTokenizor
 from ossans_navi.service.slack_service import SlackService
 from ossans_navi.type import ossans_navi_type
-from ossans_navi.type.ai_type import AiPromptSlackMessage, AiPromptSlackMessageAttachment, AiPromptSlackMessageFile, AiServiceType
+from ossans_navi.type.ai_type import AiPromptSlackMessage, AiPromptSlackMessageAttachment, AiPromptSlackMessageFile, AiPromptSlackUser, AiServiceType
 from ossans_navi.type.ossans_navi_type import SearchResults, UrlContext
 from ossans_navi.type.slack_type import SlackFile, SlackMessage, SlackMessageEvent, SlackMessageLite, SlackSearchTerm
 
@@ -212,11 +212,15 @@ class OssansNaviService:
         if isinstance(message, SlackMessageLite):
             ai_prompt_slack_message_lite = AiPromptSlackMessage(
                 timestamp=message.timestamp.strftime('%Y-%m-%d %H:%M:%S'),
-                name=message.user.name,
-                user_id=message.user.user_id,
+                sender_name=message.user.name,
+                sender_user_id=message.user.user_id,
                 content=(message.content[:limit] + (ellipsis if len(message.content) > limit else "")),
                 permalink=message.permalink,
-                mention_to=message.user.mention_to,
+                mention_to_sender=message.user.mention_to,
+                mentions_in_content=[
+                    AiPromptSlackUser(user_id=v.user_id, name=v.name, username=v.username)
+                    for v in message.mentions_in_content
+                ],
             )
 
             for attachment in message.attachments:

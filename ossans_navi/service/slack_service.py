@@ -590,19 +590,23 @@ class SlackService:
         self.cache_get_channels.put(True, channels)
         return channels
 
-    async def replace_id_to_name(self, text) -> str:
-        if not isinstance(text, str):
-            return text
+    async def get_mentions(self, text: str) -> list[SlackUser]:
+        return await async_utils.asyncio_gather(
+            *[
+                self.get_user(match.group(1)) for match in re.finditer(r'<@([A-Z0-9]+)(?:\|[^>]+?)?>', text)
+            ]
+        )
 
+    async def replace_id_to_name(self, text: str) -> str:
         async def replacer_channel(v: re.Match[str]) -> str:
             return f"#{(await self.get_channel(v.group(1), True)).name}{v.group(2) if v.group(2) else " "}"
 
         text = await async_utils.re_sub(r'<#([A-Z0-9]+)(?:\|[^>]*?)?>(\s)?', replacer_channel, text)
 
         async def replacer_user(v: re.Match[str]) -> str:
-            return (await self.get_user(v.group(1))).name + "さん"
+            return "@" + (await self.get_user(v.group(1))).username
 
-        text = await async_utils.re_sub(r'<@([A-Z0-9]+)(?:\|[^>]+?)?>( *さん)?', replacer_user, text)
+        text = await async_utils.re_sub(r'<@([A-Z0-9]+)(?:\|[^>]+?)?>', replacer_user, text)
         return text
 
     async def disable_mention_if_not_active(self, text: str) -> str:
@@ -657,7 +661,8 @@ class SlackService:
                 ),
                 attachments=attachments,
                 files=[file for file in [SlackFile.from_model(file) for file in message.files] if file is not None],
-                reactions=[f":{reaction.name}:" for reaction in message.reactions]
+                reactions=[f":{reaction.name}:" for reaction in message.reactions],
+                mentions_in_content=await self.get_mentions(message.text)
             ))
         return results
 

@@ -6,6 +6,19 @@ from pydantic import BaseModel, Field
 from ossans_navi import config
 
 
+class AiPromptSlackUser(BaseModel):
+    user_id: str
+    name: str
+    username: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "username": self.username,
+            "user_id": self.user_id,
+            "name": self.name,
+        }
+
+
 class AiPromptSlackMessageAttachment(BaseModel):
     title: str
     text: str
@@ -40,11 +53,12 @@ class AiPromptSlackMessageFile(BaseModel):
 
 class AiPromptSlackMessage(BaseModel):
     timestamp: str
-    name: str
-    user_id: str
+    sender_name: str
+    sender_user_id: str
     content: str
     permalink: str
-    mention_to: Optional[str] = Field(default=None)
+    mention_to_sender: Optional[str] = Field(default=None)
+    mentions_in_content: list[AiPromptSlackUser] = Field(default_factory=list)
     attachments: list[AiPromptSlackMessageAttachment] = Field(default_factory=list, init=False)
     files: list[AiPromptSlackMessageFile] = Field(default_factory=list, init=False)
     reactions: list[str] = Field(default_factory=list, init=False)
@@ -55,11 +69,12 @@ class AiPromptSlackMessage(BaseModel):
     def to_dict(self) -> dict[str, Any]:
         return {
             "timestamp": self.timestamp,
-            "name": self.name,
-            "user_id": self.user_id,
+            "sender_name": self.sender_name,
+            "sender_user_id": self.sender_user_id,
             "content": self.content,
             "permalink": self.permalink,
-            **({"mention_to": self.mention_to} if self.mention_to is not None else {}),
+            **({"mention_to_sender": self.mention_to_sender} if self.mention_to_sender is not None else {}),
+            **({"mentions_in_content": [user.to_dict() for user in self.mentions_in_content]} if len(self.mentions_in_content) > 0 else {}),
             **({"attachments": [attachment.to_dict() for attachment in self.attachments]} if len(self.attachments) > 0 else {}),
             **({"files": [file.to_dict() for file in self.files]} if len(self.files) > 0 else {}),
             **({"reactions": self.reactions} if len(self.reactions) > 0 else {}),
