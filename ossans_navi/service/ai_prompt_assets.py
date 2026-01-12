@@ -100,7 +100,7 @@ name: {{ event.channel.name }}
 topic: {{ event.channel.topic }}
 purpose: {{ event.channel.purpose }}
 
-# What I need you to do
+# What I want you to do
 - Do not respond to the user's intent; instead, provide a response that conforms to the JSON Schema.
 - Please respond in raw JSON format without including Markdown code blocks.
 {% if event.has_image_video_audio %}- The attached image, video, and audio content will be analyzed and entered later. Please respond to this task on the assumption that they have been entered.
@@ -108,7 +108,7 @@ purpose: {{ event.channel.purpose }}
 
 # Rules for "user_intent"
 - Organize and output the questions and intentions contained in the last message.
-- If the last message does not contain a questions or intentions, null is output.
+- If the last message does not contain any questions or intentions, null is output.
 
 # Rules for "user_intentions_type"
 - Consider the intent of the last message sent by the user. Then, select the message intent from the options below. Be sure to select from only the following options.
@@ -157,7 +157,7 @@ name: {{ event.channel.name }}
 topic: {{ event.channel.topic }}
 purpose: {{ event.channel.purpose }}
 
-# What I need you to do
+# What I want you to do
 - Do not respond to the user's intent; instead, provide a response that conforms to the JSON Schema.
 - Please respond in raw JSON format without including Markdown code blocks.
 - Output a description and text for each of the images included in each message.
@@ -179,8 +179,9 @@ name: {{ event.channel.name }}
 topic: {{ event.channel.topic }}
 purpose: {{ event.channel.purpose }}
 
-# What I need you to do
-- Use the output as RAG input for another LLM. Extract information from the attached video or audio without leaking any details, in accordance with the user's intent.
+# What I want you to do
+- Your output will be used as RAG input for another LLM.
+- Extract information from the attached video or audio without leaking any details, in accordance with the user's intent.
 - Please think in {{ language }} and respond in {{ language }}.
 """
 
@@ -208,7 +209,7 @@ name: {{ event.channel.name }}
 topic: {{ event.channel.topic }}
 purpose: {{ event.channel.purpose }}
 
-# What I need you to do
+# What I want you to do
 - Do not respond to the user's intent; instead, provide a response that conforms to the JSON Schema.
 - Please respond in raw JSON format without including Markdown code blocks.
 - On my behalf, I would like you to come up with search keywords for full-text search in Slack.
@@ -219,21 +220,21 @@ purpose: {{ event.channel.purpose }}
 
 # Rules for "user_intent"
 - Organize and output the questions and intentions contained in the last message.
-- If the last message does not contain a question or intent, null is output.
+- If the last message does not contain any questions or intentions, null is output.
 
 # Rules for "how_to_find_out"
 - If "user_intent" is null, output null.
-- What and how should I look into to resolve "user_intent"? Please organize and output.
+- To resolve "user_intent", what should be investigated and how? Please organize and output the information.
 
 # Rules for "slack_search_words"
-- If "user_intent" is null, output an empty array in "slack_search_words".
-- If "user_intent" exists, think of many search words that might get an answer and output them in an array, I search once for each element of the array.
+- If "user_intent" is null, output an empty array.
+- If "user_intent" exists, think of many search words that might get an answer and output them in an array, I'll search once for each element of the array.
 - Separate search words with a space for AND search.
 - You can also add a date filter to the search words.
-- If "after:yyyy-mm-dd" is specified as a search word, it searches after that date.
-- If "before:yyyy-mm-dd" is specified as a search word, it searches before that date.
-- Specify "user_id" in the form "from:<@UXXXXXXXX>" to search messages by sender.
-- "in:#channel_name" to search within a channel.
+- If `after:yyyy-mm-dd` is specified as a search word, it searches after that date.
+- If `before:yyyy-mm-dd` is specified as a search word, it searches before that date.
+- Specify "user_id" in the form `from:<@UXXXXXXXX>` to search messages by sender.
+- Specify `in:#channel_name` to search within a channel.
 - We would like to search for words with similar meanings, as information may be recorded with different wording. Please provide as many search terms as you can.
 - If "user_intent" is time-related, please use the date filter, do not include relative dates and times in the string, such as "last year", "this year", or "recently".
 - To obtain a wide range of search results, please include search terms with only one word, not just words that use AND search.
@@ -268,7 +269,7 @@ name: {{ event.channel.name }}
 topic: {{ event.channel.topic }}
 purpose: {{ event.channel.purpose }}
 
-# What I need you to do
+# What I want you to do
 - Do not respond to the user's intent; instead, provide a response that conforms to the JSON Schema.
 - Please respond in raw JSON format without including Markdown code blocks.
 - I want to filter out the necessary information from the <rag_info> results. Exclude information completely unrelated to the user's intent and output the permalink for the required information.
@@ -279,7 +280,7 @@ purpose: {{ event.channel.purpose }}
 
 # Rules for "user_intent"
 - Please organize and output the intent contained in the last message.
-- If the last message does not contain an intention, null is output.
+- If the last message does not contain any questions or intentions, null is output.
 
 # Rules for "permalinks"
 - Output permalink as an array.
@@ -313,7 +314,7 @@ name: {{ event.channel.name }}
 topic: {{ event.channel.topic }}
 purpose: {{ event.channel.purpose }}
 
-# What I need you to do
+# What I want you to do
 - Respond to the user's questions or intentions.
 - Please refer to <rag_info> results and give priority to the {{ workspace_name }}'s circumstances and internal rules in your answer.
 - The <rag_info> results contains outdated information; use the newer information.
@@ -355,7 +356,7 @@ name: {{ event.channel.name }}
 topic: {{ event.channel.topic }}
 purpose: {{ event.channel.purpose }}
 
-# What I need you to do
+# What I want you to do
 - Do not respond to the user's intent; instead, provide a response that conforms to the JSON Schema.
 - Please respond in raw JSON format without including Markdown code blocks.
 - "The message you intend to send", which I will quote later, is the message you intend to respond to.
@@ -364,7 +365,7 @@ purpose: {{ event.channel.purpose }}
 
 # Rules for "user_intent"
 - Please organize and output the intent contained in the last message.
-- If the last message does not contain an intention, null is output.
+- If the last message does not contain any questions or intentions, null is output.
 
 # Rules for "response_quality"
 - Outputs true if "user_intent" can be resolved with the response message and the response message is a useful message.
