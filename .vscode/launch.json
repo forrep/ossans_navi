@@ -20,7 +20,7 @@
             "console": "integratedTerminal",
             "args": [],
             "env": {
-                "OSN_AI_MODEL_LOW_COST": "GEMINI_20_FLASH",
+                "OSN_AI_MODEL_LOW_COST": "GEMINI_25_FLASH_LITE",
                 "OSN_AI_MODEL_HIGH_QUALITY": "GEMINI_25_PRO"
             }
         },

@@ -207,6 +207,10 @@ async def do_ossans_navi_response(
 
     # スレッドでやりとりされた履歴メッセージを取得
     thread_messages = await ossans_navi_service.get_thread_messages()
+    if len(thread_messages) == 0:
+        # 投稿後に処理される前にメッセージが削除されたケース
+        logger.info("No thread messages, finished.")
+        return
     # スレッドの会話内に OssansNavi からの返信があるかどうか？（そのスレッドに参加しているかどうか）
     event.is_joined = ossans_navi_service.is_joined(thread_messages)
     # スレッド上の会話で、OssansNavi のメッセージの直後に送信されたメッセージか？（OssansNavi のメッセージへの返信だと思われるか）

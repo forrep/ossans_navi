@@ -629,6 +629,10 @@ class SlackService:
                 # よって、user_client で発生する missing_scope は想定内
                 logger.info(f"{error_response.get("error")}, channel={channel}, thread_ts={thread_ts}, user_client={user_client}, exception={e}")
                 return []
+            elif error_response.get("error") == "thread_not_found":
+                # 投稿後にメッセージが削除されるなどが原因、エラー扱いではないので空配列を返す
+                logger.info(f"{error_response.get("error")}, channel={channel}, thread_ts={thread_ts}, user_client={user_client}, exception={e}")
+                return []
             else:
                 logger.error(f"{error_response.get("error")}, channel={channel}, thread_ts={thread_ts}, user_client={user_client}, exception={e}")
                 raise e
@@ -656,7 +660,7 @@ class SlackService:
                 content=await self.replace_id_to_name(message.text),
                 # thread_ts と ts が異なる場合はスレッド内の子メッセージ
                 permalink=(
-                    f"{self.workspace_url}archives/{channel}/p{thread_ts.replace('.', '')}"
+                    f"{self.workspace_url}archives/{channel}/p{message.ts.replace('.', '')}"
                     + (f"?thread_ts={thread_ts}" if thread_ts != message.ts else "")
                 ),
                 attachments=attachments,

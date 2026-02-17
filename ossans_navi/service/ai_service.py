@@ -856,8 +856,6 @@ class AiService:
         ]
 
     async def request_refine_slack_searches(self, model: AiModelUsage, prompt: AiPrompt) -> list[RefineResponse]:
-        # Gemini は n=2 で十分な網羅性がある
-        prompt.choices = 2 if model.ai_service_type == AiServiceType.GEMINI else 5
         response = await self._chat_completions(model, prompt)
         return AiService._analyze_refine_slack_searches_response(response)
 

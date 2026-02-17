@@ -248,7 +248,7 @@ REFINE_SLACK_SEARCHES_SCHEMA = Schema(
     type=Type.OBJECT,
     properties={
         "user_intent": Schema(type=Type.STRING, nullable=True),
-        "permalinks": Schema(type=Type.ARRAY, items=Schema(type=Type.STRING)),
+        "permalinks": Schema(type=Type.ARRAY, items=Schema(type=Type.STRING), max_items=100),
         "additional_search_words": Schema(type=Type.ARRAY, items=Schema(type=Type.STRING)),
     },
     required=["user_intent", "permalinks", "additional_search_words"],
