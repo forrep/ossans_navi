@@ -92,7 +92,7 @@ class AiServiceType(Enum):
 
 class AiModelInfo(Enum):
     GEMINI_20_FLASH = ("gemini-2.0-flash", AiServiceType.GEMINI, 0.10, 0.40)
-    GEMINI_25_FLASH = ("gemini-2.5-flash-preview-09-2025", AiServiceType.GEMINI, 0.30, 2.50)
+    GEMINI_25_FLASH = ("gemini-2.5-flash", AiServiceType.GEMINI, 0.30, 2.50)
     GEMINI_25_FLASH_LITE = ("gemini-2.5-flash-lite-preview-09-2025", AiServiceType.GEMINI, 0.10, 0.40)
     GEMINI_25_PRO = ("gemini-2.5-pro", AiServiceType.GEMINI, 1.25, 10.00)
     GEMINI_30_FLASH = ("gemini-3-flash-preview", AiServiceType.GEMINI, 0.50, 3.00)
