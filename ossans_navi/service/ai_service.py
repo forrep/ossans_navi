@@ -565,7 +565,7 @@ class AiService:
         model: AiModelUsage,
         prompt: AiPrompt,
     ) -> AiResponse:
-        logger.debug(f"start _chat_completions_gemini: {str(self.client_gemini)}")
+        logger.debug("start _chat_completions_gemini")
         start_time = time.time()
         last_exception: Optional[Exception] = None
         response: Optional[types.GenerateContentResponse] = None
@@ -672,6 +672,7 @@ class AiService:
             model: AiModelUsage,
             prompt: AiPrompt,
     ) -> AiResponse:
+        logger.debug("start _chat_completions_openai")
         if model.ai_service_type == AiServiceType.OPENAI:
             client = self.client_openai
         elif model.ai_service_type == AiServiceType.AZURE_OPENAI:
@@ -809,8 +810,6 @@ class AiService:
         return v
 
     async def request_slack_search_words(self, model: AiModelUsage, prompt: AiPrompt) -> tuple[list[str], list[str]]:
-        # Gemini は n=2 で十分なバリエーションを生成してくれる
-        prompt.choices = 2 if model.ai_service_type == AiServiceType.GEMINI else 5
         response = await self._chat_completions(model, prompt)
         slack_search_words = list(set(
             itertools.chain.from_iterable(

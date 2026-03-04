@@ -91,11 +91,11 @@ class AiServiceType(Enum):
 
 
 class AiModelInfo(Enum):
-    GEMINI_20_FLASH = ("gemini-2.0-flash", AiServiceType.GEMINI, 0.10, 0.40)
     GEMINI_25_FLASH = ("gemini-2.5-flash", AiServiceType.GEMINI, 0.30, 2.50)
     GEMINI_25_FLASH_LITE = ("gemini-2.5-flash-lite", AiServiceType.GEMINI, 0.10, 0.40)
     GEMINI_25_PRO = ("gemini-2.5-pro", AiServiceType.GEMINI, 1.25, 10.00)
     GEMINI_30_FLASH = ("gemini-3-flash-preview", AiServiceType.GEMINI, 0.50, 3.00)
+    GEMINI_31_FLASH_LITE = ("gemini-3.1-flash-lite-preview", AiServiceType.GEMINI, 0.25, 1.50)
     GPT_41 = ("gpt-4.1", AiServiceType.OPENAI, 2.00, 8.00)
     GPT_41_MINI = ("gpt-4.1-mini", AiServiceType.OPENAI, 1.10, 4.40)
     GPT_5_NANO = ("gpt-5-nano", AiServiceType.OPENAI, 0.05, 0.40)
