@@ -347,7 +347,12 @@ class SlackMessageEvent(BaseModel):
     is_talk_to_other: bool = Field(default=False, init=False)
     is_joined: bool = Field(default=False, init=False)
     is_next_message_from_ossans_navi: bool = Field(default=False, init=False)
-    classification: Optional[dict[str, str | list[str]]] = Field(default=None, init=False)
+    user_intent: Optional[str] = Field(default=None, init=False)
+    user_intentions_type: str = Field(default="no_intent", init=False)
+    who_to_talk_to: str = Field(default="cannot_determine", init=False)
+    user_emotions: str = Field(default="no_emotions", init=False)
+    required_knowledge_types: list[str] = Field(default_factory=list, init=False)
+    _slack_emoji_names: list[str] = PrivateAttr(default_factory=list, init=False)
     settings: str = Field(default="", init=False)
     canceled_events: list['SlackMessageEvent'] = Field(default_factory=list, init=False)
     reactions_to_message: list[str] = Field(default_factory=list, init=False)
@@ -597,58 +602,41 @@ class SlackMessageEvent(BaseModel):
 
     @property
     def is_need_additional_information(self) -> bool:
-        return not (
+        return (
             len(self.required_knowledge_types) > 0
-            and self.required_knowledge_types[0] == "no_information_required"
+            and self.required_knowledge_types[0] != "no_additional_information_required"
         )
 
     @property
-    def user_intent(self) -> Optional[str]:
-        return v if isinstance((v := (self.classification or {}).get("user_intent")), str) else None
-
-    @property
-    def user_intentions_type(self) -> str:
-        return v if isinstance((v := (self.classification or {}).get("user_intentions_type")), str) else "no_intent"
-
-    @property
-    def who_to_talk_to(self) -> str:
-        return v if isinstance((v := (self.classification or {}).get("who_to_talk_to")), str) else "cannot_determine"
-
-    @property
-    def user_emotions(self) -> str:
-        return v if isinstance((v := (self.classification or {}).get("user_emotions")), str) else "no_emotions"
-
-    @property
-    def required_knowledge_types(self) -> list[str]:
-        w = v if isinstance((v := (self.classification or {}).get("required_knowledge_types")), list) else []
-        return [z for z in w if isinstance(z, str)]
-
-    @property
     def slack_emoji_names(self) -> list[str]:
-        return [
-            *(v if isinstance(v := (self.classification or {}).get("slack_emoji_names"), list) else []),
-            *(
-                [v] if isinstance(
-                    (
-                        v := {
-                            "need_answers_to_questions": None,                                # 質問
-                            "ask_someone_to_do_something": None,                              # 依頼
-                            "report_to_someone": "spiral_note_pad",                           # 報告
-                            "advice_to_someone": "teacher",                                   # アドバイス
-                            "agree_with_someone": "smile",                                    # 同意
-                            "sympathize_with_someone": "relaxed",                             # 共感
-                            "comfirm_with_someone": "wink",                                   # 確認
-                            "praise_someone_or_something": "thumbsup",                        # 感嘆
-                            "disappointed_in_someone_or_something": "disappointed_relieved",  # 失望
-                            "sharing_information": "spiral_note_pad",                         # 共有
-                            "note_for_self": "pencil",                                        # メモ
-                            "other": None,
-                        }.get(self.user_intentions_type)
-                    ),
-                    str
-                ) else []
+        return self._slack_emoji_names
+
+    @slack_emoji_names.setter
+    def slack_emoji_names(self, value: list[str]) -> None:
+        self._slack_emoji_names = value.copy()
+        if (
+            self.user_intentions_type is not None
+            and isinstance(
+                (
+                    v := {
+                        "need_answers_to_questions": None,                                # 質問
+                        "ask_someone_to_do_something": None,                              # 依頼
+                        "report_to_someone": "spiral_note_pad",                           # 報告
+                        "advice_to_someone": "teacher",                                   # アドバイス
+                        "agree_with_someone": "smile",                                    # 同意
+                        "sympathize_with_someone": "relaxed",                             # 共感
+                        "comfirm_with_someone": "wink",                                   # 確認
+                        "praise_someone_or_something": "thumbsup",                        # 感嘆
+                        "disappointed_in_someone_or_something": "disappointed_relieved",  # 失望
+                        "sharing_information": "spiral_note_pad",                         # 共有
+                        "note_for_self": "pencil",                                        # メモ
+                        "other": None,
+                    }.get(self.user_intentions_type)
+                ),
+                str
             )
-        ]
+        ):
+            self._slack_emoji_names.append(v)
 
     def _is_mention_to_subteam(self) -> bool:
         return bool(re.search(r'<!subteam\^[^>]+>', self.text))

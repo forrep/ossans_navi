@@ -267,7 +267,16 @@ async def do_ossans_navi_response(
                         event.has_image_video_audio = True
 
     # メッセージの仕分けを行う、質問かどうか判別する
-    event.classification = await ossans_navi_service.classify(thread_messages)
+    classification = await ossans_navi_service.classify(thread_messages)
+    event.user_intent = classification.user_intent
+    if classification.user_intentions_type:
+        event.user_intentions_type = classification.user_intentions_type
+    if classification.who_to_talk_to:
+        event.who_to_talk_to = classification.who_to_talk_to
+    if classification.user_emotions:
+        event.user_emotions = classification.user_emotions
+    event.required_knowledge_types = classification.required_knowledge_types
+    event.slack_emoji_names = classification.slack_emoji_names
     logger.info(f"classify intent          {event.user_intent}")
     logger.info(f"classify intent_type     {event.user_intentions_type}")
     logger.info(f"classify who_to_talk_to  {event.who_to_talk_to}")
