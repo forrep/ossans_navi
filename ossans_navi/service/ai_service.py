@@ -746,29 +746,30 @@ class AiService:
             raise last_exception or RuntimeError()
         return AiResponse.from_openai_response(response, prompt.is_json)
 
-    async def request_classify(self, model: AiModelUsage, prompt: AiPrompt) -> dict[str, str | list[str]]:
+    async def request_classify(self, model: AiModelUsage, prompt: AiPrompt) -> dict[str, Optional[str] | list[str]]:
         str_columns = ("user_intent", "user_intentions_type", "who_to_talk_to", "user_emotions",)
         list_columns = ("required_knowledge_types", "slack_emoji_names",)
         prompt.choices = 5
         response = await self._chat_completions(model, prompt)
-        summary: defaultdict[str, defaultdict[str, int]] = defaultdict(lambda: defaultdict(lambda: 0))
+        summary: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
         for message in response.choices:
             if isinstance(message.content, dict):
-                for name in (*str_columns, *list_columns):
-                    if isinstance((v := message.content.get(name)), str):
+                for name in str_columns + list_columns:
+                    v = message.content.get(name)
+                    if isinstance(v, str):
                         summary[name][v] = summary[name][v] + 1
-                for name in list_columns:
-                    if isinstance((v := message.content.get(name)), list):
+                    elif name in list_columns and isinstance(v, list):
                         for w in v:
-                            summary[name][w] = summary[name][w] + 1
+                            if isinstance(w, str):
+                                summary[name][w] = summary[name][w] + 1
         summary_sorted: defaultdict[str, list[tuple[str, int]]] = defaultdict(list)
-        for name in (*str_columns, *list_columns):
+        for name in str_columns + list_columns:
             summary_sorted[name] = sorted(summary[name].items(), key=lambda v: (v[1], len(v[0]), v[0]), reverse=True)
         logger.info(f"classify: {summary_sorted}")
         return {
             **(
                 {
-                    name: v[0][0] if len(v := summary_sorted[name]) > 0 else ""
+                    name: v[0][0] if len(v := summary_sorted[name]) > 0 else None
                     for name in str_columns
                 }
             ),

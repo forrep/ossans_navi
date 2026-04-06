@@ -78,14 +78,19 @@ OSN_AZURE_OPENAI_ENDPOINT=https://*.openai.azure.com/
 
 OSN_AI_MODEL_LOW_COST/OSN_AI_MODEL_HIGH_QUALITY で利用する LLM モデルを設定します。以下が許容される設定値です。
 
-- GEMINI_20_FLASH
 - GEMINI_25_FLASH （デフォルトの高クオリティモデル）
 - GEMINI_25_FLASH_LITE （デフォルトの低コストモデル）
 - GEMINI_25_PRO
+- GEMINI_30_FLASH
+- GEMINI_31_FLASH_LITE
 - GPT_41
 - GPT_41_MINI
-- AZURE_GPT_41 （デプロイ名は gpt-4.1 固定）
-- AZURE_GPT_41_MINI （デプロイ名は gpt-4.1-mini 固定）
+- GPT_5_NANO
+- GPT_5_MINI
+- AZURE_GPT_41 （デプロイ名: gpt-4.1）
+- AZURE_GPT_41_MINI （デプロイ名: gpt-4.1-mini）
+- AZURE_GPT_5_NANO （デプロイ名: gpt-5-nano）
+- AZURE_GPT_5_MINI （デプロイ名: gpt-5-mini）
 
 ```properties
 # 低コストモデル（デフォルト: GEMINI_25_FLASH_LITE）

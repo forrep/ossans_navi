@@ -217,8 +217,8 @@ class SlackState(BaseModel):
         default_factory=lambda: LRUCache[str, bool](capacity=100, expire=1 * 60 * 10), init=False
     )
     cache_get_channel: LRUCache[str, SlackChannel] = Field(
-        # 60分
-        default_factory=lambda: LRUCache[str, SlackChannel](capacity=1000, expire=1 * 60 * 60), init=False
+        # 5分
+        default_factory=lambda: LRUCache[str, SlackChannel](capacity=1000, expire=1 * 60 * 5), init=False
     )
     cache_config: LRUCache[bool, dict] = Field(
         # 60分

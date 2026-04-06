@@ -17,14 +17,19 @@ GEMINI_API_KEY = os.environ.get("OSN_GEMINI_API_KEY")
 
 # AiModelInfo の名前を指定
 # 候補:
-#   - GEMINI_20_FLASH
 #   - GEMINI_25_FLASH
 #   - GEMINI_25_FLASH_LITE
 #   - GEMINI_25_PRO
+#   - GEMINI_30_FLASH
+#   - GEMINI_31_FLASH_LITE
 #   - GPT_41
 #   - GPT_41_MINI
+#   - GPT_5_NANO
+#   - GPT_5_MINI
 #   - AZURE_GPT_41
 #   - AZURE_GPT_41_MINI
+#   - AZURE_GPT_5_NANO
+#   - AZURE_GPT_5_MINI
 AI_MODEL_LOW_COST = os.environ.get("OSN_AI_MODEL_LOW_COST", "GEMINI_25_FLASH_LITE")
 AI_MODEL_HIGH_QUALITY = os.environ.get("OSN_AI_MODEL_HIGH_QUALITY", "GEMINI_25_FLASH")
 
@@ -82,7 +87,7 @@ if AI_MODEL_LOW_COST.startswith("GEMINI_") and AI_MODEL_HIGH_QUALITY.startswith(
     LOAD_VIDEO_AUDIO_FILES = True
     # 映像ファイルの FPS、FPS=0.25 で 4秒ごとに1フレーム消費、1フレームあたり 258トークン消費
     VIDEO_FPS = 0.25
-    # 回答生成処理に GETMINI_30_FLASH モデルを使用する
+    # 回答生成処理に GEMINI_30_FLASH モデルを使用する
     MODEL_FOR_LASTSHOT = "GEMINI_30_FLASH"
 else:
     # 入力する会話コンテキスト（スレッド）の最大トークン数

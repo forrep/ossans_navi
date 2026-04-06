@@ -1,4 +1,4 @@
-from typing import Any, Iterable
+from typing import Any, Iterable, Optional
 
 from pydantic import BaseModel, Field, PrivateAttr
 
@@ -43,6 +43,15 @@ class OssansNaviConfig(BaseModel):
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()
+
+
+class ClassifyResponse(BaseModel):
+    user_intent: Optional[str]
+    user_intentions_type: Optional[str]
+    who_to_talk_to: Optional[str]
+    user_emotions: Optional[str]
+    required_knowledge_types: list[str]
+    slack_emoji_names: list[str]
 
 
 class LastshotResponse(BaseModel):

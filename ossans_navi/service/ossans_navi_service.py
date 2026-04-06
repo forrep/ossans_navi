@@ -25,7 +25,7 @@ from ossans_navi.service.ai_tokenize_service import AiTokenizor
 from ossans_navi.service.slack_service import SlackService
 from ossans_navi.type import ossans_navi_type
 from ossans_navi.type.ai_type import AiPromptSlackMessage, AiPromptSlackMessageAttachment, AiPromptSlackMessageFile, AiPromptSlackUser, AiServiceType
-from ossans_navi.type.ossans_navi_type import SearchResults, UrlContext
+from ossans_navi.type.ossans_navi_type import ClassifyResponse, SearchResults, UrlContext
 from ossans_navi.type.slack_type import SlackFile, SlackMessage, SlackMessageEvent, SlackMessageLite, SlackSearchTerm
 
 logger = logging.getLogger(__name__)
@@ -403,14 +403,22 @@ class OssansNaviService:
     def is_next_message_from_ossans_navi(self, thread_messages: list[SlackMessageLite]) -> bool:
         return len(thread_messages) >= 2 and thread_messages[-2].user.user_id in self.slack_service.my_bot_user_id
 
-    async def classify(self, thread_messages: list[SlackMessageLite]) -> dict[str, str | list[str]]:
-        return await self.ai_service.request_classify(
+    async def classify(self, thread_messages: list[SlackMessageLite]) -> ClassifyResponse:
+        response = await self.ai_service.request_classify(
             self.model_for_classify,
             self.get_ai_prompt(
                 self.ai_prompt_service.classify_prompt(),
                 thread_messages,
                 schema=ai_prompt_assets.CLASSIFY_SCHEMA,
             )
+        )
+        return ClassifyResponse(
+            user_intent=v if isinstance((v := response.get("user_intent")), str) else None,
+            user_intentions_type=v if isinstance((v := response.get("user_intentions_type")), str) else None,
+            who_to_talk_to=v if isinstance((v := response.get("who_to_talk_to")), str) else None,
+            user_emotions=v if isinstance((v := response.get("user_emotions")), str) else None,
+            required_knowledge_types=v if isinstance((v := response.get("required_knowledge_types")), list) else [],
+            slack_emoji_names=v if isinstance((v := response.get("slack_emoji_names")), list) else [],
         )
 
     async def store_config(self, config: ossans_navi_type.OssansNaviConfig, clear_cache: bool = True) -> None:
