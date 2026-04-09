@@ -519,6 +519,10 @@ class OssansNaviService:
             # 画像かつ未分析（not is_analyzed）のファイルが1枚もないなら終了、分析対象がない
             return
 
+        target_messages = [
+            message for message in thread_messages
+            if len([1 for file in message.files if file.is_image and not file.is_analyzed and file.is_valid]) > 0
+        ]
         # 添付画像を AI で解析実行
         image_description = await self.ai_service.request_image_description(
             self.model_for_image_description,
@@ -528,10 +532,8 @@ class OssansNaviService:
                 analyze_image_files=True,
                 schema=Schema(
                     type=Type.OBJECT,
-                    properties={
-                        message.permalink: ai_prompt_assets.IMAGE_DESCRIPTION_SCHEMA for message in thread_messages
-                    },
-                    required=[message.permalink for message in thread_messages]
+                    properties={message.permalink: ai_prompt_assets.IMAGE_DESCRIPTION_SCHEMA for message in target_messages},
+                    required=[message.permalink for message in target_messages]
                 )
             )
         )
