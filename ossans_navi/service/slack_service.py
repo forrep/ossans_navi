@@ -678,6 +678,12 @@ class SlackService:
         thread_ts: Optional[str] = None,
         images: list[ossans_navi_type.Image] = [],
     ) -> None:
+        await self.bot_client.chat_postMessage(
+            channel=channel,
+            thread_ts=thread_ts,
+            text=text,
+            blocks=blocks,
+        )
         files: list[dict[str, Any]] = [
             {
                 "filename": f"image{image.extension}",
@@ -686,18 +692,12 @@ class SlackService:
             for image in images
         ]
         if files:
+            # 本来は files_upload_v2 の initial_comment でメッセージを送信するべき
+            # しかし文字数が2000文字程度を超えると 414 エラーが返却されるので画像だけ別に送信する
             await self.bot_client.files_upload_v2(
                 channel=channel,
                 thread_ts=thread_ts,
-                initial_comment=text,
                 file_uploads=files,
-            )
-        else:
-            await self.bot_client.chat_postMessage(
-                channel=channel,
-                thread_ts=thread_ts,
-                text=text,
-                blocks=blocks,
             )
 
     async def add_reaction(self, channel: str, ts: str, names: str | list[str]) -> None:

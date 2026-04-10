@@ -85,8 +85,11 @@ class OssansNaviService:
         else:
             raise ValueError(f"Model {global_config.MODEL_FOR_QUALITY_CHECK} not found")
 
-        # URLコンテキスト用モデルだけはオプショナル扱い
+        # URLコンテキスト用モデルはオプショナル扱い
         self.model_for_url_context = ai_service.models_usage.get_model(global_config.MODEL_FOR_URL_CONTEXT)
+        # lasthost の画像生成用モデルもオプショナル扱い
+        if global_config.MODEL_FOR_LASTSHOT_IMAGE_GENERATION:
+            self.model_for_lastshot_image_generation = ai_service.models_usage.get_model(global_config.MODEL_FOR_LASTSHOT_IMAGE_GENERATION)
 
     @classmethod
     async def create(
@@ -266,6 +269,7 @@ class OssansNaviService:
         schema: Optional[Schema] = None,
         rag_info: Optional[AiPromptRagInfo] = None,
         input_video_audio_files: bool = False,
+        input_bot_generated_images: bool = False,
     ) -> AiPrompt:
         if limit_last_message < 0:
             limit_last_message = limit
@@ -306,11 +310,11 @@ class OssansNaviService:
                                         and input_image_files >= 0  # 本来この条件は必要ないが Flake8 が input_image_files を利用していないと誤判定する対策
                                     )
                                 ]
-                                # input_image_files > 0 、かつ AiPromptRole.USER の場合だけ画像を入力する
+                                # AiPromptRole.USER または input_bot_generated_images が有効な場合は画像を入力する
                                 # 現時点では AiPromptRole.ASSISTANT で画像を入力すると以下の動作になる
                                 #   OpenAI → 画像を入力するとAPIエラーが発生する
                                 #   Gemini → 画像を入力しても参照されない（APIエラーは発生しない）
-                                if input_image_files > 0 and message.user.user_id not in self.slack_service.my_bot_user_id
+                                if message.user.user_id not in self.slack_service.my_bot_user_id or input_bot_generated_images
                                 else []
                             )
                         ),
@@ -869,9 +873,15 @@ class OssansNaviService:
             tokens_remain = config.LASTSHOT_TOKEN_WITH_MENTION
         else:
             tokens_remain = config.LASTSHOT_TOKEN_NO_MENTION
+        if self.event.is_image_generation_request and self.model_for_lastshot_image_generation is not None:
+            lastshot_model = self.model_for_lastshot_image_generation
+            is_image_generation_request = True
+        else:
+            lastshot_model = self.model_for_lastshot
+            is_image_generation_request = False
         tokens_remain -= AiTokenizor.messages_tokens(
             self.get_ai_prompt(
-                self.ai_prompt_service.lastshot_prompt(False),
+                self.ai_prompt_service.lastshot_prompt(False, is_image_generation_request),
                 thread_messages,
                 limit=15000,
                 limit_last_message=40000,
@@ -913,7 +923,10 @@ class OssansNaviService:
         logger.info(f"Lastshot current_messages={len(current_messages)}, current_url_contexts={len(current_url_contexts)}")
 
         lastshot_prompt = self.get_ai_prompt(
-            self.ai_prompt_service.lastshot_prompt(len(current_messages) > 0 or len(current_url_contexts) > 0),
+            self.ai_prompt_service.lastshot_prompt(
+                len(current_messages) > 0 or len(current_url_contexts) > 0,
+                is_image_generation_request
+            ),
             thread_messages,
             input_image_files=config.LASTSHOT_INPUT_IMAGE_FILES,
             limit=15000,
@@ -937,11 +950,16 @@ class OssansNaviService:
                     )
                 },
                 words=self.search_results.lastshot_terms,
-            )
+            ),
+            input_bot_generated_images=is_image_generation_request,
         )
-        if config.ENABLE_CODE_EXECUTION_TOOL and self.model_for_lastshot.model.ai_service_type in [AiServiceType.GEMINI]:
+        if (
+            config.ENABLE_CODE_EXECUTION_TOOL
+            and not is_image_generation_request
+            and self.model_for_lastshot.model.ai_service_type in [AiServiceType.GEMINI]
+        ):
             lastshot_prompt.tools_code_execution = True
-        return await self.ai_service.request_lastshot(self.model_for_lastshot, lastshot_prompt)
+        return await self.ai_service.request_lastshot(lastshot_model, lastshot_prompt)
 
     async def quality_check(self, thread_messages: list[SlackMessageLite], response_message: str) -> QualityCheckResponse:
         return await self.ai_service.request_quality_check(

@@ -1,4 +1,5 @@
 import os
+from typing import Optional
 
 # HTTPプロキシ設定
 if "OSN_HTTPS_PROXY" in os.environ:
@@ -56,7 +57,7 @@ REFINE_SLACK_SEARCHES_DEPTH_WITH_MENTION = 2
 REFINE_SLACK_SEARCHES_COUNT_NO_MENTION = 3
 REFINE_SLACK_SEARCHES_DEPTH_NO_MENTION = 2
 
-MAX_OUTPUT_TOKENS = 12288
+MAX_OUTPUT_TOKENS = 12_288
 
 MODEL_FOR_CLASSIFY = "LOW_COST"
 MODEL_FOR_IMAGE_DESCRIPTION = "LOW_COST"
@@ -66,21 +67,22 @@ MODEL_FOR_REFINE_SLACK_SEARCHES = "LOW_COST"
 MODEL_FOR_URL_CONTEXT = "GEMINI_25_FLASH_LITE"
 MODEL_FOR_LASTSHOT = "HIGH_QUALITY"
 MODEL_FOR_QUALITY_CHECK = "LOW_COST"
+MODEL_FOR_LASTSHOT_IMAGE_GENERATION: Optional[str]
 
 if AI_MODEL_LOW_COST.startswith("GEMINI_") and AI_MODEL_HIGH_QUALITY.startswith("GEMINI_"):
     # Gemini の場合は API利用料金が安いのとコンテキストサイズが大きいので入力トークン数を増量
     # 入力する会話コンテキスト（スレッド）の最大トークン数
-    MAX_THREAD_TOKENS = 36000
+    MAX_THREAD_TOKENS = 36_000
     # refine_slack_searches の1回あたり許容するトークン数
-    REFINE_SLACK_SEARCHES_TOKEN = 24000
+    REFINE_SLACK_SEARCHES_TOKEN = 24_000
     # refine_slack_searches の実行回数と実行深度（メンションあり）
     REFINE_SLACK_SEARCHES_COUNT_WITH_MENTION = 6
     # refine_slack_searches の実行回数と実行深度（メンションなし）
     REFINE_SLACK_SEARCHES_COUNT_NO_MENTION = 4
     # lastshot で許容するトークン数
-    LASTSHOT_TOKEN_WITH_MENTION = 80000
+    LASTSHOT_TOKEN_WITH_MENTION = 80_000
     # lastshot で許容するトークン数（メンションなし）
-    LASTSHOT_TOKEN_NO_MENTION = 40000
+    LASTSHOT_TOKEN_NO_MENTION = 40_000
     # lastshot で再入力する画像数
     LASTSHOT_INPUT_IMAGE_FILES = 4
     # 映像・音声ファイルを入力する
@@ -89,21 +91,26 @@ if AI_MODEL_LOW_COST.startswith("GEMINI_") and AI_MODEL_HIGH_QUALITY.startswith(
     VIDEO_FPS = 0.25
     # 回答生成処理に GEMINI_30_FLASH モデルを使用する
     MODEL_FOR_LASTSHOT = "GEMINI_30_FLASH"
+    # 画像生成用モデル
+    MODEL_FOR_LASTSHOT_IMAGE_GENERATION = "GEMINI_31_FLASH_IMAGE"
 else:
     # 入力する会話コンテキスト（スレッド）の最大トークン数
-    MAX_THREAD_TOKENS = 12000
+    MAX_THREAD_TOKENS = 12_000
     # refine_slack_searches の1回あたり許容するトークン数
-    REFINE_SLACK_SEARCHES_TOKEN = 24000
+    REFINE_SLACK_SEARCHES_TOKEN = 24_000
     # lastshot で許容するトークン数
-    LASTSHOT_TOKEN_WITH_MENTION = 20000
+    LASTSHOT_TOKEN_WITH_MENTION = 20_000
     # lastshot で許容するトークン数（メンションなし）
-    LASTSHOT_TOKEN_NO_MENTION = 10000
+    LASTSHOT_TOKEN_NO_MENTION = 10_000
     # lastshot で再入力する画像数
     LASTSHOT_INPUT_IMAGE_FILES = 2
     # 映像・音声ファイルを入力する
     LOAD_VIDEO_AUDIO_FILES = False
     # 映像ファイルの FPS、現時点では Gemini のみのサポート
     VIDEO_FPS = 0.5
+    # 画像生成用モデル
+    MODEL_FOR_LASTSHOT_IMAGE_GENERATION = None
+
 
 # 外部URLの取得をするか
 LOAD_URL_CONTEXT = True

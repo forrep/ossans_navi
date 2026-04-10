@@ -141,8 +141,9 @@ async def do_ossans_navi_response_safe(event: SlackMessageEvent, slack_service: 
             logger.info(f"Usage Report (Total Cost: {ossans_navi_service.ai_service.models_usage.get_total_cost():.4f})")
             for model in [v for v in ossans_navi_service.ai_service.models_usage.models if v.get_total_cost() > 0.0]:
                 logger.info(f"  {model.model.name}({model.model_name}) Cost: {model.get_total_cost():.4f}")
-                logger.info(f"    tokens_in  = {model.tokens_in}")
-                logger.info(f"    tokens_out = {model.tokens_out}")
+                logger.info(f"    tokens_in         = {model.tokens_in}")
+                logger.info(f"    tokens_out        = {model.tokens_out}")
+                logger.info(f"    tokens_out(image) = {model.tokens_out_image}")
 
 
 async def do_ossans_navi_response(
@@ -404,6 +405,17 @@ async def do_ossans_navi_response(
                         "cost": ossans_navi_service.ai_service.models_usage.get_total_cost(),
                         "channel": event.channel_id,
                         "thread_ts": event.thread_ts,
+                        "tokens": [
+                            {
+                                "model": model.model_name,
+                                "tokens": {
+                                    "in": model.tokens_in,
+                                    "out_text": model.tokens_out,
+                                    "out_image": model.tokens_out_image,
+                                }
+                            }
+                            for model in ossans_navi_service.ai_service.models_usage.models
+                        ],
                     }, ensure_ascii=False)
                 )
             # 応答した場合はロックしたまま finish する

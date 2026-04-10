@@ -153,74 +153,75 @@ class AiPromptMessage(BaseModel):
         messages.append(message)
         return messages
 
-    def to_gemini_content(self, rag_info: Optional[AiPromptRagInfo] = None) -> list[types.ContentDict]:
+    def to_gemini_content(self) -> list[types.ContentDict]:
         contents: list[types.ContentDict] = []
         parts: list[types.PartDict] = []
-        if self.role == AiPromptRole.ASSISTANT:
-            parts.append(
-                {
-                    "text": self.content.text
-                }
-            )
-        elif self.role == AiPromptRole.USER:
-            # USERロールの場合のみ画像・映像・音声や <metadata> を入力する
-            # Gemini は ASSISTANTロールで画像を入力してもエラーにはならないが処理対象にもならない、無駄なので送らない
-            # ASSISTANT の応答文に画像リンクが含まれると Slack 上ではメッセージに画像が添付されるため、
-            # ASSISTANT ロールのメッセージにも画像が添付されるケースはある
-            # <metadata> を ASSISTANTロールで入力してしまうと、ハルシネーションで架空の <metadata> を生成してしまうことがあるため入力してはいけない
-            parts.append(
-                {
-                    "text": (
-                        self.content.text
-                        + (
-                            # <metadata> が存在する場合を入力する（self.content.is_dict の場合）
-                            (
-                                "\n\n<metadata>\n"
-                                + json.dumps(self.content.detail, ensure_ascii=False, separators=(',', ':'))
-                                + "\n</metadata>"
-                            ) if self.content.is_dict else ""
-                        )
+        has_image_video_audio = False
+        parts.append(
+            {
+                "text": (
+                    self.content.text
+                    + (
+                        # USERロールの場合で <metadata> が存在する場合は入力する（self.content.is_dict の場合）
+                        # ASSISTANTロールで <metadata> を入力すると、応答時に架空の <metadata> を生成してしまう
+                        (
+                            "\n\n<metadata>\n"
+                            + json.dumps(self.content.detail, ensure_ascii=False, separators=(',', ':'))
+                            + "\n</metadata>"
+                        ) if self.content.is_dict and self.role == AiPromptRole.USER else ""
                     )
-                }
-            )
-            for image in self.content.images:
-                if image.file is not None:
+                )
+            }
+        )
+        for image in self.content.images:
+            if image.file is not None:
+                if self.role == AiPromptRole.USER:
+                    # ASSISTANTロールでルールに基づいた入力をすると出力でも同じルールに従ってしまうため Attachment(below) という提携文言を入力しない
                     parts.append({"text": f"Attachment(below): {image.title}"})
-                    parts.append(
-                        {
-                            "file_data": {
-                                "mime_type": image.file.mime_type,
-                                "file_uri": image.file.uri,
-                            }
+                parts.append(
+                    {
+                        "file_data": {
+                            "mime_type": image.file.mime_type,
+                            "file_uri": image.file.uri,
                         }
-                    )
-            for video in self.content.videos:
-                if video.file is not None:
+                    }
+                )
+                has_image_video_audio = True
+        for video in self.content.videos:
+            if video.file is not None:
+                if self.role == AiPromptRole.USER:
+                    # ASSISTANTロールでルールに基づいた入力をすると出力でも同じルールに従ってしまうため Attachment(below) という提携文言を入力しない
                     parts.append({"text": f"Attachment(below): {video.title}"})
-                    parts.append(
-                        {
-                            "file_data": {
-                                "mime_type": video.file.mime_type,
-                                "file_uri": video.file.uri,
-                            },
-                            "video_metadata": {
-                                "fps": config.VIDEO_FPS,
-                            }
+                parts.append(
+                    {
+                        "file_data": {
+                            "mime_type": video.file.mime_type,
+                            "file_uri": video.file.uri,
+                        },
+                        "video_metadata": {
+                            "fps": config.VIDEO_FPS,
                         }
-                    )
-            for audio in self.content.audios:
-                if audio.file is not None:
+                    }
+                )
+                has_image_video_audio = True
+        for audio in self.content.audios:
+            if audio.file is not None:
+                if self.role == AiPromptRole.USER:
+                    # ASSISTANTロールでルールに基づいた入力をすると出力でも同じルールに従ってしまうため Attachment(below) という提携文言を入力しない
                     parts.append({"text": f"Attachment(below): {audio.title}"})
-                    parts.append(
-                        {
-                            "file_data": {
-                                "mime_type": audio.file.mime_type,
-                                "file_uri": audio.file.uri,
-                            },
-                        }
-                    )
+                parts.append(
+                    {
+                        "file_data": {
+                            "mime_type": audio.file.mime_type,
+                            "file_uri": audio.file.uri,
+                        },
+                    }
+                )
+                has_image_video_audio = True
         contents.append({
-            "role": self.role.gemini_role,
+            # has_image_video_audio が True の場合は ASSISTANT だったとしても USERロールで入力する。
+            # なぜなら ASSISTANTロールに紐づく画像には thought_signature が必須だが、当システムではそれを入力できないため
+            "role": AiPromptRole.USER.gemini_role if has_image_video_audio else self.role.gemini_role,
             "parts": parts,
         })
         return contents
@@ -342,13 +343,8 @@ class AiPrompt(BaseModel):
 
     def to_gemini_contents(self) -> types.ContentListUnionDict:
         contents: list[types.ContentUnionDict] = []
-        for (i, message) in enumerate(self.messages):
-            if i + 1 != len(self.messages):
-                # ループの最後以外のメッセージには RAG 情報を付与しない
-                contents.extend(message.to_gemini_content())
-            else:
-                # ループの最後のメッセージだけ RAG 情報を付与する
-                contents.extend(message.to_gemini_content(self.rag_info))
+        for message in self.messages:
+            contents.extend(message.to_gemini_content())
         return contents
 
     def to_gemini_rest(self) -> dict[str, Any]:
@@ -366,10 +362,10 @@ class AiPrompt(BaseModel):
         }
 
     def get_upload_files(self) -> list[AiPromptUploadFile]:
-        """USERロールに紐づく画像・映像・音声ファイルを全て取得する"""
+        """画像・映像・音声ファイルを全て取得する"""
         return list(itertools.chain.from_iterable([
             message.content.images + message.content.videos + message.content.audios
-            for message in self.messages if message.role == AiPromptRole.USER
+            for message in self.messages
         ]))
 
     @staticmethod
@@ -446,13 +442,13 @@ class AiResponse(BaseModel):
                     ):
                         texts.append(f"```\n{part.code_execution_result.output.strip()}\n```\n")
                     elif (
-                        isinstance(part.inline_data, dict)
+                        part.inline_data is not None
                         and part.inline_data.mime_type
                         and part.inline_data.mime_type.startswith("image/")
                         and part.inline_data.data
                     ):
                         images.append(ossans_navi_type.Image(data=part.inline_data.data, mime_type=part.inline_data.mime_type))
-                if len(texts) > 0:
+                if len(texts) > 0 or len(images) > 0:
                     ai_response_messages.append(
                         AiResponseMessage(
                             content="".join(texts),
@@ -661,6 +657,15 @@ class AiService:
                 model.tokens_in += response.usage_metadata.tool_use_prompt_token_count
             if isinstance(response.usage_metadata.candidates_token_count, int):
                 model.tokens_out += response.usage_metadata.candidates_token_count
+            if (
+                isinstance(response.usage_metadata.candidates_tokens_details, list)
+            ):
+                model.tokens_out_image += sum(
+                    [
+                        v.token_count for v in response.usage_metadata.candidates_tokens_details
+                        if v.modality == types.MediaModality.IMAGE and isinstance(v.token_count, int)
+                    ]
+                )
         if not response.candidates:
             # 応答がない場合は例外を送出
             logger.error("Error empty choices, response=" + str(response))

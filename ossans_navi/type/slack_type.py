@@ -608,6 +608,10 @@ class SlackMessageEvent(BaseModel):
         )
 
     @property
+    def is_image_generation_request(self) -> bool:
+        return self.is_mention and self.user_intentions_type == "ask_the_assistant_bot_to_create_an_image"
+
+    @property
     def slack_emoji_names(self) -> list[str]:
         return self._slack_emoji_names
 

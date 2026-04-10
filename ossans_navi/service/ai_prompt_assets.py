@@ -317,7 +317,7 @@ topic: {{ event.channel.topic }}
 purpose: {{ event.channel.purpose }}
 
 # What I want you to do
-- Respond to the user's questions or intentions.
+- Respond to the user's questions or intentions{% if image_generation %} and generate an image{% endif%}.
 - Please refer to <rag_info> results and give priority to the {{ workspace_name }}'s circumstances and internal rules in your answer.
 - The <rag_info> results contains outdated information; use the newer information.
 - If <rag_info> results does not provide related information, please respond in general terms.

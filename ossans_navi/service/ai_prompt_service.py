@@ -48,8 +48,8 @@ class AiPromptService:
     def url_context_prompt(self) -> str:
         return self._prompt(ai_prompt_assets.URL_CONTEXT_PROMPT)
 
-    def lastshot_prompt(self, has_rag_info: bool) -> str:
-        return self._prompt(ai_prompt_assets.LASTSHOT_PROMPT, {"has_rag_info": has_rag_info})
+    def lastshot_prompt(self, has_rag_info: bool, image_generation: bool) -> str:
+        return self._prompt(ai_prompt_assets.LASTSHOT_PROMPT, {"has_rag_info": has_rag_info, "image_generation": image_generation})
 
     def quality_check_prompt(self, response_message: str) -> str:
         return self._prompt(
