@@ -678,7 +678,7 @@ class SlackService:
         thread_ts: Optional[str] = None,
         images: list[ossans_navi_type.Image] = [],
     ) -> None:
-        if text:
+        if text or blocks:
             await self.bot_client.chat_postMessage(
                 channel=channel,
                 thread_ts=thread_ts,
