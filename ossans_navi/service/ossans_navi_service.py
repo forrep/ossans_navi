@@ -1033,7 +1033,7 @@ class OssansNaviService:
                 logger.debug(f"Do not get private conversations, channel_id={message.channel_id}, thread_ts={message.message.thread_ts}")
                 return
             messages = self._integrate_duplicated_slack_file(
-                await self.slack_service.get_conversations_replies(message.channel_id, message.message.thread_ts, True)
+                await self.slack_service.get_conversations_replies(message.channel_id, message.message.thread_ts, user_client=True)
             )
             if len(messages) == 0:
                 # プライベートチャネルに対する読み取り権限がないなどの理由で空配列が返ってくるパターンがある

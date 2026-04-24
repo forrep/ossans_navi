@@ -821,14 +821,21 @@ class SlackService:
             # 以下の条件のいずれかに合致する場合は該当メッセージは参照しない
             # channel情報を取得できていない
             not message.channel
-            # セーフモードがONで、かつプライベートチャネルで、かつ safe_mode_viewable_channels に含まれていないチャネルの場合
-            or (config.SAFE_MODE and message.channel.is_private and message.channel.id not in viewable_private_channels)
+            # 以下の条件すべてに合致する場合
+            #   1. セーフモードがON
+            #   2. プライベートチャネル
+            #   3. safe_mode_viewable_channels に含まれていない
+            #   4. 現在のメッセージのチャネルではない（メッセージが投稿されたチャネル内の情報はプライベートでも参照して問題ない）
+            or (
+                config.SAFE_MODE
+                and message.channel.is_private
+                and message.channel.id not in viewable_private_channels
+                and message.channel.id != recieved_message_channel_id
+            )
             # プライベートチャネル、かつ元メッセージ送信者がそのチャネルに参加していない場合
             or message.channel.is_private and not await self.is_user_joined_channel(recieved_message_user, message.channel.id)
-            # DM ※情報価値が低いことが多い
-            or message.channel.is_im
-            # グループDM ※情報価値が低いことが多い
-            or message.channel.is_mpim
+            # 現在のメッセージのチャネルではないではない、かつ DM またはグループDM
+            or (message.channel.id != recieved_message_channel_id and (message.channel.is_im or message.channel.is_mpim))
             # 投稿者が null ※RSSフィードなどが該当する、ワークスペース固有の情報ではないため入力しない、LMM 自体の学習結果に期待する
             or message.user is None
             # 開発用チャネル ※テスト用にノイズとなる質問が多数投稿されているため
