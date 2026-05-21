@@ -813,12 +813,14 @@ class SlackConversationRepliesMessageType(BaseModel):
     # 問題となった channel は conversations.replies の場合に必要ないので受け取らない
     ts: str
     thread_ts: Optional[str] = None
+    """返信メッセージがある場合に thread_ts を返却、返信メッセージがない単独メッセージの場合は None を返す"""
     user: Optional[str] = None
     bot_id: Optional[str] = None
     text: str = ""
     attachments: list[SlackAttachmentType] = Field(default_factory=list)
     files: list[SlackFileType] = Field(default_factory=list)
     reactions: list[SlackReactionType] = Field(default_factory=list)
+    blocks: Optional[list[dict]] = None  # text が空の場合は blocks 要素自体が返却されないので Optional とする
 
 
 class SlackConversationsRepliesResponse(SlackBaseResponse):

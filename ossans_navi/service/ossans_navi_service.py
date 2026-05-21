@@ -105,6 +105,10 @@ class OssansNaviService:
             ossans_navi_type.OssansNaviConfig.from_dict(await slack_service.get_config_dict()),
         )
 
+    @property
+    def viewable_private_channels(self) -> list[str]:
+        return self.config.viewable_private_channels + [self.event.channel_id]
+
     @staticmethod
     def json_dumps_converter(v) -> str:
         if isinstance(v, datetime.datetime):
@@ -367,7 +371,14 @@ class OssansNaviService:
     async def get_thread_messages(self) -> list[SlackMessageLite]:
         # SlackMessageLite を取得した後に _integrate_duplicated_slack_file で含まれる SlackFile のインスタンスを1つにまとめる
         thread_messages = self._integrate_duplicated_slack_file(
-            await self.slack_service.get_conversations_replies(self.event.channel_id, self.event.thread_ts)
+            await self.slack_service.get_conversations_replies(
+                channel_id=self.event.channel_id,
+                thread_ts=self.event.thread_ts,
+                user_client=False,
+                recursive=1,
+                event_user_id=self.event.user.user_id,
+                viewable_private_channels=self.viewable_private_channels,
+            )
         )
         logger.info(
             "conversations_replies="
@@ -587,10 +598,10 @@ class OssansNaviService:
 
             result = await self.slack_service.search(
                 current_term,
-                self.event.user,
+                self.event.user.user_id,
                 self.event.channel_id,
                 self.event.thread_ts,
-                self.config.viewable_private_channels,
+                self.viewable_private_channels,
                 self.config.trusted_bots,
                 is_additional,
             )
@@ -1033,7 +1044,14 @@ class OssansNaviService:
                 logger.debug(f"Do not get private conversations, channel_id={message.channel_id}, thread_ts={message.message.thread_ts}")
                 return
             messages = self._integrate_duplicated_slack_file(
-                await self.slack_service.get_conversations_replies(message.channel_id, message.message.thread_ts, user_client=True)
+                await self.slack_service.get_conversations_replies(
+                    channel_id=message.channel_id,
+                    thread_ts=message.message.thread_ts,
+                    user_client=True,
+                    recursive=0,
+                    event_user_id=self.event.user.user_id,
+                    viewable_private_channels=self.viewable_private_channels,
+                )
             )
             if len(messages) == 0:
                 # プライベートチャネルに対する読み取り権限がないなどの理由で空配列が返ってくるパターンがある

@@ -143,7 +143,12 @@ class AiModelUsage(BaseModel):
     def cost_out(self) -> float:
         return self.model.cost_out
 
-    def get_total_cost(self) -> float:
+    @property
+    def is_used(self) -> bool:
+        return self.tokens_in > 0 or self.tokens_out > 0 or self.tokens_out_image > 0
+
+    @property
+    def total_cost(self) -> float:
         return self.cost_in * self.tokens_in / 1_000_000 + self.cost_out * self.tokens_out / 1_000_000
 
 
@@ -190,7 +195,7 @@ class AiModelsUsage(BaseModel):
         return models_usage
 
     def get_total_cost(self) -> float:
-        return sum([model.get_total_cost() for model in self.models])
+        return sum([model.total_cost for model in self.models])
 
     def get_model(self, name: str) -> Optional[AiModelUsage]:
         return self.models_map.get(name)

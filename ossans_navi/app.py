@@ -139,8 +139,8 @@ async def do_ossans_navi_response_safe(event: SlackMessageEvent, slack_service: 
     finally:
         if ossans_navi_service:
             logger.info(f"Usage Report (Total Cost: {ossans_navi_service.ai_service.models_usage.get_total_cost():.4f})")
-            for model in [v for v in ossans_navi_service.ai_service.models_usage.models if v.get_total_cost() > 0.0]:
-                logger.info(f"  {model.model.name}({model.model_name}) Cost: {model.get_total_cost():.4f}")
+            for model in [v for v in ossans_navi_service.ai_service.models_usage.models if v.total_cost > 0.0]:
+                logger.info(f"  {model.model.name}({model.model_name}) Cost: {model.total_cost:.4f}")
                 logger.info(f"    tokens_in         = {model.tokens_in}")
                 logger.info(f"    tokens_out        = {model.tokens_out}")
                 logger.info(f"    tokens_out(image) = {model.tokens_out_image}")
@@ -415,6 +415,7 @@ async def do_ossans_navi_response(
                                 }
                             }
                             for model in ossans_navi_service.ai_service.models_usage.models
+                            if model.is_used
                         ],
                     }, ensure_ascii=False)
                 )

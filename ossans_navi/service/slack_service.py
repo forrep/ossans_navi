@@ -6,6 +6,7 @@ import math
 import re
 from enum import Enum
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 import aiohttp
 from pydantic import BaseModel, ConfigDict, Field
@@ -21,11 +22,11 @@ from ossans_navi.common.cache import LRUCache
 from ossans_navi.service.slack_wrapper import SlackWrapper
 from ossans_navi.type import ossans_navi_type
 from ossans_navi.type.slack_type import (SlackAttachment, SlackAuthTestAppResponse, SlackAuthTestBotResponse, SlackAuthTestUserResponse,
-                                         SlackChannel, SlackConversationsHistoryResponse, SlackConversationsInfoResponse,
-                                         SlackConversationsListResponse, SlackConversationsMembersResponse, SlackConversationsOpenResponse,
-                                         SlackConversationsRepliesResponse, SlackFile, SlackMessage, SlackMessageEvent, SlackMessageLite,
-                                         SlackMessageType, SlackSearch, SlackSearchMessagesResponse, SlackSearchTerm, SlackUser, SlackUsers,
-                                         SlackUsersGetPresenceResponse, SlackUsersListResponse)
+                                         SlackChannel, SlackChannelType, SlackConversationRepliesMessageType, SlackConversationsHistoryResponse,
+                                         SlackConversationsInfoResponse, SlackConversationsListResponse, SlackConversationsMembersResponse,
+                                         SlackConversationsOpenResponse, SlackConversationsRepliesResponse, SlackFile, SlackMessage,
+                                         SlackMessageEvent, SlackMessageLite, SlackMessageType, SlackSearch, SlackSearchMessagesResponse,
+                                         SlackSearchTerm, SlackUser, SlackUsers, SlackUsersGetPresenceResponse, SlackUsersListResponse)
 
 logger = logging.getLogger(__name__)
 
@@ -216,9 +217,9 @@ class SlackState(BaseModel):
         # 10分
         default_factory=lambda: LRUCache[str, bool](capacity=100, expire=1 * 60 * 10), init=False
     )
-    cache_get_channel: LRUCache[str, SlackChannel] = Field(
+    cache_get_channel: LRUCache[tuple[bool, str], SlackChannel] = Field(
         # 5分
-        default_factory=lambda: LRUCache[str, SlackChannel](capacity=1000, expire=1 * 60 * 5), init=False
+        default_factory=lambda: LRUCache[tuple[bool, str], SlackChannel](capacity=1000, expire=1 * 60 * 5), init=False
     )
     cache_config: LRUCache[bool, dict] = Field(
         # 60分
@@ -347,7 +348,7 @@ class SlackService:
         return self.state.cache_user_presence
 
     @property
-    def cache_get_channel(self) -> LRUCache[str, SlackChannel]:
+    def cache_get_channel(self) -> LRUCache[tuple[bool, str], SlackChannel]:
         if self.state.cache_get_channel is None:
             raise RuntimeError("SlackService is not started. cache_get_channel is None")
         return self.state.cache_get_channel
@@ -475,7 +476,7 @@ class SlackService:
 
     async def get_channel(self, channel_id: str, user_client: bool = False, no_cache: bool = False) -> SlackChannel:
         client: SlackWrapper = self.user_client if user_client else self.bot_client
-        if not no_cache and (cached := self.cache_get_channel.get(channel_id)).found:
+        if not no_cache and (cached := self.cache_get_channel.get((user_client, channel_id,))).found:
             return cached.value
         try:
             response = SlackConversationsInfoResponse(
@@ -515,7 +516,7 @@ class SlackService:
             logger.error(f"conversations_info returns error, channel_id={channel_id}")
             logger.error(e, exc_info=True)
             raise e
-        self.cache_get_channel.put(channel_id, channel)
+        self.cache_get_channel.put((user_client, channel_id, ), channel)
         return channel
 
     async def get_presence(self, user_id: str) -> bool:
@@ -565,8 +566,8 @@ class SlackService:
         self.cache_get_conversations_members.put(channel_id, response_members)
         return response_members
 
-    async def is_user_joined_channel(self, user: SlackUser, channel_id: str):
-        return user.user_id in await self.get_conversations_members(channel_id)
+    async def is_user_joined_channel(self, user_id: str, channel_id: str):
+        return user_id in await self.get_conversations_members(channel_id)
 
     async def get_channels(self) -> dict[str, dict]:
         if (cached := self.cache_get_channels.get(True)).found:
@@ -615,11 +616,170 @@ class SlackService:
 
         return await async_utils.re_sub(r'<@([A-Z0-9]+)>', replacer, text)
 
-    async def get_conversations_replies(self, channel: str, thread_ts: str, user_client: bool = False) -> list[SlackMessageLite]:
+    def find_slack_workspace_urls(self, blocks: list[dict]) -> list[str]:
+        urls = []
+        for block in blocks:
+            if block.get("type") == "link" and isinstance((url := block.get("url")), str) and url.startswith(self.workspace_url):
+                urls.append(url)
+            if isinstance((elements := block.get("elements")), list) and len(elements := [v for v in elements if isinstance(v, dict)]):
+                urls.extend(self.find_slack_workspace_urls(elements))
+        return urls
+
+    async def get_from_slack_workspace_url(
+        self,
+        url: str,
+        recursive: int,
+        event_user_id: str,
+        viewable_private_channels: list[str]
+    ) -> Optional[SlackAttachment]:
+        # https://{workspace}.slack.com/
+        if not url.startswith(self.workspace_url):
+            raise ValueError(f"URL does not start with workspace URL: {url}")
+        parsed_url = urlparse(url)
+        # https://{workspace}.slack.com/archives/{channel_id}/p{message_ts}?thread_ts={thread_ts}
+        if (matcher1 := re.match(r'/archives/([^/]+)/p([0-9]+)([0-9]{6})', parsed_url.path)):
+            result = None
+            channel_id = matcher1.group(1)
+            for user_client in [True, False]:
+                client = self.user_client if user_client else self.bot_client
+                channel = await self.get_channel(channel_id, user_client)
+                if not channel.is_valid:
+                    continue
+                ts = f"{matcher1.group(2)}.{matcher1.group(3)}"
+                if (matcher2 := re.search(r'&?thread_ts=([0-9.]+)', parsed_url.query)):
+                    # スレッド内の返信メッセージの場合は thread_ts=xxx が付与される
+                    thread_ts = matcher2.group(1)
+                else:
+                    # 非スレッドメッセージ（※親メッセージ）の場合は ts が thread_ts に相当する、もし返信メッセージが付くと ts が thread_ts となる
+                    thread_ts = ts
+                # 権限チェック（プライベートチャネルのチェック等）
+                if not await self.check_permission(channel, event_user_id, viewable_private_channels):
+                    return SlackAttachment(
+                        title="permission_denied",
+                        text="(Content not available: you do not have access to this channel)",
+                        link=url,
+                    )
+
+                try:
+                    # 該当スレッド（thread_ts）内で oldest=ts, latest=ts にマッチする1メッセージを絞り込んで取得
+                    conversations_replies_response = await client.conversations_replies(
+                        channel=channel_id,
+                        ts=thread_ts,
+                        limit=1,
+                        oldest=ts,
+                        latest=ts,
+                        inclusive=True,
+                    )
+                    response = SlackConversationsRepliesResponse(**(v if (isinstance((v := conversations_replies_response.data), dict)) else {}))
+                    if len(response.messages) > 0 and (message := response.messages[-1]):
+                        message_lite = await self.conversation_replies_message_to_slck_messag_lite(
+                            message,
+                            channel_id,
+                            recursive,
+                            event_user_id,
+                            viewable_private_channels,
+                        )
+                        return SlackAttachment(
+                            title="",
+                            text=message_lite.content,
+                            link=message_lite.permalink,
+                        )
+                except SlackApiError as e:
+                    error_response: SlackResponse = e.response
+                    error_message = error_response.get("error")
+                    if error_message in ("missing_scope", "not_in_channel", "channel_not_found", "thread_not_found"):
+                        # 権限不足やメッセージが削除されているなどが要因でメッセージを取得できない場合
+                        logger.info(
+                            f"{error_response.get("error")}, channel={channel_id}, thread_ts={thread_ts}, user_client={user_client}, exception={e}"
+                        )
+                        result = SlackAttachment(
+                            title=error_message,
+                            text="(Content not available: this message could not be retrieved)",
+                            link=url,
+                        )
+                    else:
+                        logger.error(
+                            f"{error_response.get("error")}, channel={channel_id}, thread_ts={thread_ts}, user_client={user_client}, exception={e}"
+                        )
+                        result = SlackAttachment(
+                            title=error_message if error_message else "unknown_error",
+                            text="(Content not available: an unexpected error occurred while retrieving this message)",
+                            link=url,
+                        )
+                except Exception as e:
+                    logger.error(
+                        f"conversations_replies returns error, channel={channel_id}, thread_ts={thread_ts}, user_client={user_client}, exception={e}"
+                    )
+                    raise e
+            return result
+        return None
+
+    async def conversation_replies_message_to_slck_messag_lite(
+        self,
+        message: SlackConversationRepliesMessageType,
+        channel_id: str,
+        recursive: int,
+        event_user_id: str,
+        viewable_private_channels: list[str]
+    ) -> SlackMessageLite:
+        # 返信メッセージがある場合のみ thread_ts に値が入る、返信メッセージがない単独メッセージの場合は ts が thread_ts と同等
+        thread_ts = message.thread_ts if message.thread_ts else message.ts
+        attachments: list[SlackAttachment] = []
+        for attachment_model in message.attachments:
+            attachment = SlackAttachment.from_model(attachment_model)
+            attachment.user = (await self.get_user(attachment_model.author_id)) if attachment_model.author_id.startswith("U") else None
+            attachments.append(attachment)
+        if message.user:
+            user = await self.get_user(message.user)
+        elif message.bot_id:
+            user = await self.get_user(message.bot_id)
+        else:
+            raise ValueError("Message has no user or bot_id")
+        if recursive > 0 and message.blocks and len(slack_group_urls := self.find_slack_workspace_urls(message.blocks)) > 0:
+            attachment_urls = [attachment.link for attachment in attachments]
+            logger.info(f"Message slack_group_urls: {slack_group_urls}")
+            # メッセージ内の SlackワークスペースURLのうち attachments に含まれない url を取得する
+            for url in slack_group_urls:
+                if url not in attachment_urls:
+                    if (
+                        v := await self.get_from_slack_workspace_url(
+                            url,
+                            recursive - 1,
+                            event_user_id,
+                            viewable_private_channels,
+                        )
+                    ):
+                        attachments.append(v)
+
+        return SlackMessageLite(
+            timestamp=datetime.datetime.fromtimestamp(float(message.ts)),
+            ts=message.ts,
+            thread_ts=thread_ts,
+            user=user,
+            content=await self.replace_id_to_name(message.text),
+            # thread_ts と ts が異なる場合はスレッド内の子メッセージ
+            permalink=(
+                f"{self.workspace_url}archives/{channel_id}/p{message.ts.replace('.', '')}"
+                + (f"?thread_ts={thread_ts}" if thread_ts != message.ts else "")
+            ),
+            attachments=attachments,
+            files=[file for file in [SlackFile.from_model(file) for file in message.files] if file is not None],
+            reactions=[f":{reaction.name}:" for reaction in message.reactions],
+            mentions_in_content=await self.get_mentions(message.text)
+        )
+
+    async def get_conversations_replies(
+        self, channel_id: str,
+        thread_ts: str,
+        user_client: bool,
+        recursive: int,
+        event_user_id: str,
+        viewable_private_channels: list[str],
+    ) -> list[SlackMessageLite]:
         client: SlackWrapper = self.user_client if user_client else self.bot_client
         try:
             response = SlackConversationsRepliesResponse(
-                **(v if (isinstance((v := (await client.conversations_replies(channel=channel, ts=thread_ts, limit=60)).data), dict)) else {})
+                **(v if (isinstance((v := (await client.conversations_replies(channel=channel_id, ts=thread_ts, limit=60)).data), dict)) else {})
             )
         except SlackApiError as e:
             error_response: SlackResponse = e.response
@@ -627,48 +787,36 @@ class SlackService:
                 # user_token で実行する search_message はアプリインストール者の権限に準ずるためプライベートチャネルやDMもヒットする
                 # 一方で付与された scope はパブリックチャネルしか読み取れないので、missing_scope が発生する
                 # よって、user_client で発生する missing_scope は想定内
-                logger.info(f"{error_response.get("error")}, channel={channel}, thread_ts={thread_ts}, user_client={user_client}, exception={e}")
+                logger.info(
+                    f"{error_response.get("error")}, channel_id={channel_id}, thread_ts={thread_ts}, user_client={user_client}, exception={e}"
+                )
                 return []
             elif error_response.get("error") == "thread_not_found":
                 # 投稿後にメッセージが削除されるなどが原因、エラー扱いではないので空配列を返す
-                logger.info(f"{error_response.get("error")}, channel={channel}, thread_ts={thread_ts}, user_client={user_client}, exception={e}")
+                logger.info(
+                    f"{error_response.get("error")}, channel_id={channel_id}, thread_ts={thread_ts}, user_client={user_client}, exception={e}"
+                )
                 return []
             else:
-                logger.error(f"{error_response.get("error")}, channel={channel}, thread_ts={thread_ts}, user_client={user_client}, exception={e}")
+                logger.error(
+                    f"{error_response.get("error")}, channel_id={channel_id}, thread_ts={thread_ts}, user_client={user_client}, exception={e}"
+                )
                 raise e
         except Exception as e:
-            logger.error(f"conversations_replies returns error, channel={channel}, thread_ts={thread_ts}, user_client={user_client}, exception={e}")
+            logger.error(
+                f"conversations_replies returns error, channel_id={channel_id}, thread_ts={thread_ts}, user_client={user_client}, exception={e}"
+            )
             raise e
-        results = []
-        for message in response.messages:
-            attachments: list[SlackAttachment] = []
-            for attachment_model in message.attachments:
-                attachment = SlackAttachment.from_model(attachment_model)
-                attachment.user = (await self.get_user(attachment_model.author_id)) if attachment_model.author_id.startswith("U") else None
-                attachments.append(attachment)
-            if message.user:
-                user = await self.get_user(message.user)
-            elif message.bot_id:
-                user = await self.get_user(message.bot_id)
-            else:
-                raise ValueError("Message has no user or bot_id")
-            results.append(SlackMessageLite(
-                timestamp=datetime.datetime.fromtimestamp(float(message.ts)),
-                ts=message.ts,
-                thread_ts=thread_ts,
-                user=user,
-                content=await self.replace_id_to_name(message.text),
-                # thread_ts と ts が異なる場合はスレッド内の子メッセージ
-                permalink=(
-                    f"{self.workspace_url}archives/{channel}/p{message.ts.replace('.', '')}"
-                    + (f"?thread_ts={thread_ts}" if thread_ts != message.ts else "")
-                ),
-                attachments=attachments,
-                files=[file for file in [SlackFile.from_model(file) for file in message.files] if file is not None],
-                reactions=[f":{reaction.name}:" for reaction in message.reactions],
-                mentions_in_content=await self.get_mentions(message.text)
-            ))
-        return results
+        return [
+            await self.conversation_replies_message_to_slck_messag_lite(
+                message,
+                channel_id,
+                recursive,
+                event_user_id,
+                viewable_private_channels,
+            )
+            for message in response.messages
+        ]
 
     async def chat_post_message(
         self,
@@ -711,6 +859,9 @@ class SlackService:
             await self.bot_client.reactions_add(channel=channel, timestamp=ts, name=name)
         except SlackApiError as e:
             response: SlackResponse = e.response
+            if response.get("error") == "already_reacted":
+                logger.info(f"Already reacted, channel={channel}, ts={ts}, name={name}")
+                return
             if response.get("error") == "invalid_name":
                 logger.info("Reaction not found: " + name)
                 if len(names) >= 2:
@@ -803,10 +954,41 @@ class SlackService:
                 mrkdwn_lines.append(line)
         return "\n".join(mrkdwn_lines)
 
+    async def check_permission(
+        self, channel: SlackChannelType | SlackChannel,
+        event_user_id: str,
+        viewable_private_channels: list[str]
+    ) -> bool:
+        if isinstance(channel, SlackChannelType):
+            channel_id = channel.id
+        elif isinstance(channel, SlackChannel):
+            channel_id = channel.channel_id
+        else:
+            raise ValueError(f"Invalid type: type(channel)={type(channel)}")
+        if (
+            # 以下の条件のいずれかに合致する場合は該当メッセージは参照しない
+            (
+                # 以下の条件すべてに合致する場合
+                #   1. セーフモードがON
+                #   2. プライベート/DM/グループDM である
+                #   3. viewable_private_channels に含まれていない（※起点となるメッセージが投稿されたチャネルIDも自動的に含む）
+                config.SAFE_MODE
+                and (channel.is_private or channel.is_im or channel.is_mpim)
+                and channel_id not in viewable_private_channels
+            )
+            or (
+                # プライベート/DM/グループDM、かつ元メッセージ送信者がそのチャネルに参加していない場合
+                (channel.is_private or channel.is_im or channel.is_mpim)
+                and not await self.is_user_joined_channel(event_user_id, channel_id)
+            )
+        ):
+            return False
+        return True
+
     async def _refine_slack_message(
         self,
         message: SlackMessageType,
-        recieved_message_user: SlackUser,
+        recieved_message_user_id: str,
         recieved_message_channel_id: str,
         recieved_message_thread_ts: str,
         viewable_private_channels: list[str],
@@ -821,25 +1003,10 @@ class SlackService:
             # 以下の条件のいずれかに合致する場合は該当メッセージは参照しない
             # channel情報を取得できていない
             not message.channel
-            # 以下の条件すべてに合致する場合
-            #   1. セーフモードがON
-            #   2. プライベートチャネル
-            #   3. safe_mode_viewable_channels に含まれていない
-            #   4. 現在のメッセージのチャネルではない（メッセージが投稿されたチャネル内の情報はプライベートでも参照して問題ない）
-            or (
-                config.SAFE_MODE
-                and message.channel.is_private
-                and message.channel.id not in viewable_private_channels
-                and message.channel.id != recieved_message_channel_id
-            )
-            # プライベートチャネル、かつ元メッセージ送信者がそのチャネルに参加していない場合
-            or message.channel.is_private and not await self.is_user_joined_channel(recieved_message_user, message.channel.id)
-            # 現在のメッセージのチャネルではないではない、かつ DM またはグループDM
-            or (message.channel.id != recieved_message_channel_id and (message.channel.is_im or message.channel.is_mpim))
-            # 投稿者が null ※RSSフィードなどが該当する、ワークスペース固有の情報ではないため入力しない、LMM 自体の学習結果に期待する
+            # 投稿者が null ※RSSアプリから投稿されたメッセージが該当する、投稿者不明の情報を採用するのは妥当ではない
             or message.user is None
-            # 開発用チャネル ※テスト用にノイズとなる質問が多数投稿されているため
-            or message.channel.id in config.DEVELOPMENT_CHANNELS
+            # 権限チェック（プライベートチャネルのチェック等）
+            or not await self.check_permission(message.channel, recieved_message_user_id, viewable_private_channels)
         ):
             return None
         message_user = await self.get_user(message.user)
@@ -904,7 +1071,7 @@ class SlackService:
     async def search(
         self,
         term: SlackSearchTerm,
-        recieved_message_user: SlackUser,
+        recieved_message_user_id: str,
         recieved_message_channel_id: str,
         recieved_message_thread_ts: str,
         viewable_private_channels: list[str],
@@ -938,7 +1105,7 @@ class SlackService:
                     message for message in [
                         await self._refine_slack_message(
                             message,
-                            recieved_message_user,
+                            recieved_message_user_id,
                             recieved_message_channel_id,
                             recieved_message_thread_ts,
                             viewable_private_channels,
