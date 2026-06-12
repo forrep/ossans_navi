@@ -205,9 +205,9 @@ class SlackState(BaseModel):
         # 3分
         default_factory=lambda: LRUCache[bool, SlackUsers](capacity=1, expire=60 * 3), init=False
     )
-    cache_get_conversations_members: LRUCache[str, list[str]] = Field(
+    cache_get_conversations_members: LRUCache[str, list[SlackUser]] = Field(
         # 4時間
-        default_factory=lambda: LRUCache[str, list[str]](capacity=1000, expire=1 * 60 * 60 * 4), init=False
+        default_factory=lambda: LRUCache[str, list[SlackUser]](capacity=1000, expire=1 * 60 * 60 * 4), init=False
     )
     cache_get_channels: LRUCache[bool, dict[str, dict]] = Field(
         # 4時間
@@ -330,7 +330,7 @@ class SlackService:
         return self.state.cache_users_list
 
     @property
-    def cache_get_conversations_members(self) -> LRUCache[str, list[str]]:
+    def cache_get_conversations_members(self) -> LRUCache[str, list[SlackUser]]:
         if self.state.cache_get_conversations_members is None:
             raise RuntimeError("SlackService is not started. cache_get_conversations_members is None")
         return self.state.cache_get_conversations_members
@@ -542,14 +542,14 @@ class SlackService:
         self.cache_user_presence.put(user_id, user_presence)
         return user_presence
 
-    async def get_conversations_members(self, channel_id: str) -> list[str]:
+    async def get_conversations_members(self, channel_id: str) -> list[SlackUser]:
         if (cached := self.cache_get_conversations_members.get(channel_id)).found:
             return cached.value
         try:
             response = SlackConversationsMembersResponse(
                 **(v if (isinstance((v := (await self.user_client.conversations_members(channel=channel_id, limit=1000)).data), dict)) else {})
             )
-            response_members = response.members
+            response_members = [await self.get_user(user_id) for user_id in response.members]
         except SlackApiError as e:
             error_response: SlackResponse = e.response
             if error_response.get("error") != "channel_not_found":
@@ -567,7 +567,7 @@ class SlackService:
         return response_members
 
     async def is_user_joined_channel(self, user_id: str, channel_id: str):
-        return user_id in await self.get_conversations_members(channel_id)
+        return user_id in [v.user_id for v in await self.get_conversations_members(channel_id)]
 
     async def get_channels(self) -> dict[str, dict]:
         if (cached := self.cache_get_channels.get(True)).found:
