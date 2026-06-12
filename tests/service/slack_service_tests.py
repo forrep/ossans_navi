@@ -444,21 +444,7 @@ async def test_get_conversations_members(slack_service: SlackService, monkeypatc
 
     monkeypatch.setattr(SlackWrapper, "conversations_members", conversations_members_dummy)
 
-    async def get_user_dummy(self, user_id_bot_id: str):
-        return SlackUser(
-            user_id=user_id_bot_id,
-            name='Unknown',
-            username='unknown',
-            mention_to=None,
-            is_bot=False,
-            is_guest=True,
-            is_admin=False,
-            is_valid=False
-        )
-
-    monkeypatch.setattr(SlackService, "get_user", get_user_dummy)
-
-    assert [v.user_id for v in await slack_service.get_conversations_members("C7GGZ82UR")] == [
+    assert await slack_service.get_conversations_members("C7GGZ82UR") == [
         "U02L3BLC5",
         "U48KQ57L3",
         "U496LGCUR",
@@ -484,7 +470,7 @@ async def test_get_conversations_members(slack_service: SlackService, monkeypatc
 
     # conversations_members を None にしても cache から取得できる
     monkeypatch.setattr(SlackWrapper, "conversations_members", None)
-    assert [v.user_id for v in await slack_service.get_conversations_members("C7GGZ82UR")] == [
+    assert await slack_service.get_conversations_members("C7GGZ82UR") == [
         "U02L3BLC5",
         "U48KQ57L3",
         "U496LGCUR",

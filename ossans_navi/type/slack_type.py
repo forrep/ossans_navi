@@ -359,7 +359,6 @@ class SlackMessageEvent(BaseModel):
     has_image_video_audio: bool = Field(default=False, init=False)
     _user: Optional[SlackUser] = PrivateAttr(default=None, init=False)
     _channel: Optional[SlackChannel] = PrivateAttr(default=None, init=False)
-    _channel_members: Optional[list[SlackUser]] = PrivateAttr(default=None, init=False)
 
     def valid(self) -> bool:
         return bool(self._user)
@@ -383,16 +382,6 @@ class SlackMessageEvent(BaseModel):
     @channel.setter
     def channel(self, value: SlackChannel):
         self._channel = value
-
-    @property
-    def channel_members(self) -> list[SlackUser]:
-        if self._channel_members:
-            return self._channel_members
-        raise ValueError("self._channel_members is None")
-
-    @channel_members.setter
-    def channel_members(self, value: list[SlackUser]):
-        self._channel_members = value
 
     @property
     def channel_id(self) -> str:

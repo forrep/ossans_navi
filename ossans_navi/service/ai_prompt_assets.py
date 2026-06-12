@@ -100,7 +100,6 @@ CLASSIFY_PROMPT = """
 name: {{ event.channel.name }}
 topic: {{ event.channel.topic }}
 purpose: {{ event.channel.purpose }}
-channel_members: {% for member in event.channel_members %}{{ member.name }}({{ member.mention_to }}){% if not loop.last %}, {% endif %}{% endfor %}
 
 # What I want you to do
 - Do not respond to the user's intent; instead, provide a response that conforms to the JSON Schema.
@@ -210,7 +209,6 @@ SLACK_SEARCH_WORD_PROMPT = """
 name: {{ event.channel.name }}
 topic: {{ event.channel.topic }}
 purpose: {{ event.channel.purpose }}
-channel_members: {% for member in event.channel_members %}{{ member.name }}({{ member.mention_to }}){% if not loop.last %}, {% endif %}{% endfor %}
 
 # What I want you to do
 - Do not respond to the user's intent; instead, provide a response that conforms to the JSON Schema.
@@ -271,7 +269,6 @@ REFINE_SLACK_SEARCHES_PROMPT = """
 name: {{ event.channel.name }}
 topic: {{ event.channel.topic }}
 purpose: {{ event.channel.purpose }}
-channel_members: {% for member in event.channel_members %}{{ member.name }}({{ member.mention_to }}){% if not loop.last %}, {% endif %}{% endfor %}
 
 # What I want you to do
 - Do not respond to the user's intent; instead, provide a response that conforms to the JSON Schema.
@@ -318,7 +315,6 @@ LASTSHOT_PROMPT = """
 name: {{ event.channel.name }}
 topic: {{ event.channel.topic }}
 purpose: {{ event.channel.purpose }}
-channel_members: {% for member in event.channel_members %}{{ member.name }}({{ member.mention_to }}){% if not loop.last %}, {% endif %}{% endfor %}
 
 # What I want you to do
 - Respond to the user's questions or intentions{% if image_generation %} and generate an image{% endif%}.
@@ -326,8 +322,7 @@ channel_members: {% for member in event.channel_members %}{{ member.name }}({{ m
 - The <rag_info> results contains outdated information; use the newer information.
 - If <rag_info> results does not provide related information, please respond in general terms.
 - Mention "user_id" in the form of "<@UXXXXXXXXX>".
-- When you make a mention, the other person will be notified, so please keep usage to a minimum!
-- Mentions are restricted to members included in the "channel_members" list.
+- When you make a Mention, the other person will be notified, so please keep usage to a minimum!
 - Use a name, not an ID, to refer to a specific person.
 - Please think in {{ language }} and respond in {{ language }}.
 {% if not event.is_mention %}- Please respond briefly.
@@ -362,7 +357,6 @@ QUALITY_CHECK_PROMPT = """
 name: {{ event.channel.name }}
 topic: {{ event.channel.topic }}
 purpose: {{ event.channel.purpose }}
-channel_members: {% for member in event.channel_members %}{{ member.name }}({{ member.mention_to }}){% if not loop.last %}, {% endif %}{% endfor %}
 
 # What I want you to do
 - Do not respond to the user's intent; instead, provide a response that conforms to the JSON Schema.
