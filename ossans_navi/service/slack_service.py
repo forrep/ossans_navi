@@ -205,9 +205,9 @@ class SlackState(BaseModel):
         # 3分
         default_factory=lambda: LRUCache[bool, SlackUsers](capacity=1, expire=60 * 3), init=False
     )
-    cache_get_conversations_members: LRUCache[str, list[str]] = Field(
+    cache_get_conversations_members: LRUCache[tuple[bool, str], list[SlackUser]] = Field(
         # 4時間
-        default_factory=lambda: LRUCache[str, list[str]](capacity=1000, expire=1 * 60 * 60 * 4), init=False
+        default_factory=lambda: LRUCache[tuple[bool, str], list[SlackUser]](capacity=1000, expire=1 * 60 * 60 * 4), init=False
     )
     cache_get_channels: LRUCache[bool, dict[str, dict]] = Field(
         # 4時間
@@ -330,7 +330,7 @@ class SlackService:
         return self.state.cache_users_list
 
     @property
-    def cache_get_conversations_members(self) -> LRUCache[str, list[str]]:
+    def cache_get_conversations_members(self) -> LRUCache[tuple[bool, str], list[SlackUser]]:
         if self.state.cache_get_conversations_members is None:
             raise RuntimeError("SlackService is not started. cache_get_conversations_members is None")
         return self.state.cache_get_conversations_members
@@ -542,14 +542,15 @@ class SlackService:
         self.cache_user_presence.put(user_id, user_presence)
         return user_presence
 
-    async def get_conversations_members(self, channel_id: str) -> list[str]:
-        if (cached := self.cache_get_conversations_members.get(channel_id)).found:
+    async def get_conversations_members(self, channel_id: str, user_client: bool) -> list[SlackUser]:
+        client = self.user_client if user_client else self.bot_client
+        if (cached := self.cache_get_conversations_members.get((user_client, channel_id,))).found:
             return cached.value
         try:
             response = SlackConversationsMembersResponse(
-                **(v if (isinstance((v := (await self.user_client.conversations_members(channel=channel_id, limit=1000)).data), dict)) else {})
+                **(v if (isinstance((v := (await client.conversations_members(channel=channel_id, limit=1000)).data), dict)) else {})
             )
-            response_members = response.members
+            response_members = [await self.get_user(user_id) for user_id in response.members]
         except SlackApiError as e:
             error_response: SlackResponse = e.response
             if error_response.get("error") != "channel_not_found":
@@ -563,11 +564,11 @@ class SlackService:
             logger.error(f"conversations_members returns error channel_id={channel_id}")
             logger.error(e, exc_info=True)
             raise e
-        self.cache_get_conversations_members.put(channel_id, response_members)
+        self.cache_get_conversations_members.put((user_client, channel_id,), response_members)
         return response_members
 
-    async def is_user_joined_channel(self, user_id: str, channel_id: str):
-        return user_id in await self.get_conversations_members(channel_id)
+    async def is_user_joined_channel(self, user_id: str, channel_id: str, user_client: bool):
+        return user_id in [v.user_id for v in await self.get_conversations_members(channel_id, user_client)]
 
     async def get_channels(self) -> dict[str, dict]:
         if (cached := self.cache_get_channels.get(True)).found:
@@ -653,7 +654,7 @@ class SlackService:
                     # 非スレッドメッセージ（※親メッセージ）の場合は ts が thread_ts に相当する、もし返信メッセージが付くと ts が thread_ts となる
                     thread_ts = ts
                 # 権限チェック（プライベートチャネルのチェック等）
-                if not await self.check_permission(channel, event_user_id, viewable_private_channels):
+                if not await self.check_permission(channel, event_user_id, viewable_private_channels, user_client):
                     return SlackAttachment(
                         title="permission_denied",
                         text="(Content not available: you do not have access to this channel)",
@@ -957,7 +958,8 @@ class SlackService:
     async def check_permission(
         self, channel: SlackChannelType | SlackChannel,
         event_user_id: str,
-        viewable_private_channels: list[str]
+        viewable_private_channels: list[str],
+        user_client: bool,
     ) -> bool:
         if isinstance(channel, SlackChannelType):
             channel_id = channel.id
@@ -979,7 +981,7 @@ class SlackService:
             or (
                 # プライベート/DM/グループDM、かつ元メッセージ送信者がそのチャネルに参加していない場合
                 (channel.is_private or channel.is_im or channel.is_mpim)
-                and not await self.is_user_joined_channel(event_user_id, channel_id)
+                and not await self.is_user_joined_channel(event_user_id, channel_id, user_client)
             )
         ):
             return False
@@ -1006,7 +1008,7 @@ class SlackService:
             # 投稿者が null ※RSSアプリから投稿されたメッセージが該当する、投稿者不明の情報を採用するのは妥当ではない
             or message.user is None
             # 権限チェック（プライベートチャネルのチェック等）
-            or not await self.check_permission(message.channel, recieved_message_user_id, viewable_private_channels)
+            or not await self.check_permission(message.channel, recieved_message_user_id, viewable_private_channels, True)
         ):
             return None
         message_user = await self.get_user(message.user)
@@ -1046,7 +1048,7 @@ class SlackService:
         score_multiply = 1.0
         if (channel := (await self.get_channels()).get(message.channel.name)):
             score_multiply = channel["score"]
-        elif (num_members := len(await self.get_conversations_members(message.channel.id))) >= 1:
+        elif (num_members := len(await self.get_conversations_members(message.channel.id, True))) >= 1:
             score_multiply = math.log2(num_members) + 1.0
         return SlackMessage(
             message=SlackMessageLite(
