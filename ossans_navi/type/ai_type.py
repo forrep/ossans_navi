@@ -96,7 +96,7 @@ class AiModelInfo(Enum):
     GEMINI_25_PRO = ("gemini-2.5-pro", AiServiceType.GEMINI, 1.25, 10.00)
     GEMINI_30_FLASH = ("gemini-3-flash-preview", AiServiceType.GEMINI, 0.50, 3.00)
     GEMINI_31_FLASH_LITE = ("gemini-3.1-flash-lite", AiServiceType.GEMINI, 0.25, 1.50)
-    GEMINI_31_FLASH_IMAGE = ("gemini-3.1-flash-image-preview", AiServiceType.GEMINI, 0.50, 3.00)
+    GEMINI_31_FLASH_IMAGE = ("gemini-3.1-flash-image", AiServiceType.GEMINI, 0.50, 3.00)
     GPT_41 = ("gpt-4.1", AiServiceType.OPENAI, 2.00, 8.00)
     GPT_41_MINI = ("gpt-4.1-mini", AiServiceType.OPENAI, 1.10, 4.40)
     GPT_5_NANO = ("gpt-5-nano", AiServiceType.OPENAI, 0.05, 0.40)

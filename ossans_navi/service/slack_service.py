@@ -73,6 +73,7 @@ class EventGuard:
                 # 例: メッセージ1で @ossans_navi にメンションされ、メッセージ2 はメンションが無い場合でも @ossans_navi のメンションとして処理する
                 val[key].status = EventGuard.Status.CANCELED
                 canceled_events.extend(val[key].canceled_events)
+                val[key].canceled_events.clear()
                 if val[key].event.ts != event.ts:
                     # キューに入っているイベントの ts と今回のイベントの ts が一致する場合は更新イベントであり、元メッセージがイベントとして登録されている
                     # その場合は更新前の同一メッセージを canceled_events として扱わない、更新前のメッセージの情報は使う必要が無い
