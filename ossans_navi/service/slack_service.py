@@ -383,7 +383,7 @@ class SlackService:
         state.app_token = app_token if app_token else config.SLACK_APP_TOKEN
         state.user_token = user_token if user_token else config.SLACK_USER_TOKEN
         state.bot_token = bot_token if bot_token else config.SLACK_BOT_TOKEN
-        state.app = AsyncApp(token=state.bot_token, logger=logging.getLogger("slack_bolt"))
+        state.app = AsyncApp(token=state.bot_token, signing_secret=config.SLACK_SIGNING_SECRET, logger=logging.getLogger("slack_bolt"))
         state.socket_mode_handler = AsyncSocketModeHandler(state.app, state.app_token)
         state.app_client = SlackWrapper(token=state.app_token)
         state.user_client = SlackWrapper(token=state.user_token)

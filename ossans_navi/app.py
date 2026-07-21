@@ -449,7 +449,7 @@ async def main():
             continue
         if (value := getattr(config, name)) is None:
             continue
-        if isinstance(value, str) and ("API_KEY" in name or "TOKEN" in name):
+        if isinstance(value, str) and ("API_KEY" in name or "TOKEN" in name or "SECRET" in name):
             value = "*" * len(str(value))
         logger.info(f"  {name}={value}")
 
